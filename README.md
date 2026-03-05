@@ -11,6 +11,8 @@ Claude Code, etc.) until checks are satisfied.
 This repo currently contains only planning documents: requirements, feature
 descriptions, and example best-practice definitions.
 
+![logo](docs/openshrike-logo.png)
+
 ## Why this exists
 
 As software development shifts to agent-driven workflows, we need observability
