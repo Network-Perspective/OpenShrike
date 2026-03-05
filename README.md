@@ -30,13 +30,13 @@ and governance over those agents. This project aims to:
 
 ## Document map
 
-- Vision and scope: `docs/requirements/01-project-vision.md`
-- Feature scope and phases: `docs/requirements/02-feature-scope.md`
-- Security model: `docs/requirements/03-security-model.md`
-- Agent runtime and isolation: `docs/requirements/04-agent-runtime.md`
-- Best practices library: `docs/requirements/05-best-practices-library.md`
-- Observability and feedback loop: `docs/requirements/06-observability.md`
-- Workflows and integrations: `docs/requirements/07-workflows-and-integrations.md`
+- [Vision and scope](docs/requirements/01-project-vision.md)
+- [Feature scope and phases](docs/requirements/02-feature-scope.md)
+- [Security model](docs/requirements/03-security-model.md)
+- [Agent runtime and isolation](docs/requirements/04-agent-runtime.md)
+- [Best practices library](docs/requirements/05-best-practices-library.md)
+- [Observability and feedback loop](docs/requirements/06-observability.md)
+- [Workflows and integrations](docs/requirements/07-workflows-and-integrations.md)
 
 ## Imagined usage (non-functional sketch)
 

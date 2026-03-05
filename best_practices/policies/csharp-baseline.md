@@ -67,31 +67,31 @@ These are references to cross-language check groups (no duplication):
 
 ## Check documents (for agent instructions)
 Each check is defined with step-by-step guidance and pass/fail examples:
-- `best_practices/checks/csharp/csharp-arch-001-no-circular-references.md`
-- `best_practices/checks/csharp/csharp-arch-002-public-api-analyzers.md`
-- `best_practices/checks/csharp/csharp-arch-003-di-registrations-validated.md`
-- `best_practices/checks/csharp/csharp-arch-004-typed-options.md`
-- `best_practices/checks/csharp/csharp-test-001-avoid-task-result.md`
-- `best_practices/checks/csharp/csharp-test-002-deterministic-time.md`
-- `best_practices/checks/csharp/csharp-test-003-no-static-mutable-test-state.md`
-- `best_practices/checks/csharp/csharp-test-004-json-snapshot-approvals.md`
-- `best_practices/checks/csharp/csharp-sec-001-httpclient-factory.md`
-- `best_practices/checks/csharp/csharp-sec-002-processstartinfo-validation.md`
-- `best_practices/checks/csharp/csharp-sec-003-no-binaryformatter.md`
-- `best_practices/checks/csharp/csharp-sec-004-policy-authorization.md`
-- `best_practices/checks/csharp/csharp-sec-005-approved-crypto.md`
-- `best_practices/checks/csharp/csharp-rel-001-cancellation-tokens.md`
-- `best_practices/checks/csharp/csharp-rel-002-configureawait-consistency.md`
-- `best_practices/checks/csharp/csharp-rel-003-resilience-policies.md`
-- `best_practices/checks/csharp/csharp-perf-001-avoid-boxing.md`
-- `best_practices/checks/csharp/csharp-perf-002-valuetask-usage.md`
-- `best_practices/checks/csharp/csharp-perf-003-avoid-linq-allocations.md`
-- `best_practices/checks/csharp/csharp-ops-001-health-checks.md`
-- `best_practices/checks/csharp/csharp-ops-002-structured-logging.md`
-- `best_practices/checks/csharp/csharp-ops-003-no-secrets-in-appsettings.md`
-- `best_practices/checks/csharp/csharp-ops-004-dotnet-container-minimal.md`
-- `best_practices/checks/csharp/csharp-doc-001-xml-docs-public-apis.md`
-- `best_practices/checks/csharp/csharp-doc-002-release-notes-breaking.md`
+- [csharp-arch-001-no-circular-references](../checks/csharp/csharp-arch-001-no-circular-references.md)
+- [csharp-arch-002-public-api-analyzers](../checks/csharp/csharp-arch-002-public-api-analyzers.md)
+- [csharp-arch-003-di-registrations-validated](../checks/csharp/csharp-arch-003-di-registrations-validated.md)
+- [csharp-arch-004-typed-options](../checks/csharp/csharp-arch-004-typed-options.md)
+- [csharp-test-001-avoid-task-result](../checks/csharp/csharp-test-001-avoid-task-result.md)
+- [csharp-test-002-deterministic-time](../checks/csharp/csharp-test-002-deterministic-time.md)
+- [csharp-test-003-no-static-mutable-test-state](../checks/csharp/csharp-test-003-no-static-mutable-test-state.md)
+- [csharp-test-004-json-snapshot-approvals](../checks/csharp/csharp-test-004-json-snapshot-approvals.md)
+- [csharp-sec-001-httpclient-factory](../checks/csharp/csharp-sec-001-httpclient-factory.md)
+- [csharp-sec-002-processstartinfo-validation](../checks/csharp/csharp-sec-002-processstartinfo-validation.md)
+- [csharp-sec-003-no-binaryformatter](../checks/csharp/csharp-sec-003-no-binaryformatter.md)
+- [csharp-sec-004-policy-authorization](../checks/csharp/csharp-sec-004-policy-authorization.md)
+- [csharp-sec-005-approved-crypto](../checks/csharp/csharp-sec-005-approved-crypto.md)
+- [csharp-rel-001-cancellation-tokens](../checks/csharp/csharp-rel-001-cancellation-tokens.md)
+- [csharp-rel-002-configureawait-consistency](../checks/csharp/csharp-rel-002-configureawait-consistency.md)
+- [csharp-rel-003-resilience-policies](../checks/csharp/csharp-rel-003-resilience-policies.md)
+- [csharp-perf-001-avoid-boxing](../checks/csharp/csharp-perf-001-avoid-boxing.md)
+- [csharp-perf-002-valuetask-usage](../checks/csharp/csharp-perf-002-valuetask-usage.md)
+- [csharp-perf-003-avoid-linq-allocations](../checks/csharp/csharp-perf-003-avoid-linq-allocations.md)
+- [csharp-ops-001-health-checks](../checks/csharp/csharp-ops-001-health-checks.md)
+- [csharp-ops-002-structured-logging](../checks/csharp/csharp-ops-002-structured-logging.md)
+- [csharp-ops-003-no-secrets-in-appsettings](../checks/csharp/csharp-ops-003-no-secrets-in-appsettings.md)
+- [csharp-ops-004-dotnet-container-minimal](../checks/csharp/csharp-ops-004-dotnet-container-minimal.md)
+- [csharp-doc-001-xml-docs-public-apis](../checks/csharp/csharp-doc-001-xml-docs-public-apis.md)
+- [csharp-doc-002-release-notes-breaking](../checks/csharp/csharp-doc-002-release-notes-breaking.md)
 
 ## Overrides (draft)
 - Allow disabling any check with explicit rationale and expiry.
