@@ -1,6 +1,6 @@
 # OpenShrike MVP Implementation: First C# Policy Check
 
-Date: 2026-03-05
+Date: 2026-03-06
 
 ## Scope implemented
 This implementation aligns with project requirements that checks run through `opencode` and are defined as policy/check instructions.
@@ -10,6 +10,13 @@ Implemented:
 - Check-definition resolution from markdown (`best_practices/checks/**`).
 - `opencode` invocation for check execution.
 - Structured JSON report emitted by OpenShrike.
+- Policy markdown resolution (`best_practices/policies/**`) and multi-check policy runs.
+- Human-readable markdown output (`--output markdown`).
+- Bundle emission (`--emit-bundle <path>`).
+- Scope-aware scans: `uncommitted` (default), `commit`, `branch`, `pr`, `full`.
+- Scope target selection via `--scan-target`.
+- Read-only mutation guardrail for repository files during agent execution.
+- Spectre.Console progress UI with scope and per-check progress updates.
 
 Not implemented:
 - Hardcoded policy logic in OpenShrike for check semantics.
@@ -27,23 +34,34 @@ Not implemented:
 - `best_practices/checks/csharp/csharp-rel-001-cancellation-tokens.md`
 
 ## Runtime flow implemented
-1. User runs `scan --check <id> --repo <path> --output json`.
-2. OpenShrike resolves check markdown file `<id>.md` from `best_practices/checks`.
-3. OpenShrike builds an agent prompt with:
+1. User runs `scan` with either `--check <id>` or `--policy <id>`.
+2. OpenShrike resolves selected check(s) from markdown under `best_practices/checks` (for policies, check IDs are extracted from policy links).
+3. OpenShrike resolves scope from git metadata or full-repo mode:
+   - `uncommitted` (default): changed tracked/untracked files in working tree.
+   - `commit`: files changed in a commit or commit range.
+   - `branch`: files changed in `<base>...HEAD`.
+   - `pr`: files changed in supplied diff spec (default `origin/main...HEAD`).
+   - `full`: entire repository.
+4. OpenShrike builds an agent prompt with:
    - check definition markdown,
    - repository path,
+   - resolved scan scope and scoped file list (except `full`),
    - required JSON output schema.
-4. OpenShrike executes:
+5. OpenShrike executes:
    - `opencode run --format json --dir <repo> <prompt>`
-5. OpenShrike parses streamed JSON events, extracts the agent text payload, parses check JSON, validates schema fields, and emits the final report envelope.
+6. OpenShrike parses streamed JSON events, extracts the agent text payload, parses check JSON, validates schema fields and scope-constrained evidence, and emits the final report envelope.
+7. OpenShrike verifies repo files were not modified by the agent process.
 
 ## Command surface
 
 ```bash
-dotnet run --project src/OpenShrike.Cli -- scan \
-  --check csharp-rel-001-cancellation-tokens \
+shrike scan \
+  (--check csharp-rel-001-cancellation-tokens | --policy csharp-baseline) \
   --repo <path> \
-  --output json \
+  [--scan-scope uncommitted|commit|branch|pr|full] \
+  [--scan-target <target>] \
+  [--output json|markdown] \
+  [--emit-bundle <path>] \
   [--agent <agent>] \
   [--model <provider/model>]
 ```
@@ -74,6 +92,8 @@ The output envelope follows observability requirements:
   - `rationale`
   - `remediation`
 
+Markdown output mirrors the same data in human-readable form.
+
 ## Files added/updated
 - `.gitignore`
 - `OpenShrike.sln`
@@ -95,10 +115,30 @@ dotnet build OpenShrike.sln
 Run first check via agent:
 
 ```bash
-dotnet run --project src/OpenShrike.Cli -- scan \
+shrike scan \
   --check csharp-rel-001-cancellation-tokens \
   --repo ../OpenShrike.TestsCsharp \
+  --scan-scope full \
   --output json
+```
+
+Run policy scan on uncommitted changes:
+
+```bash
+shrike scan \
+  --policy csharp-baseline \
+  --repo ../OpenShrike.TestsCsharp
+```
+
+Run PR-style scan and emit markdown:
+
+```bash
+shrike scan \
+  --policy csharp-baseline \
+  --repo ../OpenShrike.TestsCsharp \
+  --scan-scope pr \
+  --scan-target origin/main...HEAD \
+  --output markdown
 ```
 
 Observed behavior:

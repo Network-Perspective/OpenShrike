@@ -9,10 +9,22 @@ internal sealed class OpencodeCheckEvaluator
 {
     private const string DefaultVersion = "0.1.0";
 
-    public CheckResult Evaluate(string checkId, string checkDefinitionPath, string repoPath, string? agent, string? model)
+    public CheckResult Evaluate(
+        string checkId,
+        string checkDefinitionPath,
+        string repoPath,
+        string? agent,
+        string? model,
+        ScanScopeContext scopeContext,
+        bool emulateOpencode)
     {
+        if (emulateOpencode)
+        {
+            return EmulateCheckResult(checkId, scopeContext);
+        }
+
         var definition = File.ReadAllText(checkDefinitionPath);
-        var prompt = BuildPrompt(checkId, definition, repoPath);
+        var prompt = BuildPrompt(checkId, definition, repoPath, scopeContext);
         var responseText = RunOpencode(prompt, repoPath, agent, model);
 
         var payloadJson = ExtractJsonObject(responseText);
@@ -27,6 +39,7 @@ internal sealed class OpencodeCheckEvaluator
         }
 
         ValidatePayload(payload, checkId);
+        ValidateEvidenceScope(payload, scopeContext);
 
         return new CheckResult
         {
@@ -40,16 +53,57 @@ internal sealed class OpencodeCheckEvaluator
         };
     }
 
-    private static string BuildPrompt(string checkId, string checkDefinition, string repoPath)
+    private static CheckResult EmulateCheckResult(string checkId, ScanScopeContext scopeContext)
     {
+        var delayMs = Random.Shared.Next(2000, 5001);
+        Task.Delay(delayMs).GetAwaiter().GetResult();
+
+        var isPass = Random.Shared.NextDouble() < 0.9;
+        var status = isPass ? "pass" : "fail";
+        var evidencePath = scopeContext.IsFullRepository
+            ? "README.md:1"
+            : BuildScopedEvidence(scopeContext);
+
+        return new CheckResult
+        {
+            Id = checkId,
+            Version = DefaultVersion,
+            Status = status,
+            Confidence = isPass ? "MEDIUM" : "HIGH",
+            Evidence = new[] { evidencePath },
+            Rationale = isPass
+                ? $"Mock evaluation passed after {delayMs}ms."
+                : $"Mock evaluation failed after {delayMs}ms.",
+            Remediation = isPass
+                ? new[] { "No action required." }
+                : new[] { "Inspect the check evidence and update code to satisfy policy." }
+        };
+    }
+
+    private static string BuildScopedEvidence(ScanScopeContext scopeContext)
+    {
+        var path = scopeContext.Files.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return "README.md:1";
+        }
+
+        return path + ":1";
+    }
+
+    private static string BuildPrompt(string checkId, string checkDefinition, string repoPath, ScanScopeContext scopeContext)
+    {
+        var scopeText = BuildScopeSection(scopeContext);
+
         return
             "You are executing a single OpenShrike best-practice check against repository path: " + repoPath + "\n\n" +
             "Check id: " + checkId + "\n" +
+            scopeText + "\n" +
             "Check definition markdown:\n" +
             "---\n" +
             checkDefinition + "\n" +
             "---\n\n" +
-            "Follow the check definition exactly. Inspect the repository and collect direct evidence.\n" +
+            "Follow the check definition exactly. Inspect only the allowed review scope and collect direct evidence.\n" +
             "Return ONLY one JSON object with this schema:\n" +
             "{\n" +
             "  \"id\": \"" + checkId + "\",\n" +
@@ -63,7 +117,29 @@ internal sealed class OpencodeCheckEvaluator
             "Rules:\n" +
             "- Output raw JSON only. No markdown fences.\n" +
             "- Use repo-relative evidence paths.\n" +
+            "- If scope is not full repository, evidence paths MUST come from listed scoped files.\n" +
             "- status=unknown only when the check is not applicable or evidence is insufficient.\n";
+    }
+
+    private static string BuildScopeSection(ScanScopeContext scopeContext)
+    {
+        if (scopeContext.IsFullRepository)
+        {
+            return "Review scope: full repository.";
+        }
+
+        var files = scopeContext.Files
+            .Take(200)
+            .Select(path => "- " + path)
+            .ToArray();
+
+        var truncated = scopeContext.Files.Count > files.Length
+            ? $"\n- ... ({scopeContext.Files.Count - files.Length} more files)"
+            : string.Empty;
+
+        return "Review scope: " + scopeContext.Label + ".\nScoped files:\n" +
+               string.Join('\n', files) +
+               truncated;
     }
 
     private static string RunOpencode(string prompt, string repoPath, string? agent, string? model)
@@ -233,6 +309,35 @@ internal sealed class OpencodeCheckEvaluator
         {
             throw new InvalidOperationException($"Agent returned invalid confidence '{payload.Confidence}'.");
         }
+    }
+
+    private static void ValidateEvidenceScope(AgentCheckPayload payload, ScanScopeContext scopeContext)
+    {
+        if (scopeContext.IsFullRepository || payload.Evidence is null || payload.Evidence.Length == 0)
+        {
+            return;
+        }
+
+        var allowed = scopeContext.Files
+            .Select(NormalizePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var evidence in payload.Evidence)
+        {
+            var separatorIndex = evidence.IndexOf(':', StringComparison.Ordinal);
+            var evidencePath = separatorIndex >= 0 ? evidence[..separatorIndex] : evidence;
+            var normalized = NormalizePath(evidencePath);
+            if (!allowed.Contains(normalized))
+            {
+                throw new InvalidOperationException(
+                    $"Agent returned evidence outside scan scope: '{evidence}'. Allowed scope: {scopeContext.Label}.");
+            }
+        }
+    }
+
+    private static string NormalizePath(string path)
+    {
+        return path.Trim().Replace('\\', '/');
     }
 
     private static bool IsOneOf(string? value, params string[] allowed)

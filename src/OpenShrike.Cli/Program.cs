@@ -7,7 +7,7 @@ app.Configure(config =>
 {
     config.SetApplicationName("shrike");
     config.AddCommand<ScanCommand>("scan")
-        .WithDescription("Run a single OpenShrike check against a repository.");
+        .WithDescription("Run a check or policy bundle against a repository.");
 });
 
 return app.Run(args);

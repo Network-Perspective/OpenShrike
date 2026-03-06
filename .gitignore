@@ -1,6 +1,7 @@
 # .NET artifacts
 bin/
 obj/
+.artifacts/
 
 # User/IDE state
 *.user

@@ -4,7 +4,7 @@ internal static class CheckDefinitionResolver
 {
     public static string ResolvePath(string checkId)
     {
-        var root = FindProjectRoot();
+        var root = ProjectRootResolver.Find();
         var checksDirectory = Path.Combine(root, "best_practices", "checks");
 
         if (!Directory.Exists(checksDirectory))
@@ -23,23 +23,5 @@ internal static class CheckDefinitionResolver
         }
 
         return match;
-    }
-
-    private static string FindProjectRoot()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-
-        while (current is not null)
-        {
-            var marker = Path.Combine(current.FullName, "best_practices", "checks");
-            if (Directory.Exists(marker))
-            {
-                return current.FullName;
-            }
-
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException("Could not locate project root containing 'best_practices/checks'.");
     }
 }

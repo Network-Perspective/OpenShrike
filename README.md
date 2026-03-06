@@ -8,8 +8,9 @@ so only the relevant checks are executed and reported. The system is meant to
 close the loop by feeding structured results back into developer agents (Codex,
 Claude Code, etc.) until checks are satisfied.
 
-This repo now contains an MVP implementation of the OpenShrike CLI focused on
-the first C# policy check, plus requirements and best-practice definitions.
+This repo now contains an MVP implementation of the OpenShrike CLI for
+policy/check scanning via `opencode`, plus requirements and best-practice
+definitions.
 
 ![logo](docs/openshrike-logo.png)
 
@@ -42,27 +43,187 @@ and governance over those agents. This project aims to:
 - [MVP implementation: first C# check](docs/implementation/01-mvp-csharp-rel-001-implementation.md)
 - [Fixture repo and pass/fail branches](docs/implementation/02-testscsharp-fixture-and-branches.md)
 
-## Imagined usage (non-functional sketch)
+## Scan usage
 
-Local review:
+Run exactly one of `--check` or `--policy`.
 
-```bash
-shrike scan --policy baseline --repo .
-```
-
-CI review on a pull request:
+Run from repo root:
 
 ```bash
-shrike scan --policy baseline --diff origin/main...HEAD
+./shrike scan --policy csharp-baseline --repo .
 ```
 
-Feedback loop to an agent:
+Optional convenience to call `shrike` directly:
 
 ```bash
-shrike review --policy baseline --emit agent-feedback.json
+ln -sf "$(pwd)/shrike" ~/.local/bin/shrike
 ```
 
-## Next step
+```bash
+shrike scan --policy csharp-baseline --repo .
+```
 
-Refine requirements in the docs, agree on scope and a name, then design the
-initial architecture and threat model before writing any code.
+## Build and install
+
+### Publish builds
+
+Framework-dependent and self-contained builds:
+
+```bash
+scripts/publish.sh --mode both --rid linux-x64
+```
+
+Self-contained only:
+
+```bash
+scripts/publish.sh --mode self-contained --rid linux-x64
+```
+
+Framework-dependent only:
+
+```bash
+scripts/publish.sh --mode framework
+```
+
+Release layout:
+
+```text
+.artifacts/publish/
+  framework/
+    shrike
+    app/
+      OpenShrike.Cli.dll
+      ...
+  self-contained/
+    linux-x64/
+      shrike
+      ...
+```
+
+### Install `shrike`
+
+Install a self-contained binary to `~/.local/bin/shrike`:
+
+```bash
+scripts/install-local.sh \
+  --source .artifacts/publish/self-contained/linux-x64/shrike
+```
+
+Use symlink mode for dev installs:
+
+```bash
+scripts/install-local.sh --source ./shrike --link
+```
+
+Upgrade:
+1. Re-publish (`scripts/publish.sh ...`)
+2. Re-run install (`scripts/install-local.sh ...`)
+
+### Scope selection
+
+Use `--scan-scope` to choose what to review. Supported values:
+- `uncommitted` (default)
+- `commit`
+- `branch`
+- `pr`
+- `full`
+
+Use `--scan-target` when required by scope:
+- `commit`: commit hash or range (`HEAD~1..HEAD`)
+- `branch`: base branch (`origin/main`)
+- `pr`: optional diff spec (defaults to `origin/main...HEAD`)
+
+Examples:
+
+Uncommitted changes (default):
+```bash
+shrike scan \
+  --policy csharp-baseline \
+  --repo .
+```
+
+Commit/range scan:
+```bash
+shrike scan \
+  --check csharp-rel-001-cancellation-tokens \
+  --repo . \
+  --scan-scope commit \
+  --scan-target HEAD~1..HEAD
+```
+
+Branch diff scan:
+```bash
+shrike scan \
+  --policy csharp-baseline \
+  --repo . \
+  --scan-scope branch \
+  --scan-target origin/main
+```
+
+PR diff scan:
+```bash
+shrike scan \
+  --policy csharp-baseline \
+  --repo . \
+  --scan-scope pr \
+  --scan-target origin/main...HEAD
+```
+
+Full repository scan:
+```bash
+shrike scan \
+  --policy csharp-baseline \
+  --repo . \
+  --scan-scope full
+```
+
+### Output options
+
+Machine-readable JSON:
+```bash
+shrike scan \
+  --policy csharp-baseline \
+  --repo . \
+  --output json
+```
+
+Human-readable Markdown:
+```bash
+shrike scan \
+  --policy csharp-baseline \
+  --repo . \
+  --output markdown
+```
+
+Optional bundle emission:
+```bash
+shrike scan \
+  --policy csharp-baseline \
+  --repo . \
+  --emit-bundle artifacts/csharp-baseline.bundle.md
+```
+
+During execution, the CLI shows a Spectre.Console live dashboard on stderr: progress bar on top, colored `PASS/FAIL/UNKNOWN` counters below, and optional detailed check lists. Toggle details with `d`, `Ctrl+T`, or `Ctrl+O` (terminal-dependent). JSON/Markdown reports stay on stdout.
+
+Mock mode for progress/UI testing (no external `opencode` dependency):
+```bash
+shrike scan \
+  --policy csharp-baseline \
+  --repo . \
+  --scan-scope full \
+  --mock-opencode
+```
+
+In mock mode each check takes ~2-5 seconds and returns `pass` with ~90% probability.
+
+## Recent changes
+
+- Added policy scanning via `--policy` with markdown policy resolution.
+- Added policy/check bundle assembly output via `--emit-bundle`.
+- Added scan scope control: `--scan-scope` and `--scan-target`.
+- Default scope is now `uncommitted`.
+- Added full repo scan support via `--scan-scope full`.
+- Added markdown report output via `--output markdown` (JSON remains available).
+- Added read-only guardrail that fails a run if the agent mutates repository files.
+- Added publish/install scripts for framework-dependent and self-contained binaries.
+- Added Spectre.Console progress output for long-running scans.

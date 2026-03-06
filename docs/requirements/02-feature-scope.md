@@ -7,14 +7,15 @@
 - Local and CI-friendly CLI interface.
 - Best-practices library with a small, curated baseline set.
 - Policy assembler that turns selected checks into skills/bundles.
+- Local OpenCode agent configuration for lightweight guardrails (readonly code access + necessary tooling)
 
 ## Phase 2 features
-- Policy marketplace and sharing via repositories.
-- Evidence collection across tests, logs, and runtime traces.
+- Isolated docker runtime
 - Multi-agent review: parallel reviewers with consensus and conflict analysis.
 - Recommendation ranking based on risk and historical outcomes.
 
 ## Phase 3 features
+- Policy marketplace and sharing via repositories.
 - Interactive "reviewer coach" for live iteration with agents.
 - Organization-level governance dashboards and compliance reporting.
 - Cross-repo insights about recurring debt patterns.
