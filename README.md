@@ -8,8 +8,8 @@ so only the relevant checks are executed and reported. The system is meant to
 close the loop by feeding structured results back into developer agents (Codex,
 Claude Code, etc.) until checks are satisfied.
 
-This repo currently contains only planning documents: requirements, feature
-descriptions, and example best-practice definitions.
+This repo now contains an MVP implementation of the OpenShrike CLI focused on
+the first C# policy check, plus requirements and best-practice definitions.
 
 ![logo](docs/openshrike-logo.png)
 
@@ -39,6 +39,8 @@ and governance over those agents. This project aims to:
 - [Best practices library](docs/requirements/05-best-practices-library.md)
 - [Observability and feedback loop](docs/requirements/06-observability.md)
 - [Workflows and integrations](docs/requirements/07-workflows-and-integrations.md)
+- [MVP implementation: first C# check](docs/implementation/01-mvp-csharp-rel-001-implementation.md)
+- [Fixture repo and pass/fail branches](docs/implementation/02-testscsharp-fixture-and-branches.md)
 
 ## Imagined usage (non-functional sketch)
 
