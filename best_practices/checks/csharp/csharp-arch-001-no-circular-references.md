@@ -1,54 +1,102 @@
-# CSHARP-ARCH-001: No circular project/assembly references
+# CSHARP-ARCH-001: Project references remain acyclic
 
 ## Intent
-Project/assembly references must be acyclic at build time to keep architecture
-clean and avoid build failures.
+
+Project and assembly dependencies should form a directed acyclic graph.
+Circular references are a concrete architectural defect: they break layering,
+make reuse harder, and often turn simple changes into coordinated edits.
+
+## Applicability
+
+Applies to repositories with more than one C# project or assembly.
+
+Return `unknown` when:
+
+- the relevant `.csproj` files are outside the available review scope, or
+- the repository is effectively a single-project application.
 
 ## Strategy
-`static` — resolvable by inspecting `.csproj` project reference graphs.
 
-## Step-by-step evaluation
-1. Build or inspect the project reference graph.
-2. Confirm there is no cycle (A -> B -> A, or longer loops).
+`static`
+
+## What to inspect
+
+1. Inspect `<ProjectReference>` edges across `.csproj` files.
+2. Check whether the changed project introduces or closes a dependency loop.
+
+## Pass criteria
+
+- No project reference cycle exists.
+- Test projects may depend on production projects, but production projects do
+  not depend back on tests.
+
+## Fail criteria
+
+- A project directly or indirectly references itself through other projects.
+- A shared project introduced as a "temporary" utility creates a back-edge into
+  a layer that already depends on it.
+
+## Do not flag
+
+- NuGet package references.
+- Source-generator or analyzer packages.
+- Test-only references that do not create a production cycle.
+
+## Evidence to collect
+
+- The `.csproj` files forming the cycle.
+- The exact reference path proving the loop.
+
+## Confidence guidance
+
+- `HIGH`: the cycle is directly visible from `<ProjectReference>` edges.
+- `MEDIUM`: the dependency loop is strongly implied but one referenced project
+  is outside the visible scope.
+- `LOW`: use only if a cycle is suspected but cannot be confirmed; prefer
+  `unknown`.
+
+## Remediation
+
+- Extract shared abstractions into a lower-level project.
+- Reverse the dependency through an interface or event boundary.
+- Remove convenience references that bypass the intended architecture.
 
 ## Pass example
+
 ```xml
-<!-- A.csproj -->
+<!-- Api.csproj -->
 <Project>
   <ItemGroup>
-    <ProjectReference Include="..\\B\\B.csproj" />
+    <ProjectReference Include="..\Application\Application.csproj" />
   </ItemGroup>
 </Project>
 ```
+
 ```xml
-<!-- B.csproj -->
+<!-- Application.csproj -->
 <Project>
   <ItemGroup>
-    <ProjectReference Include="..\\C\\C.csproj" />
+    <ProjectReference Include="..\Domain\Domain.csproj" />
   </ItemGroup>
 </Project>
 ```
 
 ## Fail example
+
 ```xml
-<!-- A.csproj -->
+<!-- Domain.csproj -->
 <Project>
   <ItemGroup>
-    <ProjectReference Include="..\\B\\B.csproj" />
-  </ItemGroup>
-</Project>
-```
-```xml
-<!-- B.csproj -->
-<Project>
-  <ItemGroup>
-    <ProjectReference Include="..\\A\\A.csproj" />
+    <ProjectReference Include="..\Infrastructure\Infrastructure.csproj" />
   </ItemGroup>
 </Project>
 ```
 
-## Confidence guidance
-- **HIGH**: Cycle found by tracing `<ProjectReference>` elements across `.csproj` files.
-- **MEDIUM**: Suspicious pattern (e.g., shared project with back-references) but
-  cycle not fully confirmed.
-- **LOW**: Unable to resolve all project references (e.g., missing files in diff).
+```xml
+<!-- Infrastructure.csproj -->
+<Project>
+  <ItemGroup>
+    <ProjectReference Include="..\Domain\Domain.csproj" />
+  </ItemGroup>
+</Project>
+```

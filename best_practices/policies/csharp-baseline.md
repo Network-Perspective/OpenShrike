@@ -1,104 +1,112 @@
-# C# Baseline Policy (Draft)
+# C# Baseline Policy
 
-This policy defines a full C# review bundle by **including shared domain
-checks** and **adding C#-specific checks**. It is designed to be assembled into
-a single opencode skill for efficient, diff-aware reviews.
+This is the default high-signal policy for .NET pull request review. It is
+intended for mature C# codebases: services, background workers, web APIs,
+libraries, and shared internal platforms.
+
+The policy is intentionally curated. It favors rules that catch real defects
+and design regressions in ordinary review. It does not try to enforce every
+possible good idea.
 
 ## Policy metadata
+
 - Policy ID: `csharp-baseline`
-- Scope: C#/.NET repositories (ASP.NET Core, libraries, services)
-- Mode: Diff-first with optional full-repo expansion for high-risk checks
+- Scope: C#/.NET repositories
+- Review mode: diff-first, with repo expansion when a check requires structural
+  evidence
+- Expected bar: a PR that passes this policy should look production-ready,
+  reviewable, and operationally responsible
 
-## Included shared domain bundles
-These are references to cross-language check groups (no duplication):
-- ARCH baseline
-- TEST baseline
-- SEC baseline
-- REL baseline
-- PERF baseline
-- OPS baseline
-- DOC baseline
-- DATA baseline
-- API baseline
-- CI baseline
-- SUPPLY baseline
-- DX baseline
+## Review contract
 
-## C#-specific checks (added by this policy)
+When executing this policy:
 
-### C#-ARCH
-- No circular project/assembly references (must be acyclic at build time).
-- Public APIs follow analyzer naming/visibility rules.
-- DI container registrations validated at startup.
-- Configuration uses strongly-typed `IOptions<T>` patterns.
+- Fail only on direct evidence.
+- Use `unknown` when the rule is not applicable or the diff is too small to
+  establish the missing safeguard.
+- Do not fail a PR for micro-optimization preferences or public-package
+  obligations that clearly do not apply.
 
-### C#-TEST
-- Async tests avoid `Task.Result` / `.Wait()` deadlocks.
-- Tests use deterministic time via fakes or clocks.
-- Avoid static mutable state in tests.
-- Snapshot tests for large JSON outputs use approval workflows.
+## Included checks
 
-### C#-SEC
-- `HttpClient` managed via `IHttpClientFactory`.
-- No untrusted input in `ProcessStartInfo` without strict validation.
-- Avoid `BinaryFormatter` and insecure deserialization APIs.
-- Policy-based authorization attributes used consistently.
-- Crypto uses `System.Security.Cryptography` with approved algorithms.
+### Architecture
 
-### C#-REL
-- `CancellationToken` threaded through async call chains.
-- Configure awaits consistent for libraries vs apps.
-- Resilience policies (retry/circuit-breaker) for outbound calls.
-
-### C#-PERF
-- Avoid boxing in hot paths; use generics or `Span<T>`.
-- Prefer `ValueTask` for high-frequency async where appropriate.
-- Avoid excessive allocations in LINQ-heavy loops.
-
-### C#-OPS
-- Health checks registered for dependencies.
-- Structured logging with scopes and correlation IDs.
-- `appsettings.*.json` does not contain secrets.
-- Minimal container images and multi-stage builds for .NET apps.
-
-### C#-DOC
-- Public APIs documented with XML comments and generated docs.
-- Breaking changes captured in release notes.
-
-## Check documents (for agent instructions)
-Each check is defined with step-by-step guidance and pass/fail examples:
 - [csharp-arch-001-no-circular-references](../checks/csharp/csharp-arch-001-no-circular-references.md)
-- [csharp-arch-002-public-api-analyzers](../checks/csharp/csharp-arch-002-public-api-analyzers.md)
 - [csharp-arch-003-di-registrations-validated](../checks/csharp/csharp-arch-003-di-registrations-validated.md)
 - [csharp-arch-004-typed-options](../checks/csharp/csharp-arch-004-typed-options.md)
+- [csharp-arch-005-no-service-locator](../checks/csharp/csharp-arch-005-no-service-locator.md)
+
+### Testing
+
 - [csharp-test-001-avoid-task-result](../checks/csharp/csharp-test-001-avoid-task-result.md)
 - [csharp-test-002-deterministic-time](../checks/csharp/csharp-test-002-deterministic-time.md)
 - [csharp-test-003-no-static-mutable-test-state](../checks/csharp/csharp-test-003-no-static-mutable-test-state.md)
-- [csharp-test-004-json-snapshot-approvals](../checks/csharp/csharp-test-004-json-snapshot-approvals.md)
+- [csharp-test-005-changed-behavior-covered](../checks/csharp/csharp-test-005-changed-behavior-covered.md)
+- [csharp-test-006-no-live-network-in-tests](../checks/csharp/csharp-test-006-no-live-network-in-tests.md)
+
+### Security
+
 - [csharp-sec-001-httpclient-factory](../checks/csharp/csharp-sec-001-httpclient-factory.md)
 - [csharp-sec-002-processstartinfo-validation](../checks/csharp/csharp-sec-002-processstartinfo-validation.md)
 - [csharp-sec-003-no-binaryformatter](../checks/csharp/csharp-sec-003-no-binaryformatter.md)
 - [csharp-sec-004-policy-authorization](../checks/csharp/csharp-sec-004-policy-authorization.md)
 - [csharp-sec-005-approved-crypto](../checks/csharp/csharp-sec-005-approved-crypto.md)
+- [csharp-sec-006-parameterized-data-access](../checks/csharp/csharp-sec-006-parameterized-data-access.md)
+- [csharp-sec-007-no-sensitive-data-in-logs](../checks/csharp/csharp-sec-007-no-sensitive-data-in-logs.md)
+
+### Reliability
+
 - [csharp-rel-001-cancellation-tokens](../checks/csharp/csharp-rel-001-cancellation-tokens.md)
-- [csharp-rel-002-configureawait-consistency](../checks/csharp/csharp-rel-002-configureawait-consistency.md)
 - [csharp-rel-003-resilience-policies](../checks/csharp/csharp-rel-003-resilience-policies.md)
-- [csharp-perf-001-avoid-boxing](../checks/csharp/csharp-perf-001-avoid-boxing.md)
-- [csharp-perf-002-valuetask-usage](../checks/csharp/csharp-perf-002-valuetask-usage.md)
-- [csharp-perf-003-avoid-linq-allocations](../checks/csharp/csharp-perf-003-avoid-linq-allocations.md)
+- [csharp-rel-004-explicit-timeouts](../checks/csharp/csharp-rel-004-explicit-timeouts.md)
+- [csharp-rel-005-background-services-honor-cancellation](../checks/csharp/csharp-rel-005-background-services-honor-cancellation.md)
+
+### Operations
+
 - [csharp-ops-001-health-checks](../checks/csharp/csharp-ops-001-health-checks.md)
 - [csharp-ops-002-structured-logging](../checks/csharp/csharp-ops-002-structured-logging.md)
 - [csharp-ops-003-no-secrets-in-appsettings](../checks/csharp/csharp-ops-003-no-secrets-in-appsettings.md)
 - [csharp-ops-004-dotnet-container-minimal](../checks/csharp/csharp-ops-004-dotnet-container-minimal.md)
-- [csharp-doc-001-xml-docs-public-apis](../checks/csharp/csharp-doc-001-xml-docs-public-apis.md)
-- [csharp-doc-002-release-notes-breaking](../checks/csharp/csharp-doc-002-release-notes-breaking.md)
+- [csharp-ops-005-safe-startup-migrations](../checks/csharp/csharp-ops-005-safe-startup-migrations.md)
 
-## Overrides (draft)
-- Allow disabling any check with explicit rationale and expiry.
-- Allow severity overrides for early adoption.
+### API design
+
+- [csharp-api-001-request-validation](../checks/csharp/csharp-api-001-request-validation.md)
+- [csharp-api-002-problem-details-errors](../checks/csharp/csharp-api-002-problem-details-errors.md)
+- [csharp-api-003-pagination-for-unbounded-collections](../checks/csharp/csharp-api-003-pagination-for-unbounded-collections.md)
+
+## Checks intentionally excluded from the baseline
+
+The library contains additional checks that are useful in specific contexts but
+too situational or too noisy for the default policy:
+
+- `csharp-arch-002-public-api-analyzers`
+- `csharp-test-004-json-snapshot-approvals`
+- `csharp-rel-002-configureawait-consistency`
+- `csharp-perf-001-avoid-boxing`
+- `csharp-perf-002-valuetask-usage`
+- `csharp-perf-003-avoid-linq-allocations`
+- `csharp-doc-001-xml-docs-public-apis`
+- `csharp-doc-002-release-notes-breaking`
+
+Those remain part of the library and can be enabled by stricter or
+context-specific policies later.
+
+## Override guidance
+
+- Allow a check override only with a clear rationale tied to the code change.
+- Record the intended expiry for temporary overrides.
+- Do not downgrade a failing high-confidence security or reliability check
+  without a compensating control.
 
 ## Output contract
+
 Each check must emit:
-- `id`, `version`, `status`, `confidence`
-- `evidence` (paths/refs)
-- `rationale` and `remediation`
+
+- `id`
+- `version`
+- `status`
+- `confidence`
+- `evidence`
+- `rationale`
+- `remediation`

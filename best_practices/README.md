@@ -1,210 +1,225 @@
-# Best Practices Library (Draft)
+# Best Practices Library
 
-This document is a brainstorming map of checks the tool could provide. It is
-intentionally extensive to shape the eventual best-practice (BP) structure.
+This library is a versioned set of review checks intended for automated,
+diff-aware software design review. Its purpose is not to enforce house style.
+Its purpose is to catch changes that make systems less safe, less maintainable,
+less observable, or less reliable.
 
-## Organizing principles (draft)
+The standard for a baseline policy is high: if a pull request passes the
+baseline, a strong engineer should be able to say the change looks deliberate,
+operable, testable, and respectful of architectural boundaries.
 
-### How to group
-- Primary axis: **domain/area** (ARCH, TEST, SEC, OPS, DOC, PERF, REL, DATA).
-- Secondary axis: **language/framework** (language-specific variants of checks).
+## Design goals
 
-Rationale:
-- Most best practices are domain-driven and cross-language.
-- Language/framework variants often share intent but differ in evidence
-  collection or remediation steps.
-  - Language-specific bundles should *reference* shared domain checks rather
-    than duplicating them, and only add truly language-specific checks.
+- Prefer checks that correlate with real production failures, security issues,
+  or long-term maintenance pain.
+- Minimize false positives by requiring explicit applicability rules and direct
+  evidence.
+- Keep checks independent so they can be versioned, enabled, disabled, or
+  overridden one at a time.
+- Bias toward `unknown` instead of `fail` when evidence is weak or the rule is
+  not applicable to the code under review.
+- Keep baseline policies curated. A baseline is not a dumping ground for every
+  check the library knows how to express.
 
-### Granularity
-- **Isolate each check** so it can be enabled, versioned, and overridden
-  independently.
-- **Group-level bundles** assemble multiple checks into one execution plan to
-  reduce token cost and shared setup overhead.
+## Non-goals
 
-### Bundles and reporting
-- Bundles should emit structured output listing each check's status and
-  confidence (pass/fail/unknown + confidence score).
-- Bundles can share setup steps (checkout, dependency install, indexing) once
-  per run and reuse evidence across many checks.
-  - Language-specific bundles should include shared domain checks by reference
-    (or import) to avoid duplication and drift.
+The baseline library should not fail a PR for:
 
-### Group-level tools/scripts
-Yes, but only when needed:
-- Some groups benefit from shared evidence tooling (dependency graphs, coverage
-  analysis, infra scanning).
-- Prefer reusable tools per group (e.g., `arch-tools`, `sec-tools`) with strict
-  allowlists and clear outputs.
-- Avoid monolithic "do everything" scripts to keep isolation predictable.
+- Formatting preferences already handled by linters or analyzers.
+- Framework fashion or tool choice without a clear engineering risk.
+- Micro-optimizations without evidence that the code is on a hot path.
+- Documentation requirements that only make sense for public packages when the
+  code is an internal service.
+- Architecture opinions that cannot be supported with repository evidence.
 
-## Check catalog (brainstorm)
+## Signal rubric
 
-### ARCH (Architecture)
-- No hidden cross-module dependencies.
-- Public interface boundaries are explicit and documented.
-- Dependency direction follows layering rules.
-- Cyclic dependencies are absent or isolated.
-- Modules have clear ownership boundaries.
-- High-churn modules have stable APIs.
-- Configurations are not mixed with business logic.
-- Feature flags have expiry or cleanup plan.
-- Cross-cutting concerns (auth, logging) are centralized.
-- Domain boundaries map to folder structure and imports.
+Every check in this library should satisfy all of the following.
 
-### TEST (Testing & Quality)
-- Critical paths have deterministic tests.
-- Flaky tests are quarantined or tagged.
-- Coverage thresholds for critical modules.
-- Integration tests cover core flows.
-- Golden tests are used for outputs with complex formatting.
-- Snapshot tests are reviewed for relevance.
-- Test data is realistic and minimal.
-- Tests do not rely on external network by default.
-- No skipped tests in mainline.
-- Performance tests exist for latency-sensitive paths.
+### 1. Applicability comes first
 
-### SEC (Security)
-- No privileged commands in review context.
-- Secret scanning: no tokens, keys, or passwords in repo.
-- Input validation for external inputs.
-- Safe deserialization practices.
-- SSRF and file path traversal protections.
-- SQL injection protections via parameterization.
-- Output encoding for HTML/JS contexts.
-- Cryptography uses vetted libraries, not custom code.
-- Authz checks exist for every protected route.
-- Session handling is secure and consistent.
+A check must say when it applies and when it does not.
 
-### REL (Reliability & Resilience)
-- Retries use bounded backoff and jitter.
-- Timeouts exist for all remote calls.
-- Circuit breakers for unstable dependencies.
-- Graceful degradation for non-critical failures.
-- Idempotency for write operations (where needed).
-- Error handling uses typed, contextual errors.
-- No infinite loops or unbounded retries.
-- Service dependencies have health checks.
-- Background jobs have retry limits and DLQs.
-- Feature rollout includes rollback plan.
+Examples:
 
-### PERF (Performance)
-- N+1 query patterns are avoided.
-- Hot paths have baseline benchmarks.
-- Caching strategy is explicit and invalidation-safe.
-- Heavy computations are offloaded or batched.
-- Avoid unnecessary serialization/deserialization.
-- Large file processing is streaming not buffering.
-- Client payload sizes are bounded.
-- Pagination for large list endpoints.
-- Async I/O used for blocking external calls.
+- Container rules do not apply to repos that do not build container images.
+- Public API governance rules do not apply to internal services with no
+  external consumers.
+- Hot-path performance rules do not apply unless the changed code is clearly in
+  a hot path or the PR itself claims a performance goal.
 
-### OPS (Operations & Deployability)
-- Deployment config is environment-agnostic.
-- No hard-coded environment values in manifests.
-- Rollback is supported and documented.
-- Observability (logs/metrics/traces) for critical paths.
-- Rate limits for public endpoints.
-- Log levels are consistent and structured.
-- Feature flags used for risky launches.
-- Container images are minimal and pinned.
-- Startup checks validate required env vars.
-- Database migrations are reversible or documented.
+If applicability cannot be established, the correct result is usually
+`unknown`, not `fail`.
 
-### DOC (Documentation & Process)
-- Architectural decisions are recorded (ADRs).
-- Public APIs have versioning guidance.
-- Runbooks exist for critical services.
-- Onboarding docs are current.
-- Code comments explain non-obvious constraints.
-- Security decisions and exceptions are documented.
-- "How to test" is documented for major modules.
-- Release notes for breaking changes.
+### 2. Fail only on direct evidence
 
-### DATA (Data & Privacy)
-- PII is classified and handled explicitly.
-- Data retention policies are enforced.
-- Data migrations include backfill plan.
-- Data schemas are versioned.
-- Audit logging for sensitive data access.
-- Exported data is sanitized or redacted.
-- Least-privilege database roles are used.
-- Backups and restore procedures are tested.
+A fail should usually be grounded in one of:
 
-### API (API Design)
-- Request/response schemas are validated.
-- Backward compatibility checks for public APIs.
-- Error responses are standardized.
-- Pagination and filtering are consistent.
-- Rate limiting and quotas are documented.
-- Idempotency keys for mutating endpoints.
+- A dangerous API usage.
+- Missing protection around an obvious risky path.
+- A concrete architectural violation.
+- A changed public contract without matching safeguards.
+- A production-facing configuration or operational gap.
 
-### CI (Pipeline & Build)
-- Reproducible builds with locked dependencies.
-- CI does not run with elevated privileges.
-- All checks run on PR before merge.
-- Build artifacts are signed or checksummed.
-- Dependency updates are automated and reviewed.
-- Linting gates are enforced.
-- Tests are parallelized but deterministic.
+Absence-based reasoning is allowed only when the repository strongly implies a
+required control should exist and it clearly does not.
 
-### SUPPLY (Supply Chain)
-- Dependencies are pinned and verified.
-- SBOM is generated for releases.
-- License compliance is checked.
-- Vulnerability scanning for dependencies.
-- Third-party code provenance is recorded.
+### 3. Keep remediation local and actionable
 
-### DX (Developer Experience)
-- Clear error messages for failed validation.
-- Configuration is discoverable and documented.
-- Default policies are safe and low-friction.
-- False positives are explainable and suppressible.
+The best checks produce findings with short remediations:
 
-## C#-specific checks (initial focus)
-Note: The C# bundle should *include* shared domain checks and add only checks
-that are truly C#-specific. No duplication of generic checks across bundles.
+- add validation at the boundary,
+- pass the cancellation token,
+- use parameterized SQL,
+- move service resolution to the composition root,
+- add a timeout or policy,
+- add or update tests for the changed behavior.
 
-### C#-ARCH
-- Assemblies avoid circular references.
-- Public APIs follow analyzers' naming and visibility guidance.
-- DI container registrations are validated at startup.
-- Configuration options use strongly-typed `IOptions<T>` patterns.
+If remediation is vague, the check is probably too vague.
 
-### C#-TEST
-- Async tests avoid `Task.Result` or `.Wait()` deadlocks.
-- Tests use deterministic time via fakes or clocks.
-- Avoid static mutable state in tests.
-- Snapshot tests are used for large JSON outputs with approval workflows.
+### 4. Prefer important rules over numerous rules
 
-### C#-SEC
-- `HttpClient` is managed via `IHttpClientFactory`.
-- No untrusted input in `ProcessStartInfo` without strict validation.
-- Avoid `BinaryFormatter` and insecure deserialization APIs.
-- Authorization checks use policy-based attributes consistently.
-- Crypto uses `System.Security.Cryptography` with approved algorithms.
+A smaller set of strong checks is better than a large set of noisy checks.
+Policies should include only checks that are useful in routine PR review.
+Situational or low-confidence checks should exist in the library, but should
+not be part of the default baseline.
 
-### C#-REL
-- `CancellationToken` is threaded through async call chains.
-- Configure awaits are consistent and appropriate for libraries vs apps.
-- Resilience policies (retry/circuit-breaker) exist for outbound calls.
+### 5. Preserve the `pass` / `fail` / `unknown` contract
 
-### C#-PERF
-- Avoid boxing in hot paths; use generics or `Span<T>`.
-- Prefer `ValueTask` for high-frequency async where appropriate.
-- Avoid excessive allocations in LINQ-heavy loops.
+- `pass`: direct evidence shows the code satisfies the check.
+- `fail`: direct evidence shows the code violates the check.
+- `unknown`: the rule does not apply, or the available evidence is not strong
+  enough to justify a fail.
 
-### C#-OPS
-- Health checks registered for dependencies.
-- Structured logging with scopes and correlation IDs.
-- `appsettings.*.json` does not contain secrets.
-- Minimal container images and multi-stage builds for .NET apps.
+## Strategy hints
 
-### C#-DOC
-- Public APIs documented with XML comments and generated docs.
-- Breaking changes captured in release notes.
+Checks declare one of three strategy hints:
 
-## Open questions (to decide structure)
-- Should domain groups be first-class with shared tools?
-- Should language-specific variants live under each group or as overlays?
-- How do we version group bundles versus single checks?
+- `static`: a deterministic pattern or repository query should be enough.
+- `heuristic`: a structured search plus judgment is needed.
+- `reasoning`: the check depends on software design judgment.
+
+For the current MVP, all checks still run through the agent. The strategy hint
+exists to keep the library ready for future extraction into faster tooling.
+
+## Required shape of a check
+
+Each check should define:
+
+- ID and title.
+- Intent.
+- Applicability, including when to return `unknown`.
+- Strategy hint.
+- What to inspect.
+- Pass criteria.
+- Fail criteria.
+- Explicit false-positive guards (`Do not flag`).
+- Evidence expectations.
+- Confidence guidance.
+- Remediation guidance.
+- Pass and fail examples.
+
+## Confidence guidance
+
+Confidence is about evidence quality, not severity.
+
+- `HIGH`: the violation or pass condition is directly visible in code,
+  configuration, tests, or build artifacts.
+- `MEDIUM`: the conclusion is strong but partly inferred from surrounding code.
+- `LOW`: applicability or evidence is weak; use only when `unknown` is not
+  appropriate.
+
+The check author should explain what counts as `HIGH`, `MEDIUM`, and `LOW` for
+that specific rule.
+
+## Policy design
+
+Policies are curated bundles of checks. A good policy:
+
+- Includes only checks strong enough for routine use.
+- Mixes architecture, security, reliability, testing, API quality, and
+  operations.
+- Avoids duplicating generic domain intent across language variants.
+- Documents which checks are intentionally excluded from baseline because they
+  are situational or noisy.
+
+The current `csharp-baseline` policy should be interpreted as:
+
+- strict on correctness, security, architecture, and operability,
+- conservative on style and micro-performance,
+- willing to say `unknown` when the diff does not establish applicability.
+
+## Domain model
+
+The library is organized by engineering concern first, language second.
+
+- `ARCH`: architecture and dependency boundaries.
+- `TEST`: tests, determinism, and reviewable behavioral safety.
+- `SEC`: security controls, dangerous APIs, and sensitive data handling.
+- `REL`: resilience, cancellation, timeouts, retries, and safe background work.
+- `PERF`: performance-sensitive patterns only when a hot path is evident.
+- `OPS`: deployability, observability, container and runtime safety.
+- `API`: public contract design and external input handling.
+- `DATA`: persistence, privacy, schema safety, and data-shaping concerns.
+- `DOC`: public-facing documentation obligations.
+
+## C# library stance
+
+The C# library should focus on checks that a strong .NET reviewer would expect
+to matter in production:
+
+- dependency direction and composition-root hygiene,
+- validated configuration and startup safety,
+- secure outbound and inbound I/O,
+- cancellation, time budgets, and retry discipline,
+- hermetic and behavior-covering tests,
+- stable API behavior at boundaries,
+- operational readiness and secret hygiene.
+
+The library should not make the default baseline fail on:
+
+- `ValueTask` not being used,
+- LINQ being present in ordinary business code,
+- XML comments missing from internal service code,
+- `ConfigureAwait(false)` not being used in ASP.NET Core app code.
+
+Those checks may still exist in the library, but only as opt-in or
+context-specific guidance.
+
+## Authoring rules for new checks
+
+Before adding a new check, the author should be able to answer all of these:
+
+1. What concrete production or maintenance failure does this prevent?
+2. Can a reviewer usually identify a violation from repository evidence?
+3. When should the agent return `unknown` instead of `fail`?
+4. What are the common false positives, and how does the check avoid them?
+5. Would a strong team be proud to require this rule in most PRs?
+
+If the answer to any of these is weak, the check should probably stay out of
+the baseline.
+
+## Check growth model
+
+- Keep checks individually versioned and independently overridable.
+- Add new checks only after validating them on known-good and known-bad
+  fixtures.
+- Prefer refining an existing check over adding a near-duplicate.
+- Deprecate low-signal checks rather than silently letting them drift.
+- Treat policy quality as a product decision, not a documentation exercise.
+
+## Output contract
+
+Each executed check must emit:
+
+- `id`
+- `version`
+- `status`
+- `confidence`
+- `evidence`
+- `rationale`
+- `remediation`
+
+The contract is intentionally small. Precision must come from the check
+definition, not from a bloated result schema.
