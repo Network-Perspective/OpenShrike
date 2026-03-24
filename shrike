@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P -- "$(dirname -- "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
 
-exec dotnet run --project "$SCRIPT_DIR/src/OpenShrike.Cli" -- "$@"
+SCRIPT_DIR="$(cd -P -- "$(dirname -- "$SOURCE")" && pwd)"
+
+if [[ -f "$SCRIPT_DIR/src/cli.ts" && -f "$SCRIPT_DIR/node_modules/tsx/dist/cli.mjs" ]]; then
+  exec node "$SCRIPT_DIR/node_modules/tsx/dist/cli.mjs" "$SCRIPT_DIR/src/cli.ts" "$@"
+fi
+
+exec node "$SCRIPT_DIR/dist/cli.js" "$@"

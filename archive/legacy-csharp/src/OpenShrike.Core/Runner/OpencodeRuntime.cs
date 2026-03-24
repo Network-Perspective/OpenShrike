@@ -9,9 +9,9 @@ internal sealed class OpencodeRuntime
     private const string DefaultAgentName = "shrike-checker";
     private const string DefaultAzureDeployment = "gpt-5.4-mini";
     private const string AzureProviderName = "azure";
-    private const string AzureBaseUrl = "https://np-openai-swe.openai.azure.com/openai";
-    private const string AzureApiVersion = "2025-04-01-preview";
     private const string AzureApiKeyEnvironmentVariable = "AZURE_OPENAI_API_KEY";
+    private const string AzureBaseUrlEnvironmentVariable = "OPENSHRIKE_AZURE_OPENAI_BASE_URL";
+    private const string AzureApiVersionEnvironmentVariable = "OPENSHRIKE_AZURE_OPENAI_API_VERSION";
     private const string DockerImageTag = "openshrike-opencode:1.3.0";
     private const string OpencodePackageVersion = "1.3.0";
     private static readonly object DockerImageLock = new();
@@ -68,6 +68,20 @@ internal sealed class OpencodeRuntime
                 $"Missing required environment variable '{AzureApiKeyEnvironmentVariable}' for opencode Azure access.");
         }
 
+        var baseUrl = Environment.GetEnvironmentVariable(AzureBaseUrlEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            throw new InvalidOperationException(
+                $"Missing required environment variable '{AzureBaseUrlEnvironmentVariable}' for opencode Azure access.");
+        }
+
+        var apiVersion = Environment.GetEnvironmentVariable(AzureApiVersionEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(apiVersion))
+        {
+            throw new InvalidOperationException(
+                $"Missing required environment variable '{AzureApiVersionEnvironmentVariable}' for opencode Azure access.");
+        }
+
         var deploymentName = providerModel.StartsWith(AzureProviderName + "/", StringComparison.OrdinalIgnoreCase)
             ? providerModel[(AzureProviderName.Length + 1)..]
             : providerModel;
@@ -92,10 +106,10 @@ internal sealed class OpencodeRuntime
                     ["options"] = new Dictionary<string, object?>
                     {
                         ["apiKey"] = apiKey,
-                        ["baseURL"] = AzureBaseUrl,
+                        ["baseURL"] = baseUrl,
                         ["queryParams"] = new Dictionary<string, string>
                         {
-                            ["api-version"] = AzureApiVersion
+                            ["api-version"] = apiVersion
                         }
                     },
                     ["models"] = new Dictionary<string, object?>

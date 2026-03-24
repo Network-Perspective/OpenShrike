@@ -1,35 +1,147 @@
 # OpenShrike
 
-Self-hosted, security-first agentic code reviewer and best-practice auditor.
-Local and CI use, wrapping an agent runtime that can run tests, search the
-codebase, and provide higher-level feedback on design, maintainability, and
-process quality. Policies are authored as data and assembled into skills/bundles
-so only the relevant checks are executed and reported. The system is meant to
-close the loop by feeding structured results back into developer agents (Codex,
-Claude Code, etc.) until checks are satisfied.
-
-This repo now contains an MVP implementation of the OpenShrike CLI for
-policy/check scanning via `opencode`, plus requirements and best-practice
-definitions.
+Security-first agentic code review CLI backed by OpenCode and a policy library.
+The active implementation is now TypeScript/Node with an Ink terminal UI.
 
 ![logo](docs/openshrike-logo.png)
 
-## Why this exists
+## What changed
 
-As software development shifts to agent-driven workflows, we need observability
-and governance over those agents. This project aims to:
-- Detect higher-level code smells and architectural risks that linters miss.
-- Enforce a growing library of best practices across the whole SDLC.
-- Provide a secure, auditable execution environment for analysis agents.
-- Create a feedback loop so agents can iteratively fix what is found.
+- The TypeScript CLI lives in `src/` and is the active implementation.
+- The previous C# solution was moved to `archive/legacy-csharp/` for reference.
+- `shrike scan` now uses the OpenCode SDK and streams agent/tool activity into a separate live pane while the scan is running.
+- `shrike init` writes runtime config into `.openshrike/` using an OpenCode-compatible config file plus env-file helpers.
 
-## Guiding principles
+## Quick start
 
-- Security first: no secrets to agents; deterministic isolation for all CLI runs.
-- Local-first and self-hosted: no vendor lock-in and no hidden outbound calls.
-- Explainability: every finding has evidence, rationale, and remediation steps.
-- Extensible best practices: policy-as-data assembled into skills/bundles.
-- Observability: agent behavior is inspectable, traceable, and reproducible.
+Install dependencies and build:
+
+```bash
+npm install
+npm run build
+```
+
+Generate runtime config in the current project:
+
+```bash
+./shrike init --force
+```
+
+Run a policy scan:
+
+```bash
+./shrike scan --policy csharp-baseline --repo .
+```
+
+## Runtime config
+
+`shrike init` writes these files into `.openshrike/`:
+
+- `opencode.json`: the runtime config consumed by OpenCode.
+- `required-env.txt`: one environment variable name per line for container/runtime wiring.
+- `runtime.env.example`: starter env-file with blank values.
+- `README.md`: short usage note for the generated files.
+
+The default config keeps secrets out of source control by using `${ENV_VAR}` placeholders. The generated default expects:
+
+```text
+AZURE_OPENAI_API_KEY
+OPENSHRIKE_AZURE_OPENAI_BASE_URL
+OPENSHRIKE_AZURE_OPENAI_API_VERSION
+```
+
+If you run `shrike` inside a container, pass those variables with your normal container mechanism, for example an env-file derived from `.openshrike/runtime.env.example`.
+
+## Scan usage
+
+Run exactly one of `--check` or `--policy`.
+
+Examples:
+
+```bash
+./shrike scan --policy csharp-baseline --repo .
+./shrike scan --check csharp-rel-001-cancellation-tokens --repo . --scan-scope commit --scan-target HEAD~1..HEAD
+./shrike scan --policy csharp-baseline --repo . --scan-scope branch --scan-target origin/main
+./shrike scan --policy csharp-baseline --repo . --scan-scope pr --scan-target origin/main...HEAD
+./shrike scan --policy csharp-baseline --repo . --scan-scope full
+```
+
+Options:
+
+- `--output json|markdown`
+- `--emit-bundle <PATH>`
+- `--agent <NAME>`
+- `--model <provider/model>`
+- `--config <PATH>`
+- `--mock-opencode`
+- `--no-ui`
+
+Scope values:
+
+- `uncommitted` (default)
+- `commit`
+- `branch`
+- `pr`
+- `full`
+
+When stderr is interactive, `shrike scan` renders an Ink dashboard:
+
+- left side: progress, scope, counters, and optional detailed check lists
+- right side: streamed OpenCode events, assistant output, and reasoning text
+
+Toggle detail lists with `d`, `Ctrl+T`, or `Ctrl+O`.
+
+Use mock mode when you want to test the UI/report flow without calling OpenCode:
+
+```bash
+./shrike scan --policy csharp-baseline --repo . --scan-scope full --mock-opencode
+```
+
+## Development
+
+Common commands:
+
+```bash
+npm run dev -- scan --policy csharp-baseline --repo .
+npm run build
+npm run typecheck
+npm test
+```
+
+The root `./shrike` launcher runs the built CLI when `dist/cli.js` exists and falls back to `tsx` during development.
+
+## Publish and install
+
+Create a framework bundle:
+
+```bash
+scripts/publish.sh
+```
+
+This writes a runnable bundle to:
+
+```text
+.artifacts/publish/framework/
+  shrike
+  app/
+    dist/
+    node_modules/
+    best_practices/
+    package.json
+    ...
+```
+
+Install from source with a symlink:
+
+```bash
+scripts/install-local.sh --source ./shrike --link
+```
+
+Install from the published framework bundle:
+
+```bash
+scripts/install-local.sh --source .artifacts/publish/framework
+```
 
 ## Document map
 
@@ -40,205 +152,4 @@ and governance over those agents. This project aims to:
 - [Best practices library](docs/requirements/05-best-practices-library.md)
 - [Observability and feedback loop](docs/requirements/06-observability.md)
 - [Workflows and integrations](docs/requirements/07-workflows-and-integrations.md)
-- [MVP implementation: first C# check](docs/implementation/01-mvp-csharp-rel-001-implementation.md)
-- [Fixture repo and pass/fail branches](docs/implementation/02-testscsharp-fixture-and-branches.md)
-
-## Scan usage
-
-Run exactly one of `--check` or `--policy`.
-
-Run from repo root:
-
-```bash
-./shrike scan --policy csharp-baseline --repo .
-```
-
-By default, `shrike scan` runs `opencode` inside an isolated Docker container.
-Use `--local-runtime` to run `opencode` directly on the host instead.
-
-Optional convenience to call `shrike` directly:
-
-```bash
-ln -sf "$(pwd)/shrike" ~/.local/bin/shrike
-```
-
-```bash
-shrike scan --policy csharp-baseline --repo .
-```
-
-Local host runtime override:
-
-```bash
-shrike scan --policy csharp-baseline --repo . --local-runtime
-```
-
-## Build and install
-
-### Publish builds
-
-Framework-dependent and self-contained builds:
-
-```bash
-scripts/publish.sh --mode both --rid linux-x64
-```
-
-Self-contained only:
-
-```bash
-scripts/publish.sh --mode self-contained --rid linux-x64
-```
-
-Framework-dependent only:
-
-```bash
-scripts/publish.sh --mode framework
-```
-
-Release layout:
-
-```text
-.artifacts/publish/
-  framework/
-    shrike
-    app/
-      OpenShrike.Cli.dll
-      ...
-  self-contained/
-    linux-x64/
-      shrike
-      ...
-```
-
-### Install `shrike`
-
-Install a self-contained binary to `~/.local/bin/shrike`:
-
-```bash
-scripts/install-local.sh \
-  --source .artifacts/publish/self-contained/linux-x64/shrike
-```
-
-Use symlink mode for dev installs:
-
-```bash
-scripts/install-local.sh --source ./shrike --link
-```
-
-Upgrade:
-1. Re-publish (`scripts/publish.sh ...`)
-2. Re-run install (`scripts/install-local.sh ...`)
-
-### Runtime prerequisites
-
-- Docker is the default execution backend for `shrike scan`.
-- `AZURE_OPENAI_API_KEY` must be set so the generated `opencode` config can call Azure OpenAI.
-- `opencode` only needs to be installed on the host when using `--local-runtime`.
-
-### Scope selection
-
-Use `--scan-scope` to choose what to review. Supported values:
-- `uncommitted` (default)
-- `commit`
-- `branch`
-- `pr`
-- `full`
-
-Use `--scan-target` when required by scope:
-- `commit`: commit hash or range (`HEAD~1..HEAD`)
-- `branch`: base branch (`origin/main`)
-- `pr`: optional diff spec (defaults to `origin/main...HEAD`)
-
-Examples:
-
-Uncommitted changes (default):
-```bash
-shrike scan \
-  --policy csharp-baseline \
-  --repo .
-```
-
-Commit/range scan:
-```bash
-shrike scan \
-  --check csharp-rel-001-cancellation-tokens \
-  --repo . \
-  --scan-scope commit \
-  --scan-target HEAD~1..HEAD
-```
-
-Branch diff scan:
-```bash
-shrike scan \
-  --policy csharp-baseline \
-  --repo . \
-  --scan-scope branch \
-  --scan-target origin/main
-```
-
-PR diff scan:
-```bash
-shrike scan \
-  --policy csharp-baseline \
-  --repo . \
-  --scan-scope pr \
-  --scan-target origin/main...HEAD
-```
-
-Full repository scan:
-```bash
-shrike scan \
-  --policy csharp-baseline \
-  --repo . \
-  --scan-scope full
-```
-
-### Output options
-
-Machine-readable JSON:
-```bash
-shrike scan \
-  --policy csharp-baseline \
-  --repo . \
-  --output json
-```
-
-Human-readable Markdown:
-```bash
-shrike scan \
-  --policy csharp-baseline \
-  --repo . \
-  --output markdown
-```
-
-Optional bundle emission:
-```bash
-shrike scan \
-  --policy csharp-baseline \
-  --repo . \
-  --emit-bundle artifacts/csharp-baseline.bundle.md
-```
-
-During execution, the CLI shows a Spectre.Console live dashboard on stderr: progress bar on top, colored `PASS/FAIL/UNKNOWN` counters below, and optional detailed check lists. Toggle details with `d`, `Ctrl+T`, or `Ctrl+O` (terminal-dependent). JSON/Markdown reports stay on stdout.
-
-Mock mode for progress/UI testing (no external `opencode` dependency):
-```bash
-shrike scan \
-  --policy csharp-baseline \
-  --repo . \
-  --scan-scope full \
-  --mock-opencode
-```
-
-In mock mode each check takes ~2-5 seconds and returns `pass` with ~90% probability.
-
-## Recent changes
-
-- Added policy scanning via `--policy` with markdown policy resolution.
-- Added policy/check bundle assembly output via `--emit-bundle`.
-- Added scan scope control: `--scan-scope` and `--scan-target`.
-- Default scope is now `uncommitted`.
-- Added full repo scan support via `--scan-scope full`.
-- Added markdown report output via `--output markdown` (JSON remains available).
-- Added read-only guardrail that fails a run if the agent mutates repository files.
-- Added publish/install scripts for framework-dependent and self-contained binaries.
-- Added Spectre.Console progress output for long-running scans.
+- [Archived first implementation notes](docs/implementation/01-mvp-csharp-rel-001-implementation.md)

@@ -9,6 +9,8 @@ public class OpencodeRuntimeTests
     public void CreateCommand_Uses_Docker_Runtime_By_Default_With_Isolated_Copy_Bootstrap()
     {
         Environment.SetEnvironmentVariable("AZURE_OPENAI_API_KEY", "test-key");
+        Environment.SetEnvironmentVariable("OPENSHRIKE_AZURE_OPENAI_BASE_URL", "https://example.test/openai");
+        Environment.SetEnvironmentVariable("OPENSHRIKE_AZURE_OPENAI_API_VERSION", "2025-04-01-preview");
 
         var command = OpencodeRuntime.CreateCommand(
             "scan prompt",
@@ -28,6 +30,8 @@ public class OpencodeRuntimeTests
     public void CreateCommand_Uses_Local_Runtime_When_Requested()
     {
         Environment.SetEnvironmentVariable("AZURE_OPENAI_API_KEY", "test-key");
+        Environment.SetEnvironmentVariable("OPENSHRIKE_AZURE_OPENAI_BASE_URL", "https://example.test/openai");
+        Environment.SetEnvironmentVariable("OPENSHRIKE_AZURE_OPENAI_API_VERSION", "2025-04-01-preview");
 
         var command = OpencodeRuntime.CreateCommand(
             "scan prompt",
@@ -49,6 +53,8 @@ public class OpencodeRuntimeTests
     public void BuildConfigContent_Uses_Azure_Settings_And_Default_Permissions()
     {
         Environment.SetEnvironmentVariable("AZURE_OPENAI_API_KEY", "test-key");
+        Environment.SetEnvironmentVariable("OPENSHRIKE_AZURE_OPENAI_BASE_URL", "https://example.test/openai");
+        Environment.SetEnvironmentVariable("OPENSHRIKE_AZURE_OPENAI_API_VERSION", "2025-04-01-preview");
 
         var json = OpencodeRuntime.BuildConfigContent("shrike-checker", "azure/gpt-5.4-mini");
         using var doc = JsonDocument.Parse(json);
@@ -59,7 +65,7 @@ public class OpencodeRuntimeTests
             .GetProperty("provider")
             .GetProperty("azure");
 
-        Assert.Equal("https://np-openai-swe.openai.azure.com/openai", provider.GetProperty("options").GetProperty("baseURL").GetString());
+        Assert.Equal("https://example.test/openai", provider.GetProperty("options").GetProperty("baseURL").GetString());
         Assert.Equal("2025-04-01-preview", provider.GetProperty("options").GetProperty("queryParams").GetProperty("api-version").GetString());
         Assert.Equal("test-key", provider.GetProperty("options").GetProperty("apiKey").GetString());
 

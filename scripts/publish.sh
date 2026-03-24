@@ -7,34 +7,20 @@ Usage:
   scripts/publish.sh [options]
 
 Options:
-  --mode <framework|self-contained|both>   Publish mode (default: both)
-  --rid <runtime-id>                       Runtime ID for self-contained publish (default: linux-x64)
-  --configuration <Debug|Release>          Build configuration (default: Release)
+  --configuration <Debug|Release>          Accepted for compatibility, ignored
   --output-root <path>                     Output root directory (default: .artifacts/publish)
 
 Examples:
-  scripts/publish.sh --mode self-contained --rid linux-x64
-  scripts/publish.sh --mode framework
-  scripts/publish.sh --mode both --rid osx-arm64
+  scripts/publish.sh
+  scripts/publish.sh --output-root /tmp/openshrike-publish
 EOF
 }
 
-MODE="both"
-RID="linux-x64"
 CONFIGURATION="Release"
 OUTPUT_ROOT=".artifacts/publish"
-PROJECT="src/OpenShrike.Cli/OpenShrike.Cli.csproj"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --mode)
-      MODE="${2:-}"
-      shift 2
-      ;;
-    --rid)
-      RID="${2:-}"
-      shift 2
-      ;;
     --configuration)
       CONFIGURATION="${2:-}"
       shift 2
@@ -55,70 +41,43 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-case "$MODE" in
-  framework|self-contained|both) ;;
-  *)
-    echo "Invalid --mode: $MODE" >&2
-    usage
-    exit 1
-    ;;
-esac
-
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 FRAMEWORK_OUT="$OUTPUT_ROOT/framework"
-SELF_OUT="$OUTPUT_ROOT/self-contained/$RID"
+APP_OUT="$FRAMEWORK_OUT/app"
 
-publish_framework() {
-  echo "Publishing framework-dependent build to $FRAMEWORK_OUT"
-  rm -rf "$FRAMEWORK_OUT"
-  mkdir -p "$FRAMEWORK_OUT"
+echo "Publishing framework bundle to $FRAMEWORK_OUT"
+echo "Configuration flag received: $CONFIGURATION"
 
-  dotnet publish "$PROJECT" \
-    -c "$CONFIGURATION" \
-    --self-contained false \
-    -o "$FRAMEWORK_OUT/app"
+rm -rf "$FRAMEWORK_OUT"
+mkdir -p "$APP_OUT"
 
-  cat > "$FRAMEWORK_OUT/shrike" <<'EOF'
+npm install
+npm run build
+
+cp package.json package-lock.json "$APP_OUT"/
+cp -a dist "$APP_OUT"/
+cp -a node_modules "$APP_OUT"/
+cp -a best_practices "$APP_OUT"/
+if [[ -d .openshrike ]]; then
+  cp -a .openshrike "$APP_OUT"/
+fi
+
+cat > "$FRAMEWORK_OUT/shrike" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-exec dotnet "$SCRIPT_DIR/app/OpenShrike.Cli.dll" "$@"
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P -- "$(dirname -- "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P -- "$(dirname -- "$SOURCE")" && pwd)"
+exec node "$SCRIPT_DIR/app/dist/cli.js" "$@"
 EOF
-  chmod +x "$FRAMEWORK_OUT/shrike"
-}
-
-publish_self_contained() {
-  echo "Publishing self-contained single-file build for $RID to $SELF_OUT"
-  rm -rf "$SELF_OUT"
-  mkdir -p "$SELF_OUT"
-
-  dotnet publish "$PROJECT" \
-    -c "$CONFIGURATION" \
-    -r "$RID" \
-    --self-contained true \
-    -p:PublishSingleFile=true \
-    -p:PublishTrimmed=false \
-    -o "$SELF_OUT"
-
-  if [[ "$RID" == win-* ]]; then
-    cp "$SELF_OUT/OpenShrike.Cli.exe" "$SELF_OUT/shrike.exe"
-  else
-    cp "$SELF_OUT/OpenShrike.Cli" "$SELF_OUT/shrike"
-    chmod +x "$SELF_OUT/shrike"
-  fi
-}
-
-if [[ "$MODE" == "framework" || "$MODE" == "both" ]]; then
-  publish_framework
-fi
-
-if [[ "$MODE" == "self-contained" || "$MODE" == "both" ]]; then
-  publish_self_contained
-fi
+chmod +x "$FRAMEWORK_OUT/shrike"
 
 echo
 echo "Publish complete."
 echo "Framework output:      $FRAMEWORK_OUT"
-echo "Self-contained output: $SELF_OUT"
