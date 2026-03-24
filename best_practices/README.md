@@ -140,11 +140,60 @@ Policies are curated bundles of checks. A good policy:
 - Includes only checks strong enough for routine use.
 - Mixes architecture, security, reliability, testing, API quality, and
   operations.
-- Avoids duplicating generic domain intent across language variants.
+- Reuses shared cross-language checks instead of duplicating generic intent in
+  every language variant.
 - Documents which checks are intentionally excluded from baseline because they
   are situational or noisy.
 
-The current `csharp-baseline` policy should be interpreted as:
+## Library layout
+
+The library now has three layers:
+
+- `checks/shared`: language-agnostic checks for architecture, testing,
+  security, reliability, operations, API design, and architectural records.
+- `checks/<language>`: language- or stack-specific overlays for runtime,
+  framework, and ecosystem failure modes.
+- `policies/*.md`: curated policies that link to shared and language-specific
+  checks.
+
+This lets one policy reuse the same architectural and operational expectations
+across stacks while still enforcing the sharp language-specific rules that
+actually matter in review.
+
+## Current policy catalog
+
+Shared:
+
+- `shared-foundation`
+
+.NET:
+
+- `csharp-baseline`
+
+Python:
+
+- `python-baseline`
+- `python-ml-baseline`
+- `pytorch-baseline`
+
+Node / web backend:
+
+- `javascript-baseline`
+- `typescript-baseline`
+
+JVM:
+
+- `java-baseline`
+
+Additional popular language:
+
+- `go-baseline`
+
+## Language stances
+
+### C#
+
+The `csharp-baseline` policy should be interpreted as:
 
 - strict on correctness, security, architecture, and operability,
 - conservative on style and micro-performance,
@@ -186,6 +235,60 @@ The library should not make the default baseline fail on:
 
 Those checks may still exist in the library, but only as opt-in or
 context-specific guidance.
+
+### Python
+
+Python is split into three policy layers because the failure modes are
+different:
+
+- `python-baseline` for services, CLIs, workers, and reusable libraries,
+- `python-ml-baseline` for model-training and data-science code,
+- `pytorch-baseline` for training and inference loops where framework semantics
+  like `train()` / `eval()` and `no_grad()` are correctness concerns.
+
+The Python stack should be strict on:
+
+- import-time side effects,
+- subprocess and deserialization safety,
+- explicit network timeouts,
+- async event-loop correctness,
+- leakage-free evaluation and reproducible ML workflows.
+
+### JavaScript and TypeScript
+
+The Node and web-backend policies are strict on:
+
+- module-load side effects,
+- shell and dynamic-code execution,
+- dropped promises,
+- unbounded outbound HTTP calls,
+- runtime validation of external data.
+
+TypeScript adds a narrower focus on using the type system honestly:
+
+- do not cast external data directly into trusted types,
+- do not hide real type mismatches behind broad suppression comments,
+- do not leak `any` through public contracts.
+
+### Java
+
+The Java policy focuses on classic JVM production risks:
+
+- explicit dependency injection,
+- validated configuration binding,
+- safe process execution,
+- no native Java deserialization on untrusted data,
+- explicit HTTP timeout policy,
+- correct interrupt handling.
+
+### Go
+
+The Go policy focuses on the things that routinely break real services:
+
+- `context.Context` propagation,
+- command execution and SQL safety,
+- explicit HTTP timeouts,
+- goroutine lifecycle ownership.
 
 ## Authoring rules for new checks
 
