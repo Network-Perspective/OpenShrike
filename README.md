@@ -53,6 +53,9 @@ Run from repo root:
 ./shrike scan --policy csharp-baseline --repo .
 ```
 
+By default, `shrike scan` runs `opencode` inside an isolated Docker container.
+Use `--local-runtime` to run `opencode` directly on the host instead.
+
 Optional convenience to call `shrike` directly:
 
 ```bash
@@ -61,6 +64,12 @@ ln -sf "$(pwd)/shrike" ~/.local/bin/shrike
 
 ```bash
 shrike scan --policy csharp-baseline --repo .
+```
+
+Local host runtime override:
+
+```bash
+shrike scan --policy csharp-baseline --repo . --local-runtime
 ```
 
 ## Build and install
@@ -118,6 +127,12 @@ scripts/install-local.sh --source ./shrike --link
 Upgrade:
 1. Re-publish (`scripts/publish.sh ...`)
 2. Re-run install (`scripts/install-local.sh ...`)
+
+### Runtime prerequisites
+
+- Docker is the default execution backend for `shrike scan`.
+- `AZURE_OPENAI_API_KEY` must be set so the generated `opencode` config can call Azure OpenAI.
+- `opencode` only needs to be installed on the host when using `--local-runtime`.
 
 ### Scope selection
 

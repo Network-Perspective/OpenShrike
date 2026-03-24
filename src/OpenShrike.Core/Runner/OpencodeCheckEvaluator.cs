@@ -16,7 +16,8 @@ internal sealed class OpencodeCheckEvaluator
         string? agent,
         string? model,
         ScanScopeContext scopeContext,
-        bool emulateOpencode)
+        bool emulateOpencode,
+        bool useDockerRuntime)
     {
         if (emulateOpencode)
         {
@@ -25,7 +26,7 @@ internal sealed class OpencodeCheckEvaluator
 
         var definition = File.ReadAllText(checkDefinitionPath);
         var prompt = BuildPrompt(checkId, definition, repoPath, scopeContext);
-        var responseText = RunOpencode(prompt, repoPath, agent, model);
+        var responseText = RunOpencode(prompt, repoPath, agent, model, useDockerRuntime);
 
         var payloadJson = ExtractJsonObject(responseText);
         var payload = JsonSerializer.Deserialize<AgentCheckPayload>(payloadJson, new JsonSerializerOptions
@@ -142,113 +143,11 @@ internal sealed class OpencodeCheckEvaluator
                truncated;
     }
 
-    private static string RunOpencode(string prompt, string repoPath, string? agent, string? model)
+    private static string RunOpencode(string prompt, string repoPath, string? agent, string? model, bool useDockerRuntime)
     {
-        var psi = new ProcessStartInfo("opencode")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-
-        psi.ArgumentList.Add("run");
-        psi.ArgumentList.Add("--format");
-        psi.ArgumentList.Add("json");
-        psi.ArgumentList.Add("--dir");
-        psi.ArgumentList.Add(repoPath);
-
-        if (!string.IsNullOrWhiteSpace(agent))
-        {
-            psi.ArgumentList.Add("--agent");
-            psi.ArgumentList.Add(agent);
-        }
-
-        if (!string.IsNullOrWhiteSpace(model))
-        {
-            psi.ArgumentList.Add("--model");
-            psi.ArgumentList.Add(model);
-        }
-
-        psi.ArgumentList.Add(prompt);
-
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start opencode process.");
-
-        var textBuffer = new StringBuilder();
-        var errorBuffer = new StringBuilder();
-
-        var stdoutTask = Task.Run(async () =>
-        {
-            while (true)
-            {
-                var line = await process.StandardOutput.ReadLineAsync().ConfigureAwait(false);
-                if (line is null)
-                {
-                    break;
-                }
-
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    using var doc = JsonDocument.Parse(line);
-                    if (!doc.RootElement.TryGetProperty("type", out var typeElement))
-                    {
-                        continue;
-                    }
-
-                    if (!string.Equals(typeElement.GetString(), "text", StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-
-                    if (!doc.RootElement.TryGetProperty("part", out var partElement))
-                    {
-                        continue;
-                    }
-
-                    if (!partElement.TryGetProperty("text", out var textElement))
-                    {
-                        continue;
-                    }
-
-                    var chunk = textElement.GetString();
-                    if (!string.IsNullOrWhiteSpace(chunk))
-                    {
-                        lock (textBuffer)
-                        {
-                            textBuffer.Append(chunk);
-                        }
-                    }
-                }
-                catch (JsonException)
-                {
-                    // Ignore malformed event lines and keep reading.
-                }
-            }
-        });
-
-        var stderrTask = process.StandardError.ReadToEndAsync();
-
-        Task.WhenAll(stdoutTask, stderrTask).GetAwaiter().GetResult();
-
-        errorBuffer.Append(stderrTask.GetAwaiter().GetResult());
-        process.WaitForExit();
-
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"opencode exited with code {process.ExitCode}: {errorBuffer}");
-        }
-
-        var text = textBuffer.ToString().Trim();
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            throw new InvalidOperationException("opencode returned no text response.");
-        }
-
-        return text;
+        var runtimeMode = useDockerRuntime ? OpencodeRuntimeMode.Docker : OpencodeRuntimeMode.Local;
+        var runtime = new OpencodeRuntime();
+        return runtime.Run(prompt, repoPath, agent, model, runtimeMode);
     }
 
     private static string ExtractJsonObject(string input)

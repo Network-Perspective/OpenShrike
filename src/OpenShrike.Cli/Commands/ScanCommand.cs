@@ -39,8 +39,8 @@ public sealed class ScanCommand : Command<ScanCommand.Settings>
         [Description("Optional opencode agent name")]
         public string? Agent { get; init; }
 
-        [CommandOption("--model <PROVIDER_MODEL>")]
-        [Description("Optional opencode model, e.g. openai/gpt-5")]
+        [CommandOption("--model <MODEL>")]
+        [Description("Optional Azure OpenAI deployment/model name for opencode (default: gpt-5.4-mini)")]
         public string? Model { get; init; }
 
         [CommandOption("--emit-bundle <PATH>")]
@@ -59,6 +59,10 @@ public sealed class ScanCommand : Command<ScanCommand.Settings>
         [CommandOption("--mock-opencode")]
         [Description("Emulate opencode calls locally (2-5s/check, ~90% pass)")]
         public bool MockOpencode { get; init; }
+
+        [CommandOption("--local-runtime")]
+        [Description("Run opencode directly on the host instead of the default isolated Docker runtime")]
+        public bool LocalRuntime { get; init; }
 
         public override ValidationResult Validate()
         {
@@ -140,7 +144,8 @@ public sealed class ScanCommand : Command<ScanCommand.Settings>
                                 scopeKind,
                                 settings.ScanTarget,
                                 settings.MockOpencode,
-                                OnProgress)
+                                OnProgress,
+                                useDockerRuntime: !settings.LocalRuntime)
                             : ScanRunner.Run(
                                 settings.CheckId!,
                                 settings.RepoPath,
@@ -149,7 +154,8 @@ public sealed class ScanCommand : Command<ScanCommand.Settings>
                                 scopeKind,
                                 settings.ScanTarget,
                                 settings.MockOpencode,
-                                OnProgress);
+                                OnProgress,
+                                useDockerRuntime: !settings.LocalRuntime);
                     }
                     finally
                     {

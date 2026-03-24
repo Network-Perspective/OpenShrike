@@ -170,4 +170,21 @@ public class ScanCommandSettingsTests
 
         Assert.True(result.Successful);
     }
+
+    [Fact]
+    public void Validate_Succeeds_With_Local_Runtime_Enabled()
+    {
+        var settings = new ScanCommand.Settings
+        {
+            PolicyId = "csharp-baseline",
+            RepoPath = ".",
+            OutputFormat = "json",
+            ScanScope = "full",
+            LocalRuntime = true
+        };
+
+        var result = settings.Validate();
+
+        Assert.True(result.Successful);
+    }
 }

@@ -12,7 +12,8 @@ public static class ScanRunner
         ScanScopeKind scopeKind = ScanScopeKind.Uncommitted,
         string? scopeTarget = null,
         bool emulateOpencode = false,
-        Action<ScanProgressEvent>? onProgress = null)
+        Action<ScanProgressEvent>? onProgress = null,
+        bool useDockerRuntime = true)
     {
         return RunChecks(
             new[] { checkId },
@@ -24,7 +25,8 @@ public static class ScanRunner
             scopeKind,
             scopeTarget,
             emulateOpencode,
-            onProgress);
+            onProgress,
+            useDockerRuntime);
     }
 
     public static ScanReport RunPolicy(
@@ -35,10 +37,11 @@ public static class ScanRunner
         ScanScopeKind scopeKind = ScanScopeKind.Uncommitted,
         string? scopeTarget = null,
         bool emulateOpencode = false,
-        Action<ScanProgressEvent>? onProgress = null)
+        Action<ScanProgressEvent>? onProgress = null,
+        bool useDockerRuntime = true)
     {
         var policy = PolicyDefinitionResolver.Resolve(policyId);
-        return RunChecks(policy.CheckIds, policy.Id, policy.Version, repoPath, agent, model, scopeKind, scopeTarget, emulateOpencode, onProgress);
+        return RunChecks(policy.CheckIds, policy.Id, policy.Version, repoPath, agent, model, scopeKind, scopeTarget, emulateOpencode, onProgress, useDockerRuntime);
     }
 
     private static ScanReport RunChecks(
@@ -51,7 +54,8 @@ public static class ScanRunner
         ScanScopeKind scopeKind,
         string? scopeTarget,
         bool emulateOpencode,
-        Action<ScanProgressEvent>? onProgress)
+        Action<ScanProgressEvent>? onProgress,
+        bool useDockerRuntime)
     {
         var repoFullPath = Path.GetFullPath(repoPath);
         if (!Directory.Exists(repoFullPath))
@@ -125,7 +129,7 @@ public static class ScanRunner
 
             var checkDefinitionPath = CheckDefinitionResolver.ResolvePath(checkId);
             var guard = RepoMutationGuard.Capture(repoFullPath);
-            var result = evaluator.Evaluate(checkId, checkDefinitionPath, repoFullPath, agent, model, scopeContext, emulateOpencode);
+            var result = evaluator.Evaluate(checkId, checkDefinitionPath, repoFullPath, agent, model, scopeContext, emulateOpencode, useDockerRuntime);
             guard.ThrowIfMutated();
             checks.Add(result);
 
