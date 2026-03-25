@@ -1,9 +1,7 @@
 import crypto from 'node:crypto';
 import net from 'node:net';
 import {
-  createOpencode,
   type AssistantMessage,
-  type Config,
   type Event,
   type Message,
   type OpencodeClient,
@@ -15,12 +13,13 @@ import {
   OPENCODE_POLL_TIMEOUT_MS,
   OPENCODE_REQUEST_TIMEOUT_MS
 } from './constants.js';
+import {createManagedOpencodeServer} from './opencode-server.js';
 import {extractAssistantTextFromParts} from './runtime-events.js';
 import type {ScanLogger} from './scan-log.js';
 
 export interface OpenCodeRuntimeOptions {
   repoPath: string;
-  config: Config;
+  config: import('@opencode-ai/sdk').Config;
   onEvent?: ((event: Event) => void) | undefined;
   logger?: ScanLogger | null;
 }
@@ -34,7 +33,7 @@ export class OpenCodeRuntime {
   private constructor(
     private readonly repoPath: string,
     private readonly client: OpencodeClient,
-    private readonly closeServer: () => void,
+    private readonly closeServer: () => Promise<void>,
     private readonly streamAbortController: AbortController,
     private readonly streamTask: Promise<void>,
     private readonly onEvent: ((event: Event) => void) | undefined,
@@ -45,86 +44,92 @@ export class OpenCodeRuntime {
   static async create(options: OpenCodeRuntimeOptions): Promise<OpenCodeRuntime> {
     ensureLocalNodeBinsOnPath();
     const port = await findAvailablePort();
-
-    const {client, server} = await createOpencode({
+    const server = await createManagedOpencodeServer({
       config: options.config,
-      port
+      port,
+      logger: options.logger ?? null
     });
     options.logger?.write('runtime.created', {
       repoPath: options.repoPath,
-      port
+      port,
+      pid: server.pid ?? null
     });
 
     const streamAbortController = new AbortController();
     const sessionErrors = new Map<string, string>();
-    const stream = await client.event.subscribe({
-      query: {
-        directory: options.repoPath
-      },
-      signal: streamAbortController.signal
-    });
-    options.logger?.write('runtime.stream.subscribed', {
-      repoPath: options.repoPath
-    });
+    try {
+      const stream = await server.client.event.subscribe({
+        query: {
+          directory: options.repoPath
+        },
+        signal: streamAbortController.signal
+      });
+      options.logger?.write('runtime.stream.subscribed', {
+        repoPath: options.repoPath
+      });
 
-    const streamTask = (async () => {
-      try {
-        for await (const event of stream.stream) {
-          if (event.type === 'session.error' && event.properties.sessionID) {
-            sessionErrors.set(
-              event.properties.sessionID,
-              getErrorMessage(event.properties.error, 'Unknown OpenCode session error.')
-            );
+      const streamTask = (async () => {
+        try {
+          for await (const event of stream.stream) {
+            if (event.type === 'session.error' && event.properties.sessionID) {
+              sessionErrors.set(
+                event.properties.sessionID,
+                getErrorMessage(event.properties.error, 'Unknown OpenCode session error.')
+              );
+            }
+            options.onEvent?.(event);
+            if (event.type === 'permission.updated') {
+              await withTimeoutSignal(
+                OPENCODE_DELETE_TIMEOUT_MS,
+                'reply to OpenCode permission request',
+                signal =>
+                  server.client.postSessionIdPermissionsPermissionId({
+                    path: {
+                      id: event.properties.sessionID,
+                      permissionID: event.properties.id
+                    },
+                    query: {
+                      directory: options.repoPath
+                    },
+                    body: {
+                      response: 'reject'
+                    },
+                    signal
+                  })
+              );
+            }
           }
-          options.onEvent?.(event);
-          if (event.type === 'permission.updated') {
-            await withTimeoutSignal(
-              OPENCODE_DELETE_TIMEOUT_MS,
-              'reply to OpenCode permission request',
-              signal =>
-                client.postSessionIdPermissionsPermissionId({
-                  path: {
-                    id: event.properties.sessionID,
-                    permissionID: event.properties.id
-                  },
-                  query: {
-                    directory: options.repoPath
-                  },
-                  body: {
-                    response: 'reject'
-                  },
-                  signal
-                })
-            );
-          }
-        }
-      } catch (error) {
-        if (!streamAbortController.signal.aborted) {
-          options.onEvent?.({
-            type: 'session.error',
-            properties: {
-              error: {
-                name: 'UnknownError',
-                data: {
-                  message: error instanceof Error ? error.message : String(error)
+        } catch (error) {
+          if (!streamAbortController.signal.aborted) {
+            options.onEvent?.({
+              type: 'session.error',
+              properties: {
+                error: {
+                  name: 'UnknownError',
+                  data: {
+                    message: error instanceof Error ? error.message : String(error)
+                  }
                 }
               }
-            }
-          });
+            });
+          }
         }
-      }
-    })();
+      })();
 
-    return new OpenCodeRuntime(
-      options.repoPath,
-      client,
-      server.close,
-      streamAbortController,
-      streamTask,
-      options.onEvent,
-      options.logger ?? null,
-      sessionErrors
-    );
+      return new OpenCodeRuntime(
+        options.repoPath,
+        server.client,
+        server.close,
+        streamAbortController,
+        streamTask,
+        options.onEvent,
+        options.logger ?? null,
+        sessionErrors
+      );
+    } catch (error) {
+      await server.close().catch(() => undefined);
+      throw error;
+    }
   }
 
   async runPrompt(options: {
@@ -257,8 +262,8 @@ export class OpenCodeRuntime {
 
   async close(): Promise<void> {
     this.streamAbortController.abort();
-    this.closeServer();
     await this.streamTask.catch(() => undefined);
+    await this.closeServer();
     this.logger?.write('runtime.closed');
   }
 

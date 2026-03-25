@@ -47,7 +47,9 @@ function ScanApp(props: {
 }) {
   const {exit} = useApp();
   const {stdout} = useStdout();
-  const streamRef = useRef<ScrollViewRef>(null);
+  const eventStreamRef = useRef<ScrollViewRef>(null);
+  const outputStreamRef = useRef<ScrollViewRef>(null);
+  const reasoningStreamRef = useRef<ScrollViewRef>(null);
   const [progress, setProgress] = useState<ProgressViewState>(createProgressViewState());
   const [streamState, setStreamState] = useState<RuntimeStreamState>(createRuntimeStreamState());
   const [streamViewportHeight, setStreamViewportHeight] = useState(0);
@@ -58,7 +60,7 @@ function ScanApp(props: {
   const gapWidth = 1;
   const leftWidth = Math.max(20, Math.floor((terminalWidth - gapWidth) / 2));
   const rightWidth = Math.max(20, terminalWidth - gapWidth - leftWidth);
-  const streamLines = useMemo(() => buildStreamLines(streamState), [streamState]);
+  const streamSections = useMemo(() => buildStreamSections(streamState), [streamState]);
 
   useInput((input, key) => {
     if (input === 'd' || (key.ctrl && (input === 't' || input === 'o'))) {
@@ -71,45 +73,59 @@ function ScanApp(props: {
 
     if (key.upArrow) {
       setFollowStream(false);
-      streamRef.current?.scrollBy(-1);
+      scrollAllStreams([-1, -1, -1], [eventStreamRef, outputStreamRef, reasoningStreamRef]);
       return;
     }
 
     if (key.downArrow) {
-      streamRef.current?.scrollBy(1);
-      setFollowStream(isPinnedToBottom(streamRef.current));
+      scrollAllStreams([1, 1, 1], [eventStreamRef, outputStreamRef, reasoningStreamRef]);
+      setFollowStream(
+        areAllStreamsPinnedToBottom([eventStreamRef.current, outputStreamRef.current, reasoningStreamRef.current])
+      );
       return;
     }
 
     if (key.pageUp) {
       setFollowStream(false);
-      streamRef.current?.scrollBy(-Math.max(3, streamViewportHeight - 2));
+      const delta = -Math.max(3, streamViewportHeight - 2);
+      scrollAllStreams([delta, delta, delta], [eventStreamRef, outputStreamRef, reasoningStreamRef]);
       return;
     }
 
     if (key.pageDown) {
-      streamRef.current?.scrollBy(Math.max(3, streamViewportHeight - 2));
-      setFollowStream(isPinnedToBottom(streamRef.current));
+      const delta = Math.max(3, streamViewportHeight - 2);
+      scrollAllStreams([delta, delta, delta], [eventStreamRef, outputStreamRef, reasoningStreamRef]);
+      setFollowStream(
+        areAllStreamsPinnedToBottom([eventStreamRef.current, outputStreamRef.current, reasoningStreamRef.current])
+      );
       return;
     }
 
     if (key.home) {
       setFollowStream(false);
-      streamRef.current?.scrollToTop();
+      eventStreamRef.current?.scrollToTop();
+      outputStreamRef.current?.scrollToTop();
+      reasoningStreamRef.current?.scrollToTop();
       return;
     }
 
     if (key.end) {
-      streamRef.current?.scrollToBottom();
+      eventStreamRef.current?.scrollToBottom();
+      outputStreamRef.current?.scrollToBottom();
+      reasoningStreamRef.current?.scrollToBottom();
       setFollowStream(true);
     }
   });
 
   useEffect(() => {
     const handleResize = () => {
-      streamRef.current?.remeasure();
+      eventStreamRef.current?.remeasure();
+      outputStreamRef.current?.remeasure();
+      reasoningStreamRef.current?.remeasure();
       if (followStream) {
-        streamRef.current?.scrollToBottom();
+        eventStreamRef.current?.scrollToBottom();
+        outputStreamRef.current?.scrollToBottom();
+        reasoningStreamRef.current?.scrollToBottom();
       }
     };
 
@@ -160,9 +176,11 @@ function ScanApp(props: {
 
   useEffect(() => {
     if (followStream) {
-      streamRef.current?.scrollToBottom();
+      eventStreamRef.current?.scrollToBottom();
+      outputStreamRef.current?.scrollToBottom();
+      reasoningStreamRef.current?.scrollToBottom();
     }
-  }, [followStream, streamLines]);
+  }, [followStream, streamSections]);
 
   return (
     <Box flexDirection="row" gap={1} width={terminalWidth} height={terminalHeight}>
@@ -175,22 +193,26 @@ function ScanApp(props: {
         </Box>
       </Panel>
       <Panel title="OpenCode Stream" width={rightWidth} height={terminalHeight}>
-        <Box flexGrow={1} overflow="hidden">
-          <ScrollView
-            ref={streamRef}
-            flexDirection="column"
-            width="100%"
-            height="100%"
-            onViewportSizeChange={size => {
-              setStreamViewportHeight(size.height);
-            }}
-          >
-            {streamLines.map((line, index) => (
-              <Text key={`${index}-${line.kind}`} {...(line.color ? {color: line.color} : {})}>
-                {line.text}
-              </Text>
-            ))}
-          </ScrollView>
+        <Box flexDirection="column" flexGrow={1} gap={1} overflow="hidden">
+          <StreamSection
+            ref={eventStreamRef}
+            title="Events"
+            titleColor="yellowBright"
+            lines={streamSections.events}
+            onViewportHeightChange={setStreamViewportHeight}
+          />
+          <StreamSection
+            ref={outputStreamRef}
+            title="Assistant Output"
+            titleColor="greenBright"
+            lines={streamSections.output}
+          />
+          <StreamSection
+            ref={reasoningStreamRef}
+            title="Reasoning"
+            titleColor="magentaBright"
+            lines={streamSections.reasoning}
+          />
         </Box>
       </Panel>
     </Box>
@@ -216,6 +238,48 @@ function Panel(props: {title: string; children: React.ReactNode; width: number; 
     </Box>
   );
 }
+
+const StreamSection = React.forwardRef(function StreamSection(
+  props: {
+    title: string;
+    titleColor: string;
+    lines: StreamLine[];
+    onViewportHeightChange?: ((height: number) => void) | undefined;
+  },
+  ref: React.ForwardedRef<ScrollViewRef>
+) {
+  return (
+    <Box
+      borderStyle="round"
+      borderColor="gray"
+      paddingX={1}
+      paddingY={0}
+      flexDirection="column"
+      flexBasis={0}
+      flexGrow={1}
+      overflow="hidden"
+    >
+      <Text color={props.titleColor}>{props.title}</Text>
+      <Box flexGrow={1} overflow="hidden">
+        <ScrollView
+          ref={ref}
+          flexDirection="column"
+          width="100%"
+          height="100%"
+          onViewportSizeChange={size => {
+            props.onViewportHeightChange?.(size.height);
+          }}
+        >
+          {props.lines.map((line, index) => (
+            <Text key={`${props.title}-${index}-${line.kind}`} {...(line.color ? {color: line.color} : {})}>
+              {line.text}
+            </Text>
+          ))}
+        </ScrollView>
+      </Box>
+    </Box>
+  );
+});
 
 function renderProgress(state: ProgressViewState) {
   const total = Math.max(state.totalChecks, 1);
@@ -254,7 +318,7 @@ function renderStatus(state: ProgressViewState) {
         <Text key={index}>{line}</Text>
       ))}
       <Text color="cyan">
-        Stream scroll: up/down, page up/down, home/end
+        Stream scroll: up/down, page up/down, home/end (all panes)
       </Text>
     </Box>
   );
@@ -335,21 +399,25 @@ function formatScopeFileInfo(state: ProgressViewState): string {
   return state.scopeIsFullRepository ? 'all files' : `${state.scopeFileCount} files`;
 }
 
-function buildStreamLines(state: RuntimeStreamState): StreamLine[] {
-  const eventLines = state.entries.length === 0 ? ['Waiting for OpenCode events...'] : state.entries;
-  const outputLines = splitMultilineText(state.output || '(no assistant text yet)');
-  const reasoningLines = splitMultilineText(state.reasoning || '(no reasoning stream yet)');
-
-  return [
-    {text: 'Events', color: 'yellowBright', kind: 'header'},
-    ...eventLines.map(line => ({text: line, kind: 'event'})),
-    {text: '', kind: 'spacer'},
-    {text: 'Assistant Output', color: 'greenBright', kind: 'header'},
-    ...outputLines.map(line => ({text: line, kind: 'output'})),
-    {text: '', kind: 'spacer'},
-    {text: 'Reasoning', color: 'magentaBright', kind: 'header'},
-    ...reasoningLines.map(line => ({text: line, kind: 'reasoning'}))
-  ];
+export function buildStreamSections(state: RuntimeStreamState): {
+  events: StreamLine[];
+  output: StreamLine[];
+  reasoning: StreamLine[];
+} {
+  return {
+    events: (state.entries.length === 0 ? ['Waiting for OpenCode events...'] : state.entries).map(line => ({
+      text: line,
+      kind: 'event'
+    })),
+    output: splitMultilineText(state.output || '(no assistant text yet)').map(line => ({
+      text: line,
+      kind: 'output'
+    })),
+    reasoning: splitMultilineText(state.reasoning || '(no reasoning stream yet)').map(line => ({
+      text: line,
+      kind: 'reasoning'
+    }))
+  };
 }
 
 function splitMultilineText(value: string): string[] {
@@ -362,4 +430,21 @@ function isPinnedToBottom(ref: ScrollViewRef | null): boolean {
   }
 
   return ref.getScrollOffset() >= ref.getBottomOffset();
+}
+
+function areAllStreamsPinnedToBottom(refs: Array<ScrollViewRef | null>): boolean {
+  return refs.every(isPinnedToBottom);
+}
+
+function scrollAllStreams(
+  deltas: [number, number, number],
+  refs: readonly [
+    React.RefObject<ScrollViewRef | null>,
+    React.RefObject<ScrollViewRef | null>,
+    React.RefObject<ScrollViewRef | null>
+  ]
+): void {
+  refs[0].current?.scrollBy(deltas[0]);
+  refs[1].current?.scrollBy(deltas[1]);
+  refs[2].current?.scrollBy(deltas[2]);
 }
