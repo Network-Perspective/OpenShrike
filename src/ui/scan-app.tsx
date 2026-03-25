@@ -8,7 +8,13 @@ import {
   type RuntimeStreamItem,
   type RuntimeStreamState
 } from '../lib/runtime-events.js';
-import type {CheckStatus, ScanCommandOptions, ScanProgressEvent, ScanReport} from '../lib/types.js';
+import type {
+  CheckStatus,
+  ScanCommandOptions,
+  ScanProgressEvent,
+  ScanReport,
+  ScanRuntimeEvent
+} from '../lib/types.js';
 
 type CheckDisplayStatus = CheckStatus | 'running';
 
@@ -28,6 +34,7 @@ interface ProgressViewState {
   unknownChecks: string[];
   checkOrder: string[];
   checkStatuses: Record<string, CheckDisplayStatus>;
+  runningCheckIds: string[];
   activeCheckId: string | null;
   selectedCheckIndex: number;
   followActiveCheck: boolean;
@@ -62,7 +69,6 @@ function ScanApp(props: {
   const {exit} = useApp();
   const {stdout} = useStdout();
   const streamRef = useRef<ScrollViewRef>(null);
-  const activeCheckIdRef = useRef<string | null>(null);
   const [progress, setProgress] = useState<ProgressViewState>(createProgressViewState());
   const [streamsByCheck, setStreamsByCheck] = useState<Record<string, RuntimeStreamState>>({});
   const [streamViewportHeight, setStreamViewportHeight] = useState(0);
@@ -167,7 +173,6 @@ function ScanApp(props: {
             }
 
             if (event.type === 'check-started' && event.checkId) {
-              activeCheckIdRef.current = event.checkId;
               setStreamsByCheck(previous => {
                 if (previous[event.checkId!]) {
                   return previous;
@@ -178,8 +183,6 @@ function ScanApp(props: {
                   [event.checkId!]: createRuntimeStreamState()
                 };
               });
-            } else if (event.type === 'no-changes-in-scope') {
-              activeCheckIdRef.current = null;
             }
 
             setProgress(previous => applyProgressEvent(previous, event));
@@ -189,14 +192,17 @@ function ScanApp(props: {
               return;
             }
 
-            const targetCheckId = activeCheckIdRef.current;
+            const targetCheckId = getRuntimeTargetCheckId(event);
             if (!targetCheckId) {
               return;
             }
 
             setStreamsByCheck(previous => ({
               ...previous,
-              [targetCheckId]: reduceRuntimeEvent(previous[targetCheckId] ?? createRuntimeStreamState(), event)
+              [targetCheckId]: reduceRuntimeEvent(
+                previous[targetCheckId] ?? createRuntimeStreamState(),
+                event.event
+              )
             }));
           }
         });
@@ -356,8 +362,10 @@ function renderStatus(state: ProgressViewState) {
     lines.push(`Viewing: ${formatCheckDescriptor(state, selectedCheckId)}`);
   }
 
-  if (state.activeCheckId && state.activeCheckId !== selectedCheckId) {
-    lines.push(`Running: ${formatCheckDescriptor(state, state.activeCheckId)}`);
+  if (state.runningCheckIds.length > 0) {
+    lines.push(
+      `Running: ${state.runningCheckIds.map(checkId => formatCheckDescriptor(state, checkId)).join(', ')}`
+    );
   }
 
   lines.push('Check nav: left/right    Details: d / Ctrl+T / Ctrl+O');
@@ -395,6 +403,7 @@ function createProgressViewState(): ProgressViewState {
     unknownChecks: [],
     checkOrder: [],
     checkStatuses: {},
+    runningCheckIds: [],
     activeCheckId: null,
     selectedCheckIndex: 0,
     followActiveCheck: true
@@ -412,11 +421,13 @@ function applyProgressEvent(
     scopeLabel: event.scopeLabel,
     scopeFileCount: event.scopeFileCount,
     scopeIsFullRepository: event.isFullRepository,
-    checkIndex: event.checkIndex,
+    checkIndex: event.completedCount,
     totalChecks: event.totalChecks,
     passedCount: event.passedCount,
     failedCount: event.failedCount,
-    unknownCount: event.unknownCount
+    unknownCount: event.unknownCount,
+    runningCheckIds: [...event.runningCheckIds],
+    activeCheckId: event.runningCheckIds[event.runningCheckIds.length - 1] ?? null
   };
 
   if (event.checkId) {
@@ -431,6 +442,7 @@ function applyProgressEvent(
   if (event.type === 'no-changes-in-scope') {
     next.statusLabel = 'No files matched selected scope';
     next.activeCheckId = null;
+    next.runningCheckIds = [];
     return next;
   }
 
@@ -447,7 +459,6 @@ function applyProgressEvent(
   }
 
   next.statusLabel = `Completed ${event.checkId}=${event.checkStatus}`;
-  next.activeCheckId = null;
   if (event.checkId) {
     if (event.checkStatus) {
       next.checkStatuses[event.checkId] = event.checkStatus;
@@ -502,6 +513,10 @@ function buildStreamPanelTitle(state: ProgressViewState): string {
   }
 
   return formatCheckDescriptor(state, selectedCheckId);
+}
+
+function getRuntimeTargetCheckId(event: ScanRuntimeEvent): string | null {
+  return event.checkId;
 }
 
 function formatCheckDescriptor(state: ProgressViewState, checkId: string): string {

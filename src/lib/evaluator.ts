@@ -1,6 +1,7 @@
 import type {Event} from '@opencode-ai/sdk';
 import {z} from 'zod';
 import {readCheckDefinition} from './checks.js';
+import {MAX_CHECK_EVIDENCE_ITEMS, MAX_CHECK_REMEDIATION_ITEMS} from './constants.js';
 import {OpenCodeRuntime} from './runtime.js';
 import type {
   CheckResult,
@@ -14,17 +15,38 @@ const agentCheckPayloadSchema = z.object({
   version: z.string().optional(),
   status: z.enum(['pass', 'fail', 'unknown']).optional(),
   confidence: z.enum(['HIGH', 'MEDIUM', 'LOW']).optional(),
-  evidence: z.array(z.string()).optional(),
+  evidence: z.array(z.string()).max(MAX_CHECK_EVIDENCE_ITEMS).optional(),
   rationale: z.string().optional(),
-  remediation: z.array(z.string()).optional()
+  remediation: z.array(z.string()).max(MAX_CHECK_REMEDIATION_ITEMS).optional()
 });
 type ValidatedAgentCheckPayload = z.infer<typeof agentCheckPayloadSchema>;
+
+export class CheckEvaluationError extends Error {
+  readonly originalOutput: string | null;
+
+  constructor(
+    message: string,
+    options: {
+      originalOutput?: string | null | undefined;
+      cause?: unknown;
+    } = {}
+  ) {
+    super(message, options.cause !== undefined ? {cause: options.cause} : undefined);
+    this.name = 'CheckEvaluationError';
+    this.originalOutput = options.originalOutput?.trim() || null;
+  }
+}
+
+export function getCheckEvaluationOriginalOutput(error: unknown): string | null {
+  return error instanceof CheckEvaluationError ? error.originalOutput : null;
+}
 
 export interface EvaluateCheckOptions {
   checkId: string;
   repoPath: string;
   agent: string;
   model: string;
+  workerId?: string | undefined;
   scopeContext: ScanScopeContext;
   emulateOpencode: boolean;
   runtime: OpenCodeRuntime | null;
@@ -45,13 +67,22 @@ export async function evaluateCheck(options: EvaluateCheckOptions): Promise<Chec
     prompt,
     agent: options.agent,
     model: options.model,
-    title: options.checkId
+    title: options.checkId,
+    checkId: options.checkId,
+    workerId: options.workerId
   });
 
-  const payloadJson = extractJsonObject(responseText.text);
-  const payload = agentCheckPayloadSchema.parse(JSON.parse(payloadJson));
-  validatePayload(payload, options.checkId);
-  validateEvidenceScope(payload, options.scopeContext);
+  let payloadJson: string | null = null;
+  let payload: ValidatedAgentCheckPayload | null = null;
+
+  try {
+    payloadJson = extractJsonObject(responseText.text);
+    payload = agentCheckPayloadSchema.parse(JSON.parse(payloadJson));
+    validatePayload(payload, options.checkId);
+    validateEvidenceScope(payload, options.scopeContext);
+  } catch (error) {
+    throw createCheckEvaluationError(error, responseText.text, payloadJson, payload);
+  }
 
   return {
     id: payload.id!,
@@ -127,7 +158,11 @@ export function buildPrompt(
     'Rules:',
     '- Output raw JSON only. No markdown fences.',
     '- Use repo-relative evidence paths.',
+    `- Keep evidence to at most ${MAX_CHECK_EVIDENCE_ITEMS} items.`,
+    `- Keep remediation to at most ${MAX_CHECK_REMEDIATION_ITEMS} items.`,
     '- If scope is not full repository, evidence paths MUST come from listed scoped files.',
+    '- If the relevant evidence is outside the scoped files, return status="unknown".',
+    '- Do not cite or mention out-of-scope file paths in evidence, rationale, or remediation.',
     '- status=unknown only when the check is not applicable or evidence is insufficient.'
   ].join('\n');
 }
@@ -240,4 +275,26 @@ function validateEvidenceScope(payload: ValidatedAgentCheckPayload, scopeContext
 
 function normalizePath(value: string): string {
   return value.trim().replaceAll('\\', '/');
+}
+
+function createCheckEvaluationError(
+  error: unknown,
+  rawResponseText: string,
+  payloadJson: string | null,
+  payload: ValidatedAgentCheckPayload | null
+): CheckEvaluationError {
+  if (error instanceof CheckEvaluationError) {
+    return error;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  const originalOutput = payload
+    ? JSON.stringify(payload, null, 2)
+    : payloadJson
+    ?? rawResponseText;
+
+  return new CheckEvaluationError(message, {
+    originalOutput,
+    cause: error
+  });
 }

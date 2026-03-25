@@ -4,8 +4,9 @@
 - Zero trust: assume agents are untrusted and potentially adversarial.
 - Least privilege: agents only see the files and context they need.
 - No secrets exposure: tokens, keys, and credentials are never accessible.
-- Deterministic isolation: all CLI actions occur in sandboxed containers by
-  default, with explicit opt-out only when an equivalent CI sandbox is present.
+- Deterministic isolation: OpenShrike supports both native and Docker runtime
+  modes. Native mode is the low-friction local default; Docker mode is the
+  isolated boundary for parity, CI, and stricter review runs.
 - Auditability: every action is logged with inputs, outputs, and hashes.
 
 ## Deployment tiers
@@ -40,6 +41,8 @@
 - Suitable for CI pipelines, shared infrastructure, and enterprise environments.
 - Optional gVisor or Firecracker for stronger isolation.
 - Read-only mounts for code; write access limited to scratch space.
+- Streamed runtime events and worker progress should still flow back to the CLI
+  or CI logs even when execution happens inside Docker.
 - Explicit allowlist for tools and commands available to the agent.
 - Network access disabled by default; allowlisted only when necessary.
 

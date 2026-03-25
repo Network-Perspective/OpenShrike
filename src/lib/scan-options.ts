@@ -1,11 +1,19 @@
 import {z} from 'zod';
 import {
+  DEFAULT_PARALLELISM,
   DEFAULT_OUTPUT,
+  DEFAULT_RUNTIME_MODE,
   DEFAULT_SCAN_SCOPE,
   OUTPUT_VALUES,
+  RUNTIME_MODE_VALUES,
   SCOPE_VALUES
 } from './constants.js';
 import type {ScanCommandOptions} from './types.js';
+
+const parallelismSchema = z.union([
+  z.literal('auto'),
+  z.coerce.number().int().min(1)
+]);
 
 const scanOptionsSchema = z
   .object({
@@ -21,6 +29,10 @@ const scanOptionsSchema = z
     mockOpencode: z.boolean().default(false),
     configPath: z.string().trim().min(1).optional(),
     logPath: z.string().trim().min(1).optional(),
+    runtimeMode: z.enum(RUNTIME_MODE_VALUES).default(DEFAULT_RUNTIME_MODE),
+    image: z.string().trim().min(1).optional(),
+    artifactsDir: z.string().trim().min(1).optional(),
+    parallelism: parallelismSchema.default(DEFAULT_PARALLELISM),
     ui: z.boolean().default(true)
   })
   .superRefine((value, ctx) => {
@@ -49,6 +61,6 @@ const scanOptionsSchema = z
     }
   });
 
-export function validateScanOptions(input: Partial<ScanCommandOptions>): ScanCommandOptions {
+export function validateScanOptions(input: unknown): ScanCommandOptions {
   return scanOptionsSchema.parse(input);
 }

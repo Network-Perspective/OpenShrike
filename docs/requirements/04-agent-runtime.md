@@ -16,10 +16,16 @@
   a second runtime is needed in the future.
 
 ## Runtime model
-- Each review runs in an isolated container with a clean filesystem view.
+- Runtime mode is explicit: `native` for direct local execution and `docker`
+  for isolated worker execution.
+- Docker mode runs the scan inside an ephemeral container with a clean
+  filesystem view and a read-only repo mount.
+- Native mode remains the local default for fast iteration and lower setup cost.
 - Commands are executed through a broker that enforces allowlists and quotas.
 - All command input/output is logged and hashed for audit trails.
 - The runtime executes an assembled bundle of checks to avoid repeated setup.
+- CLI progress should continue streaming even when execution happens inside
+  Docker or across multiple parallel workers.
 
 ## Bundled execution model
 - Policy assembler emits an opencode skill with step-by-step instructions.
@@ -27,9 +33,11 @@
 - Bundle emits a structured report containing per-check status and confidence.
 
 ## Isolation backend (initial decision)
-- Default backend: Docker (or Podman where Docker is unavailable).
-- Rationale: fastest path to reliable local and CI execution while preserving a
-  clear isolation boundary and strong tooling support.
+- Supported backends in Phase 2:
+  - native host execution
+  - Docker isolated execution
+- Rationale: native keeps the local loop fast, while Docker provides a clear
+  isolation boundary and CI parity.
 
 ## Container hardening (baseline)
 - Rootless containers where possible.

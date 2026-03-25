@@ -11,8 +11,7 @@
 
 ## Phase 2 features
 - Isolated docker runtime
-- Multi-agent review: parallel reviewers with consensus and conflict analysis.
-- Recommendation ranking based on risk and historical outcomes.
+- Multi-agent review: parallel reviewers to speed up execution
 
 ## Phase 3 features
 - Policy marketplace and sharing via repositories.

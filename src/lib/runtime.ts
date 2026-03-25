@@ -17,10 +17,22 @@ import {createManagedOpencodeServer} from './opencode-server.js';
 import {extractAssistantTextFromParts} from './runtime-events.js';
 import type {ScanLogger} from './scan-log.js';
 
+export interface RuntimeSessionMetadata {
+  checkId?: string | undefined;
+  workerId?: string | undefined;
+}
+
+export interface RuntimeEventEnvelope {
+  event: Event;
+  sessionId: string | null;
+  checkId: string | null;
+  workerId: string | null;
+}
+
 export interface OpenCodeRuntimeOptions {
   repoPath: string;
   config: import('@opencode-ai/sdk').Config;
-  onEvent?: ((event: Event) => void) | undefined;
+  onEvent?: ((event: RuntimeEventEnvelope) => void) | undefined;
   logger?: ScanLogger | null;
 }
 
@@ -36,9 +48,10 @@ export class OpenCodeRuntime {
     private readonly closeServer: () => Promise<void>,
     private readonly streamAbortController: AbortController,
     private readonly streamTask: Promise<void>,
-    private readonly onEvent: ((event: Event) => void) | undefined,
+    private readonly onEvent: ((event: RuntimeEventEnvelope) => void) | undefined,
     private readonly logger: ScanLogger | null,
-    private readonly sessionErrors: Map<string, string>
+    private readonly sessionErrors: Map<string, string>,
+    private readonly sessionMetadata: Map<string, RuntimeSessionMetadata>
   ) {}
 
   static async create(options: OpenCodeRuntimeOptions): Promise<OpenCodeRuntime> {
@@ -57,6 +70,7 @@ export class OpenCodeRuntime {
 
     const streamAbortController = new AbortController();
     const sessionErrors = new Map<string, string>();
+    const sessionMetadata = new Map<string, RuntimeSessionMetadata>();
     try {
       const stream = await server.client.event.subscribe({
         query: {
@@ -77,7 +91,7 @@ export class OpenCodeRuntime {
                 getErrorMessage(event.properties.error, 'Unknown OpenCode session error.')
               );
             }
-            options.onEvent?.(event);
+            options.onEvent?.(createRuntimeEventEnvelope(event, sessionMetadata));
             if (event.type === 'permission.updated') {
               await withTimeoutSignal(
                 OPENCODE_DELETE_TIMEOUT_MS,
@@ -101,17 +115,22 @@ export class OpenCodeRuntime {
           }
         } catch (error) {
           if (!streamAbortController.signal.aborted) {
-            options.onEvent?.({
-              type: 'session.error',
-              properties: {
-                error: {
-                  name: 'UnknownError',
-                  data: {
-                    message: error instanceof Error ? error.message : String(error)
+            options.onEvent?.(
+              createRuntimeEventEnvelope(
+                {
+                  type: 'session.error',
+                  properties: {
+                    error: {
+                      name: 'UnknownError',
+                      data: {
+                        message: error instanceof Error ? error.message : String(error)
+                      }
+                    }
                   }
-                }
-              }
-            });
+                },
+                sessionMetadata
+              )
+            );
           }
         }
       })();
@@ -124,7 +143,8 @@ export class OpenCodeRuntime {
         streamTask,
         options.onEvent,
         options.logger ?? null,
-        sessionErrors
+        sessionErrors,
+        sessionMetadata
       );
     } catch (error) {
       await server.close().catch(() => undefined);
@@ -137,6 +157,8 @@ export class OpenCodeRuntime {
     agent: string;
     model: string;
     title: string;
+    checkId?: string | undefined;
+    workerId?: string | undefined;
   }): Promise<PromptResult> {
     const sessionResult = await withTimeoutSignal(
       OPENCODE_REQUEST_TIMEOUT_MS,
@@ -159,6 +181,10 @@ export class OpenCodeRuntime {
     this.logger?.write('prompt.session.created', {
       sessionId: session.id,
       title: options.title
+    });
+    this.sessionMetadata.set(session.id, {
+      checkId: options.checkId,
+      workerId: options.workerId
     });
 
     try {
@@ -241,21 +267,28 @@ export class OpenCodeRuntime {
         });
       } catch (error) {
         this.onEvent?.({
-          type: 'session.error',
-          properties: {
-            sessionID: session.id,
-            error: {
-              name: 'UnknownError',
-              data: {
-                message: error instanceof Error ? error.message : String(error)
+          event: {
+            type: 'session.error',
+            properties: {
+              sessionID: session.id,
+              error: {
+                name: 'UnknownError',
+                data: {
+                  message: error instanceof Error ? error.message : String(error)
+                }
               }
             }
-          }
+          },
+          sessionId: session.id,
+          checkId: this.sessionMetadata.get(session.id)?.checkId ?? null,
+          workerId: this.sessionMetadata.get(session.id)?.workerId ?? null
         });
         this.logger?.write('prompt.session.delete_failed', {
           sessionId: session.id,
           message: error instanceof Error ? error.message : String(error)
         });
+      } finally {
+        this.sessionMetadata.delete(session.id);
       }
     }
   }
@@ -346,6 +379,43 @@ export class OpenCodeRuntime {
     }
 
     throw new Error(`Timed out waiting for OpenCode assistant response for session '${sessionId}'.`);
+  }
+}
+
+function createRuntimeEventEnvelope(
+  event: Event,
+  sessionMetadata: Map<string, RuntimeSessionMetadata>
+): RuntimeEventEnvelope {
+  const sessionId = getEventSessionId(event);
+  const metadata = sessionId ? sessionMetadata.get(sessionId) : null;
+  return {
+    event,
+    sessionId,
+    checkId: metadata?.checkId ?? null,
+    workerId: metadata?.workerId ?? null
+  };
+}
+
+function getEventSessionId(event: Event): string | null {
+  const runtimeEvent = event as {type: string; properties?: Record<string, unknown>};
+
+  switch (runtimeEvent.type) {
+    case 'message.part.delta':
+      return (runtimeEvent.properties as {sessionID?: string} | undefined)?.sessionID ?? null;
+    case 'message.part.updated':
+      return (runtimeEvent.properties as {part?: {sessionID?: string}} | undefined)?.part?.sessionID ?? null;
+    case 'message.updated':
+      return (runtimeEvent.properties as {info?: {sessionID?: string}} | undefined)?.info?.sessionID ?? null;
+    case 'session.status':
+      return (runtimeEvent.properties as {sessionID?: string} | undefined)?.sessionID ?? null;
+    case 'permission.updated':
+      return (runtimeEvent.properties as {sessionID?: string} | undefined)?.sessionID ?? null;
+    case 'permission.replied':
+      return (runtimeEvent.properties as {sessionID?: string} | undefined)?.sessionID ?? null;
+    case 'session.error':
+      return (runtimeEvent.properties as {sessionID?: string} | undefined)?.sessionID ?? null;
+    default:
+      return null;
   }
 }
 

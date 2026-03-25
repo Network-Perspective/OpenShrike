@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {createRuntimeStreamState, reduceRuntimeEvent} from '../src/lib/runtime-events.js';
 import type {Event} from '@opencode-ai/sdk';
+import type {SerializedRuntimeEvent} from '../src/lib/types.js';
 
 describe('reduceRuntimeEvent', () => {
   it('accumulates assistant text and tool lifecycle events in chronological order', () => {
@@ -115,7 +116,7 @@ describe('reduceRuntimeEvent', () => {
     expect(state.items).toEqual([
       {
         kind: 'pty',
-        text: 'bash: npm test --runInBand [cwd /repo]'
+        text: 'bash: npm'
       },
       {
         kind: 'tool',
@@ -124,6 +125,66 @@ describe('reduceRuntimeEvent', () => {
       {
         kind: 'tool-output',
         text: 'line 1\nline 2\nline 3\n...'
+      }
+    ]);
+  });
+
+  it('redacts raw command arguments, cwd details, and session error text', () => {
+    let state = createRuntimeStreamState();
+
+    state = reduceRuntimeEvent(
+      state,
+      {
+        type: 'command.executed',
+        properties: {
+          name: 'bash',
+          arguments: 'npm test --token secret'
+        }
+      } satisfies SerializedRuntimeEvent
+    );
+
+    state = reduceRuntimeEvent(
+      state,
+      {
+        type: 'pty.created',
+        properties: {
+          info: {
+            id: 'pty-2',
+            title: 'shell',
+            command: '/usr/bin/npm',
+            args: ['test', '--token', 'secret'],
+            cwd: '/repo/private'
+          }
+        }
+      } satisfies SerializedRuntimeEvent
+    );
+
+    state = reduceRuntimeEvent(
+      state,
+      {
+        type: 'session.error',
+        properties: {
+          error: {
+            data: {
+              message: 'token=secret'
+            }
+          }
+        }
+      } satisfies SerializedRuntimeEvent
+    );
+
+    expect(state.items).toEqual([
+      {
+        kind: 'tool',
+        text: 'command bash'
+      },
+      {
+        kind: 'pty',
+        text: 'shell: npm'
+      },
+      {
+        kind: 'error',
+        text: 'session error'
       }
     ]);
   });

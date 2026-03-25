@@ -24,3 +24,4 @@ Thumbs.db
 
 isolate.sh
 .openshrike-debug/*
+.openshrike/artifacts/*

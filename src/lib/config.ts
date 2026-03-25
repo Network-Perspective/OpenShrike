@@ -66,6 +66,17 @@ export async function loadRuntimeConfig(
 ): Promise<LoadedRuntimeConfig> {
   const absolutePath = path.resolve(configPath);
   const raw = await fs.readFile(absolutePath, 'utf8');
+  return parseRuntimeConfigContent(raw, absolutePath, options);
+}
+
+export function parseRuntimeConfigContent(
+  raw: string,
+  configPath: string,
+  options?: {
+    agent?: string | undefined;
+    model?: string | undefined;
+  }
+): LoadedRuntimeConfig {
   const parsed = runtimeConfigSchema.parse(JSON.parse(raw)) as Config;
 
   const placeholderVars = collectEnvPlaceholders(parsed);
@@ -77,7 +88,7 @@ export async function loadRuntimeConfig(
 
   const runtimeConfig = ensureShrikeAgent(normalizeRuntimeConfig(resolved as Config), options);
   return {
-    configPath: absolutePath,
+    configPath,
     config: runtimeConfig,
     requiredEnvVars,
     missingEnvVars

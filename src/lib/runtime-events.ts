@@ -1,5 +1,6 @@
 import type {Event, Part} from '@opencode-ai/sdk';
 import {STREAM_EVENT_LIMIT, STREAM_TEXT_LIMIT} from './constants.js';
+import type {SerializedRuntimeEvent} from './types.js';
 
 export type RuntimeStreamItemKind =
   | 'event'
@@ -33,8 +34,9 @@ export function createRuntimeStreamState(): RuntimeStreamState {
 
 export function reduceRuntimeEvent(
   state: RuntimeStreamState,
-  event: Event
+  event: Event | SerializedRuntimeEvent
 ): RuntimeStreamState {
+  const runtimeEvent = event as {type: string; properties?: Record<string, unknown>};
   const next: RuntimeStreamState = {
     items: state.items.map(item => ({...item})),
     partSnapshots: {...state.partSnapshots},
@@ -42,23 +44,31 @@ export function reduceRuntimeEvent(
     ptySnapshots: {...state.ptySnapshots}
   };
 
-  switch (event.type) {
+  switch (runtimeEvent.type) {
     case 'message.updated': {
-      if (event.properties.info.role === 'assistant') {
+      const info = (runtimeEvent.properties as {info?: {role?: string; providerID?: string; modelID?: string}} | undefined)?.info;
+      if (info?.role === 'assistant') {
         pushItem(
           next,
           'event',
-          `assistant ${event.properties.info.providerID}/${event.properties.info.modelID}`
+          `assistant ${info.providerID ?? 'unknown'}/${info.modelID ?? 'unknown'}`
         );
       }
       break;
     }
     case 'message.part.updated': {
-      applyPartEvent(next, event.properties.part, event.properties.delta);
+      const properties = runtimeEvent.properties as {part?: Part; delta?: string} | undefined;
+      if (properties?.part) {
+        applyPartEvent(next, properties.part, properties.delta);
+      }
       break;
     }
     case 'session.status': {
-      const status = event.properties.status;
+      const status = (runtimeEvent.properties as {status?: {type?: string; attempt?: number; message?: string}} | undefined)?.status;
+      if (!status?.type) {
+        break;
+      }
+
       if (status.type === 'retry') {
         pushItem(next, 'event', `session retry ${status.attempt}: ${status.message}`);
       } else {
@@ -67,50 +77,67 @@ export function reduceRuntimeEvent(
       break;
     }
     case 'permission.updated': {
-      pushItem(next, 'event', `permission requested: ${event.properties.title}`);
+      const title = (runtimeEvent.properties as {title?: string} | undefined)?.title;
+      pushItem(next, 'event', `permission requested: ${title ?? 'unknown'}`);
       break;
     }
     case 'permission.replied': {
-      pushItem(next, 'event', `permission ${event.properties.permissionID}: ${event.properties.response}`);
+      const properties = runtimeEvent.properties as {permissionID?: string; response?: string} | undefined;
+      pushItem(next, 'event', `permission ${properties?.permissionID ?? 'unknown'}: ${properties?.response ?? 'unknown'}`);
       break;
     }
     case 'command.executed': {
-      pushItem(next, 'tool', `command ${event.properties.name} ${event.properties.arguments}`.trim());
+      const properties = runtimeEvent.properties as {name?: string; arguments?: string} | undefined;
+      const commandName = normalizeCommandName(properties?.name, properties?.arguments);
+      pushItem(next, 'tool', `command ${commandName}`);
       break;
     }
     case 'session.error': {
-      pushItem(next, 'error', `session error: ${event.properties.error?.data.message ?? 'unknown error'}`);
+      pushItem(next, 'error', 'session error');
       break;
     }
     case 'todo.updated': {
-      pushItem(next, 'event', `todos updated: ${event.properties.todos.length}`);
+      const todos = (runtimeEvent.properties as {todos?: unknown[]} | undefined)?.todos;
+      pushItem(next, 'event', `todos updated: ${todos?.length ?? 0}`);
       break;
     }
     case 'pty.created': {
-      const summary = formatPtySummary(event.properties.info.command, event.properties.info.args);
-      next.ptySnapshots[event.properties.info.id] = summary;
+      const info = (runtimeEvent.properties as {info?: {id?: string; title?: string; command?: string; args?: string[]; cwd?: string}} | undefined)?.info;
+      if (!info?.id) {
+        break;
+      }
+
+      const summary = formatPtySummary(info.command ?? '');
+      next.ptySnapshots[info.id] = summary;
       pushItem(
         next,
         'pty',
-        `${event.properties.info.title}: ${summary} [cwd ${event.properties.info.cwd}]`
+        `${info.title ?? 'pty'}: ${summary}`
       );
       break;
     }
     case 'pty.updated': {
-      const summary = formatPtySummary(event.properties.info.command, event.properties.info.args);
-      if (next.ptySnapshots[event.properties.info.id] !== summary) {
-        next.ptySnapshots[event.properties.info.id] = summary;
+      const info = (runtimeEvent.properties as {info?: {id?: string; title?: string; command?: string; args?: string[]; cwd?: string}} | undefined)?.info;
+      if (!info?.id) {
+        break;
+      }
+
+      const summary = formatPtySummary(info.command ?? '');
+      if (next.ptySnapshots[info.id] !== summary) {
+        next.ptySnapshots[info.id] = summary;
         pushItem(
           next,
           'pty',
-          `${event.properties.info.title}: ${summary} [cwd ${event.properties.info.cwd}]`
+          `${info.title ?? 'pty'}: ${summary}`
         );
       }
       break;
     }
     case 'pty.exited': {
-      const summary = next.ptySnapshots[event.properties.id] ?? event.properties.id;
-      pushItem(next, 'pty', `process exited (${event.properties.exitCode}): ${summary}`);
+      const properties = runtimeEvent.properties as {id?: string; exitCode?: number} | undefined;
+      const ptyId = properties?.id ?? 'unknown';
+      const summary = next.ptySnapshots[ptyId] ?? ptyId;
+      pushItem(next, 'pty', `process exited (${properties?.exitCode ?? 'unknown'}): ${summary}`);
       break;
     }
     default:
@@ -323,13 +350,19 @@ function summarizeToolOutput(output: string): string {
   return lines.length > 3 ? `${excerpt}\n...` : excerpt;
 }
 
-function formatPtySummary(command: string, args: string[]): string {
-  const parts = [command, ...args].filter(Boolean).map(quoteIfNeeded);
-  return truncateText(parts.join(' '), 160);
+function formatPtySummary(command: string): string {
+  return truncateText(normalizeCommandName(command), 160);
 }
 
-function quoteIfNeeded(value: string): string {
-  return /\s/.test(value) ? JSON.stringify(value) : value;
+function normalizeCommandName(primary?: string, fallback?: string): string {
+  const raw = (primary?.trim() || fallback?.trim() || '').trim();
+  if (!raw) {
+    return 'unknown';
+  }
+
+  const token = raw.split(/\s+/)[0] ?? raw;
+  const sanitized = token.split(/[\\/]/).filter(Boolean).pop() ?? token;
+  return sanitized || 'unknown';
 }
 
 function truncateText(value: string, maxLength: number): string {

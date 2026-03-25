@@ -9,6 +9,8 @@ describe('validateScanOptions', () => {
         outputFormat: 'json',
         scanScope: 'uncommitted',
         mockOpencode: false,
+        runtimeMode: 'native',
+        parallelism: 1,
         ui: false
       })
     ).toThrow(/exactly one/i);
@@ -21,6 +23,8 @@ describe('validateScanOptions', () => {
         outputFormat: 'json',
         scanScope: 'uncommitted',
         mockOpencode: false,
+        runtimeMode: 'native',
+        parallelism: 1,
         ui: false
       })
     ).toThrow(/exactly one/i);
@@ -34,6 +38,8 @@ describe('validateScanOptions', () => {
         outputFormat: 'json',
         scanScope: 'commit',
         mockOpencode: false,
+        runtimeMode: 'native',
+        parallelism: 1,
         ui: false
       })
     ).toThrow(/scan-target/i);
@@ -47,11 +53,15 @@ describe('validateScanOptions', () => {
       scanScope: 'full',
       mockOpencode: true,
       logPath: 'logs/opencode.jsonl',
+      runtimeMode: 'docker',
+      parallelism: 'auto',
       ui: false
     });
 
     expect(result.policyId).toBe('csharp-baseline');
     expect(result.outputFormat).toBe('markdown');
     expect(result.logPath).toBe('logs/opencode.jsonl');
+    expect(result.runtimeMode).toBe('docker');
+    expect(result.parallelism).toBe('auto');
   });
 });

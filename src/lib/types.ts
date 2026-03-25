@@ -1,4 +1,6 @@
 export type OutputFormat = 'json' | 'markdown';
+export type RuntimeMode = 'native' | 'docker';
+export type ParallelismValue = number | 'auto';
 
 export type ScanScopeKind =
   | 'uncommitted'
@@ -35,6 +37,12 @@ export interface ScanReport {
   bundle_id: string;
   policy_version: string;
   repo: RepoInfo;
+  execution?: {
+    runtime_mode: RuntimeMode;
+    requested_parallelism: ParallelismValue;
+    effective_parallelism: number;
+    artifacts_dir: string | null;
+  } | undefined;
   summary: SummaryInfo;
   checks: CheckResult[];
 }
@@ -64,12 +72,27 @@ export interface ScanProgressEvent {
   scopeFileCount: number;
   isFullRepository: boolean;
   checkId: string | null;
+  workerId: string | null;
   checkStatus: CheckStatus | null;
   passedCount: number;
   failedCount: number;
   unknownCount: number;
   checkIndex: number;
+  completedCount: number;
   totalChecks: number;
+  runningCheckIds: string[];
+}
+
+export interface SerializedRuntimeEvent {
+  type: string;
+  properties?: Record<string, unknown> | undefined;
+}
+
+export interface ScanRuntimeEvent {
+  checkId: string | null;
+  workerId: string | null;
+  runtimeMode: RuntimeMode;
+  event: SerializedRuntimeEvent;
 }
 
 export interface ScanCommandOptions {
@@ -85,6 +108,10 @@ export interface ScanCommandOptions {
   mockOpencode: boolean;
   configPath?: string | undefined;
   logPath?: string | undefined;
+  runtimeMode: RuntimeMode;
+  image?: string | undefined;
+  artifactsDir?: string | undefined;
+  parallelism: ParallelismValue;
   ui: boolean;
 }
 
