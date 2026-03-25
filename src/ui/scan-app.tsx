@@ -2,8 +2,15 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Box, Text, render, useApp, useInput, useStdout} from 'ink';
 import {ScrollView, type ScrollViewRef} from 'ink-scroll-view';
 import {runScan} from '../lib/scan.js';
-import {createRuntimeStreamState, reduceRuntimeEvent, type RuntimeStreamState} from '../lib/runtime-events.js';
-import type {ScanCommandOptions, ScanProgressEvent, ScanReport} from '../lib/types.js';
+import {
+  createRuntimeStreamState,
+  reduceRuntimeEvent,
+  type RuntimeStreamItem,
+  type RuntimeStreamState
+} from '../lib/runtime-events.js';
+import type {CheckStatus, ScanCommandOptions, ScanProgressEvent, ScanReport} from '../lib/types.js';
+
+type CheckDisplayStatus = CheckStatus | 'running';
 
 interface ProgressViewState {
   scopeLabel: string;
@@ -19,11 +26,18 @@ interface ProgressViewState {
   passedChecks: string[];
   failedChecks: string[];
   unknownChecks: string[];
+  checkOrder: string[];
+  checkStatuses: Record<string, CheckDisplayStatus>;
+  activeCheckId: string | null;
+  selectedCheckIndex: number;
+  followActiveCheck: boolean;
 }
 
 interface StreamLine {
   text: string;
   color?: string;
+  bold?: boolean;
+  dimColor?: boolean;
   kind: string;
 }
 
@@ -47,11 +61,10 @@ function ScanApp(props: {
 }) {
   const {exit} = useApp();
   const {stdout} = useStdout();
-  const eventStreamRef = useRef<ScrollViewRef>(null);
-  const outputStreamRef = useRef<ScrollViewRef>(null);
-  const reasoningStreamRef = useRef<ScrollViewRef>(null);
+  const streamRef = useRef<ScrollViewRef>(null);
+  const activeCheckIdRef = useRef<string | null>(null);
   const [progress, setProgress] = useState<ProgressViewState>(createProgressViewState());
-  const [streamState, setStreamState] = useState<RuntimeStreamState>(createRuntimeStreamState());
+  const [streamsByCheck, setStreamsByCheck] = useState<Record<string, RuntimeStreamState>>({});
   const [streamViewportHeight, setStreamViewportHeight] = useState(0);
   const [followStream, setFollowStream] = useState(true);
 
@@ -60,7 +73,16 @@ function ScanApp(props: {
   const gapWidth = 1;
   const leftWidth = Math.max(20, Math.floor((terminalWidth - gapWidth) / 2));
   const rightWidth = Math.max(20, terminalWidth - gapWidth - leftWidth);
-  const streamSections = useMemo(() => buildStreamSections(streamState), [streamState]);
+  const selectedCheckId = getSelectedCheckId(progress);
+  const selectedStreamState = selectedCheckId ? streamsByCheck[selectedCheckId] ?? null : null;
+  const streamLines = useMemo(
+    () => buildCombinedStreamLines(selectedStreamState?.items ?? []),
+    [selectedStreamState]
+  );
+  const streamPanelTitle = buildStreamPanelTitle(progress);
+  const streamPanelTitleColor = getCheckStatusColor(
+    selectedCheckId ? progress.checkStatuses[selectedCheckId] ?? null : null
+  );
 
   useInput((input, key) => {
     if (input === 'd' || (key.ctrl && (input === 't' || input === 'o'))) {
@@ -71,61 +93,59 @@ function ScanApp(props: {
       return;
     }
 
+    if (key.leftArrow) {
+      setProgress(previous => navigateChecks(previous, -1));
+      return;
+    }
+
+    if (key.rightArrow) {
+      setProgress(previous => navigateChecks(previous, 1));
+      return;
+    }
+
     if (key.upArrow) {
       setFollowStream(false);
-      scrollAllStreams([-1, -1, -1], [eventStreamRef, outputStreamRef, reasoningStreamRef]);
+      streamRef.current?.scrollBy(-1);
       return;
     }
 
     if (key.downArrow) {
-      scrollAllStreams([1, 1, 1], [eventStreamRef, outputStreamRef, reasoningStreamRef]);
-      setFollowStream(
-        areAllStreamsPinnedToBottom([eventStreamRef.current, outputStreamRef.current, reasoningStreamRef.current])
-      );
+      streamRef.current?.scrollBy(1);
+      setFollowStream(isPinnedToBottom(streamRef.current));
       return;
     }
 
     if (key.pageUp) {
       setFollowStream(false);
       const delta = -Math.max(3, streamViewportHeight - 2);
-      scrollAllStreams([delta, delta, delta], [eventStreamRef, outputStreamRef, reasoningStreamRef]);
+      streamRef.current?.scrollBy(delta);
       return;
     }
 
     if (key.pageDown) {
       const delta = Math.max(3, streamViewportHeight - 2);
-      scrollAllStreams([delta, delta, delta], [eventStreamRef, outputStreamRef, reasoningStreamRef]);
-      setFollowStream(
-        areAllStreamsPinnedToBottom([eventStreamRef.current, outputStreamRef.current, reasoningStreamRef.current])
-      );
+      streamRef.current?.scrollBy(delta);
+      setFollowStream(isPinnedToBottom(streamRef.current));
       return;
     }
 
     if (key.home) {
       setFollowStream(false);
-      eventStreamRef.current?.scrollToTop();
-      outputStreamRef.current?.scrollToTop();
-      reasoningStreamRef.current?.scrollToTop();
+      streamRef.current?.scrollToTop();
       return;
     }
 
     if (key.end) {
-      eventStreamRef.current?.scrollToBottom();
-      outputStreamRef.current?.scrollToBottom();
-      reasoningStreamRef.current?.scrollToBottom();
+      streamRef.current?.scrollToBottom();
       setFollowStream(true);
     }
   });
 
   useEffect(() => {
     const handleResize = () => {
-      eventStreamRef.current?.remeasure();
-      outputStreamRef.current?.remeasure();
-      reasoningStreamRef.current?.remeasure();
+      streamRef.current?.remeasure();
       if (followStream) {
-        eventStreamRef.current?.scrollToBottom();
-        outputStreamRef.current?.scrollToBottom();
-        reasoningStreamRef.current?.scrollToBottom();
+        streamRef.current?.scrollToBottom();
       }
     };
 
@@ -146,6 +166,22 @@ function ScanApp(props: {
               return;
             }
 
+            if (event.type === 'check-started' && event.checkId) {
+              activeCheckIdRef.current = event.checkId;
+              setStreamsByCheck(previous => {
+                if (previous[event.checkId!]) {
+                  return previous;
+                }
+
+                return {
+                  ...previous,
+                  [event.checkId!]: createRuntimeStreamState()
+                };
+              });
+            } else if (event.type === 'no-changes-in-scope') {
+              activeCheckIdRef.current = null;
+            }
+
             setProgress(previous => applyProgressEvent(previous, event));
           },
           onRuntimeEvent: event => {
@@ -153,7 +189,15 @@ function ScanApp(props: {
               return;
             }
 
-            setStreamState(previous => reduceRuntimeEvent(previous, event));
+            const targetCheckId = activeCheckIdRef.current;
+            if (!targetCheckId) {
+              return;
+            }
+
+            setStreamsByCheck(previous => ({
+              ...previous,
+              [targetCheckId]: reduceRuntimeEvent(previous[targetCheckId] ?? createRuntimeStreamState(), event)
+            }));
           }
         });
 
@@ -176,11 +220,9 @@ function ScanApp(props: {
 
   useEffect(() => {
     if (followStream) {
-      eventStreamRef.current?.scrollToBottom();
-      outputStreamRef.current?.scrollToBottom();
-      reasoningStreamRef.current?.scrollToBottom();
+      streamRef.current?.scrollToBottom();
     }
-  }, [followStream, streamSections]);
+  }, [followStream, streamLines]);
 
   return (
     <Box flexDirection="row" gap={1} width={terminalWidth} height={terminalHeight}>
@@ -192,26 +234,19 @@ function ScanApp(props: {
           </Box>
         </Box>
       </Panel>
-      <Panel title="OpenCode Stream" width={rightWidth} height={terminalHeight}>
+      <Panel
+        title={streamPanelTitle}
+        titleColor={streamPanelTitleColor}
+        width={rightWidth}
+        height={terminalHeight}
+      >
         <Box flexDirection="column" flexGrow={1} gap={1} overflow="hidden">
           <StreamSection
-            ref={eventStreamRef}
-            title="Events"
-            titleColor="yellowBright"
-            lines={streamSections.events}
+            ref={streamRef}
+            title="Timeline"
+            titleColor="whiteBright"
+            lines={streamLines}
             onViewportHeightChange={setStreamViewportHeight}
-          />
-          <StreamSection
-            ref={outputStreamRef}
-            title="Assistant Output"
-            titleColor="greenBright"
-            lines={streamSections.output}
-          />
-          <StreamSection
-            ref={reasoningStreamRef}
-            title="Reasoning"
-            titleColor="magentaBright"
-            lines={streamSections.reasoning}
           />
         </Box>
       </Panel>
@@ -219,7 +254,13 @@ function ScanApp(props: {
   );
 }
 
-function Panel(props: {title: string; children: React.ReactNode; width: number; height: number}) {
+function Panel(props: {
+  title: string;
+  titleColor?: string;
+  children: React.ReactNode;
+  width: number;
+  height: number;
+}) {
   return (
     <Box
       borderStyle="round"
@@ -231,7 +272,7 @@ function Panel(props: {title: string; children: React.ReactNode; width: number; 
       height={props.height}
       flexShrink={0}
     >
-      <Text color="cyanBright">{props.title}</Text>
+      <Text color={props.titleColor ?? 'cyanBright'}>{props.title}</Text>
       <Box flexGrow={1} overflow="hidden">
         {props.children}
       </Box>
@@ -271,7 +312,12 @@ const StreamSection = React.forwardRef(function StreamSection(
           }}
         >
           {props.lines.map((line, index) => (
-            <Text key={`${props.title}-${index}-${line.kind}`} {...(line.color ? {color: line.color} : {})}>
+            <Text
+              key={`${props.title}-${index}-${line.kind}`}
+              {...(line.color ? {color: line.color} : {})}
+              {...(line.bold ? {bold: line.bold} : {})}
+              {...(line.dimColor ? {dimColor: line.dimColor} : {})}
+            >
               {line.text}
             </Text>
           ))}
@@ -302,9 +348,19 @@ function renderProgress(state: ProgressViewState) {
 function renderStatus(state: ProgressViewState) {
   const lines = [
     `Scope: ${state.scopeLabel} (${formatScopeFileInfo(state)})`,
-    `PASS: ${state.passedCount}    FAIL: ${state.failedCount}    UNKNOWN: ${state.unknownCount}`,
-    'Toggle details: d / Ctrl+T / Ctrl+O'
+    `PASS: ${state.passedCount}    FAIL: ${state.failedCount}    UNKNOWN: ${state.unknownCount}`
   ];
+
+  const selectedCheckId = getSelectedCheckId(state);
+  if (selectedCheckId) {
+    lines.push(`Viewing: ${formatCheckDescriptor(state, selectedCheckId)}`);
+  }
+
+  if (state.activeCheckId && state.activeCheckId !== selectedCheckId) {
+    lines.push(`Running: ${formatCheckDescriptor(state, state.activeCheckId)}`);
+  }
+
+  lines.push('Check nav: left/right    Details: d / Ctrl+T / Ctrl+O');
 
   if (state.showDetails) {
     lines.push(`Failed checks: ${joinChecks(state.failedChecks)}`);
@@ -317,9 +373,7 @@ function renderStatus(state: ProgressViewState) {
       {lines.map((line, index) => (
         <Text key={index}>{line}</Text>
       ))}
-      <Text color="cyan">
-        Stream scroll: up/down, page up/down, home/end (all panes)
-      </Text>
+      <Text color="cyan">Stream scroll: up/down, page up/down, home/end</Text>
     </Box>
   );
 }
@@ -338,7 +392,12 @@ function createProgressViewState(): ProgressViewState {
     showDetails: false,
     passedChecks: [],
     failedChecks: [],
-    unknownChecks: []
+    unknownChecks: [],
+    checkOrder: [],
+    checkStatuses: {},
+    activeCheckId: null,
+    selectedCheckIndex: 0,
+    followActiveCheck: true
   };
 }
 
@@ -348,6 +407,8 @@ function applyProgressEvent(
 ): ProgressViewState {
   const next: ProgressViewState = {
     ...previous,
+    checkOrder: [...previous.checkOrder],
+    checkStatuses: {...previous.checkStatuses},
     scopeLabel: event.scopeLabel,
     scopeFileCount: event.scopeFileCount,
     scopeIsFullRepository: event.isFullRepository,
@@ -358,6 +419,10 @@ function applyProgressEvent(
     unknownCount: event.unknownCount
   };
 
+  if (event.checkId) {
+    ensureTrackedCheck(next, event.checkId);
+  }
+
   if (event.type === 'scope-resolved') {
     next.statusLabel = 'Scope resolved';
     return next;
@@ -365,16 +430,28 @@ function applyProgressEvent(
 
   if (event.type === 'no-changes-in-scope') {
     next.statusLabel = 'No files matched selected scope';
+    next.activeCheckId = null;
     return next;
   }
 
   if (event.type === 'check-started') {
     next.statusLabel = `Running ${event.checkId}`;
+    if (event.checkId) {
+      next.activeCheckId = event.checkId;
+      next.checkStatuses[event.checkId] = 'running';
+      if (next.followActiveCheck) {
+        next.selectedCheckIndex = next.checkOrder.indexOf(event.checkId);
+      }
+    }
     return next;
   }
 
   next.statusLabel = `Completed ${event.checkId}=${event.checkStatus}`;
+  next.activeCheckId = null;
   if (event.checkId) {
+    if (event.checkStatus) {
+      next.checkStatuses[event.checkId] = event.checkStatus;
+    }
     next.passedChecks = next.passedChecks.filter(value => value !== event.checkId);
     next.failedChecks = next.failedChecks.filter(value => value !== event.checkId);
     next.unknownChecks = next.unknownChecks.filter(value => value !== event.checkId);
@@ -395,29 +472,119 @@ function joinChecks(checks: string[]): string {
   return checks.length === 0 ? 'none' : checks.join(', ');
 }
 
+function navigateChecks(state: ProgressViewState, delta: -1 | 1): ProgressViewState {
+  if (state.checkOrder.length === 0) {
+    return state;
+  }
+
+  const nextIndex = Math.max(0, Math.min(state.checkOrder.length - 1, state.selectedCheckIndex + delta));
+  return {
+    ...state,
+    selectedCheckIndex: nextIndex,
+    followActiveCheck: state.checkOrder[nextIndex] === state.activeCheckId
+  };
+}
+
+function ensureTrackedCheck(state: ProgressViewState, checkId: string): void {
+  if (!state.checkOrder.includes(checkId)) {
+    state.checkOrder.push(checkId);
+  }
+}
+
+function getSelectedCheckId(state: ProgressViewState): string | null {
+  return state.checkOrder[state.selectedCheckIndex] ?? null;
+}
+
+function buildStreamPanelTitle(state: ProgressViewState): string {
+  const selectedCheckId = getSelectedCheckId(state);
+  if (!selectedCheckId) {
+    return 'Waiting for check';
+  }
+
+  return formatCheckDescriptor(state, selectedCheckId);
+}
+
+function formatCheckDescriptor(state: ProgressViewState, checkId: string): string {
+  const position = state.checkOrder.indexOf(checkId) + 1;
+  const total = Math.max(state.totalChecks, state.checkOrder.length);
+  const status = formatCheckStatus(state.checkStatuses[checkId] ?? null);
+  return `${position}/${total} ${checkId} [${status}]`;
+}
+
+function formatCheckStatus(status: CheckDisplayStatus | null): string {
+  if (status === null) {
+    return 'WAITING';
+  }
+
+  return status.toUpperCase();
+}
+
+function getCheckStatusColor(status: CheckDisplayStatus | null): string {
+  switch (status) {
+    case 'pass':
+      return 'greenBright';
+    case 'fail':
+      return 'redBright';
+    case 'unknown':
+      return 'blueBright';
+    case 'running':
+      return 'yellowBright';
+    default:
+      return 'cyanBright';
+  }
+}
+
 function formatScopeFileInfo(state: ProgressViewState): string {
   return state.scopeIsFullRepository ? 'all files' : `${state.scopeFileCount} files`;
 }
 
-export function buildStreamSections(state: RuntimeStreamState): {
-  events: StreamLine[];
-  output: StreamLine[];
-  reasoning: StreamLine[];
+export function buildCombinedStreamLines(items: RuntimeStreamItem[]): StreamLine[] {
+  if (items.length === 0) {
+    return [
+      {
+        text: '[evt] Waiting for runtime activity...',
+        kind: 'event',
+        color: 'gray',
+        dimColor: true
+      }
+    ];
+  }
+
+  return items.flatMap(item => {
+    const style = getStreamLineStyle(item.kind);
+    return splitMultilineText(item.text).map(line => ({
+      text: `${style.label} ${line}`,
+      kind: item.kind,
+      color: style.color,
+      ...(style.bold ? {bold: style.bold} : {}),
+      ...(style.dimColor ? {dimColor: style.dimColor} : {})
+    }));
+  });
+}
+
+function getStreamLineStyle(kind: RuntimeStreamItem['kind']): {
+  label: string;
+  color: string;
+  bold?: boolean;
+  dimColor?: boolean;
 } {
-  return {
-    events: (state.entries.length === 0 ? ['Waiting for OpenCode events...'] : state.entries).map(line => ({
-      text: line,
-      kind: 'event'
-    })),
-    output: splitMultilineText(state.output || '(no assistant text yet)').map(line => ({
-      text: line,
-      kind: 'output'
-    })),
-    reasoning: splitMultilineText(state.reasoning || '(no reasoning stream yet)').map(line => ({
-      text: line,
-      kind: 'reasoning'
-    }))
-  };
+  switch (kind) {
+    case 'assistant':
+      return {label: '[ai ]', color: 'greenBright'};
+    case 'reasoning':
+      return {label: '[why]', color: 'magentaBright', dimColor: true};
+    case 'tool':
+      return {label: '[tool]', color: 'cyanBright', bold: true};
+    case 'tool-output':
+      return {label: '[out]', color: 'blueBright', dimColor: true};
+    case 'pty':
+      return {label: '[cmd]', color: 'yellowBright'};
+    case 'error':
+      return {label: '[err]', color: 'redBright', bold: true};
+    case 'event':
+    default:
+      return {label: '[evt]', color: 'gray', dimColor: true};
+  }
 }
 
 function splitMultilineText(value: string): string[] {
@@ -430,21 +597,4 @@ function isPinnedToBottom(ref: ScrollViewRef | null): boolean {
   }
 
   return ref.getScrollOffset() >= ref.getBottomOffset();
-}
-
-function areAllStreamsPinnedToBottom(refs: Array<ScrollViewRef | null>): boolean {
-  return refs.every(isPinnedToBottom);
-}
-
-function scrollAllStreams(
-  deltas: [number, number, number],
-  refs: readonly [
-    React.RefObject<ScrollViewRef | null>,
-    React.RefObject<ScrollViewRef | null>,
-    React.RefObject<ScrollViewRef | null>
-  ]
-): void {
-  refs[0].current?.scrollBy(deltas[0]);
-  refs[1].current?.scrollBy(deltas[1]);
-  refs[2].current?.scrollBy(deltas[2]);
 }
