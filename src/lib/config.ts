@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {Config} from '@opencode-ai/sdk';
+import {z} from 'zod';
 import {
-  AZURE_API_VERSION_ENV,
   AZURE_BASE_URL_ENV,
   AZURE_API_KEY_ENV,
   CONFIG_DIRECTORY_NAME,
@@ -14,6 +14,37 @@ import {
 import {findToolRoot} from './project-root.js';
 
 const ENV_PATTERN = /\$\{([A-Z0-9_]+)\}/g;
+const runtimeConfigSchema = z
+  .object({
+    $schema: z.string().optional(),
+    model: z.string().optional(),
+    provider: z
+      .record(
+        z.string(),
+        z
+          .object({
+            env: z.array(z.string()).optional(),
+            options: z.record(z.string(), z.unknown()).optional(),
+            models: z.record(z.string(), z.object({name: z.string().optional()}).passthrough()).optional()
+          })
+          .passthrough()
+      )
+      .optional(),
+    permission: z.record(z.string(), z.string()).optional(),
+    agent: z
+      .record(
+        z.string(),
+        z
+          .object({
+            description: z.string().optional(),
+            model: z.string().optional(),
+            permission: z.record(z.string(), z.string()).optional()
+          })
+          .passthrough()
+      )
+      .optional()
+  })
+  .passthrough();
 
 export interface LoadedRuntimeConfig {
   configPath: string;
@@ -35,16 +66,16 @@ export async function loadRuntimeConfig(
 ): Promise<LoadedRuntimeConfig> {
   const absolutePath = path.resolve(configPath);
   const raw = await fs.readFile(absolutePath, 'utf8');
-  const parsed = JSON.parse(raw) as Config;
+  const parsed = runtimeConfigSchema.parse(JSON.parse(raw)) as Config;
 
   const placeholderVars = collectEnvPlaceholders(parsed);
   const declaredVars = collectDeclaredEnvVars(parsed);
-  const requiredEnvVars = [...new Set([...placeholderVars, ...declaredVars])].sort();
+  const requiredEnvVars = [...new Set(stripOptionalAzureEnvVars(parsed, [...placeholderVars, ...declaredVars]))].sort();
 
   const missingEnvVars = requiredEnvVars.filter(name => !process.env[name]);
   const resolved = resolveEnvPlaceholders(parsed);
 
-  const runtimeConfig = ensureShrikeAgent(resolved, options);
+  const runtimeConfig = ensureShrikeAgent(normalizeRuntimeConfig(resolved as Config), options);
   return {
     configPath: absolutePath,
     config: runtimeConfig,
@@ -59,13 +90,11 @@ export function buildDefaultOpencodeConfig(): Config {
     model: DEFAULT_MODEL,
     provider: {
       [DEFAULT_PROVIDER]: {
-        env: [AZURE_API_KEY_ENV, AZURE_BASE_URL_ENV, AZURE_API_VERSION_ENV],
+        env: [AZURE_API_KEY_ENV, AZURE_BASE_URL_ENV],
         options: {
           apiKey: `\${${AZURE_API_KEY_ENV}}`,
           baseURL: `\${${AZURE_BASE_URL_ENV}}`,
-          queryParams: {
-            'api-version': `\${${AZURE_API_VERSION_ENV}}`
-          }
+          timeout: 120_000
         },
         models: {
           'gpt-5.4-mini': {
@@ -179,6 +208,103 @@ function collectDeclaredEnvVars(config: Config): string[] {
   }
 
   return [...result];
+}
+
+function stripOptionalAzureEnvVars(config: Config, envVars: string[]): string[] {
+  const azureOptions = config.provider?.azure?.options;
+  if (
+    !azureOptions ||
+    typeof azureOptions !== 'object' ||
+    typeof (azureOptions as Record<string, unknown>).baseURL !== 'string'
+  ) {
+    return envVars;
+  }
+
+  return envVars.filter(value => value !== 'OPENSHRIKE_AZURE_OPENAI_API_VERSION');
+}
+
+function normalizeRuntimeConfig(config: Config): Config {
+  if (!config.provider?.azure) {
+    return config;
+  }
+
+  const azureProvider = config.provider.azure;
+  const options =
+    azureProvider.options && typeof azureProvider.options === 'object'
+      ? {...(azureProvider.options as Record<string, unknown>)}
+      : null;
+
+  if (!options) {
+    return config;
+  }
+
+  if (typeof options.baseURL === 'string') {
+    const resourceName = extractAzureResourceName(options.baseURL);
+    if (resourceName) {
+      options.resourceName = resourceName;
+      delete options.baseURL;
+    } else {
+      options.baseURL = normalizeAzureBaseUrl(options.baseURL);
+    }
+  }
+
+  if ('resourceName' in options) {
+    delete options.apiVersion;
+  }
+
+  if (options.queryParams && typeof options.queryParams === 'object') {
+    const queryParams = {...(options.queryParams as Record<string, unknown>)};
+    delete queryParams['api-version'];
+    if (Object.keys(queryParams).length === 0) {
+      delete options.queryParams;
+    } else {
+      options.queryParams = queryParams;
+    }
+  }
+
+  return {
+    ...config,
+    provider: {
+      ...config.provider,
+      azure: {
+        ...azureProvider,
+        options
+      }
+    }
+  };
+}
+
+function normalizeAzureBaseUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  const withoutTrailingSlash = trimmed.replace(/\/+$/, '');
+  if (/\/openai\/v1$/i.test(withoutTrailingSlash)) {
+    return `${withoutTrailingSlash}/`;
+  }
+
+  if (/\/openai(?:\/.*)?$/i.test(withoutTrailingSlash)) {
+    return `${withoutTrailingSlash.replace(/\/openai(?:\/.*)?$/i, '/openai/v1')}/`;
+  }
+
+  return `${withoutTrailingSlash}/openai/v1/`;
+}
+
+function extractAzureResourceName(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    const match = /^([^.]+)\.openai\.azure\.com$/i.exec(url.hostname);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function resolveEnvPlaceholders<T>(value: T): T {

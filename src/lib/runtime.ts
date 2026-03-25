@@ -1,11 +1,28 @@
-import {createOpencode, type Config, type Event, type OpencodeClient} from '@opencode-ai/sdk';
+import crypto from 'node:crypto';
+import net from 'node:net';
+import {
+  createOpencode,
+  type AssistantMessage,
+  type Config,
+  type Event,
+  type Message,
+  type OpencodeClient,
+  type Part
+} from '@opencode-ai/sdk';
 import {ensureLocalNodeBinsOnPath} from './config.js';
+import {
+  OPENCODE_DELETE_TIMEOUT_MS,
+  OPENCODE_POLL_TIMEOUT_MS,
+  OPENCODE_REQUEST_TIMEOUT_MS
+} from './constants.js';
 import {extractAssistantTextFromParts} from './runtime-events.js';
+import type {ScanLogger} from './scan-log.js';
 
 export interface OpenCodeRuntimeOptions {
   repoPath: string;
   config: Config;
   onEvent?: ((event: Event) => void) | undefined;
+  logger?: ScanLogger | null;
 }
 
 export interface PromptResult {
@@ -20,41 +37,65 @@ export class OpenCodeRuntime {
     private readonly closeServer: () => void,
     private readonly streamAbortController: AbortController,
     private readonly streamTask: Promise<void>,
-    private readonly onEvent: ((event: Event) => void) | undefined
+    private readonly onEvent: ((event: Event) => void) | undefined,
+    private readonly logger: ScanLogger | null,
+    private readonly sessionErrors: Map<string, string>
   ) {}
 
   static async create(options: OpenCodeRuntimeOptions): Promise<OpenCodeRuntime> {
     ensureLocalNodeBinsOnPath();
+    const port = await findAvailablePort();
 
     const {client, server} = await createOpencode({
-      config: options.config
+      config: options.config,
+      port
+    });
+    options.logger?.write('runtime.created', {
+      repoPath: options.repoPath,
+      port
     });
 
     const streamAbortController = new AbortController();
+    const sessionErrors = new Map<string, string>();
     const stream = await client.event.subscribe({
       query: {
         directory: options.repoPath
       },
       signal: streamAbortController.signal
     });
+    options.logger?.write('runtime.stream.subscribed', {
+      repoPath: options.repoPath
+    });
 
     const streamTask = (async () => {
       try {
         for await (const event of stream.stream) {
+          if (event.type === 'session.error' && event.properties.sessionID) {
+            sessionErrors.set(
+              event.properties.sessionID,
+              getErrorMessage(event.properties.error, 'Unknown OpenCode session error.')
+            );
+          }
           options.onEvent?.(event);
           if (event.type === 'permission.updated') {
-            await client.postSessionIdPermissionsPermissionId({
-              path: {
-                id: event.properties.sessionID,
-                permissionID: event.properties.id
-              },
-              query: {
-                directory: options.repoPath
-              },
-              body: {
-                response: 'reject'
-              }
-            });
+            await withTimeoutSignal(
+              OPENCODE_DELETE_TIMEOUT_MS,
+              'reply to OpenCode permission request',
+              signal =>
+                client.postSessionIdPermissionsPermissionId({
+                  path: {
+                    id: event.properties.sessionID,
+                    permissionID: event.properties.id
+                  },
+                  query: {
+                    directory: options.repoPath
+                  },
+                  body: {
+                    response: 'reject'
+                  },
+                  signal
+                })
+            );
           }
         }
       } catch (error) {
@@ -80,7 +121,9 @@ export class OpenCodeRuntime {
       server.close,
       streamAbortController,
       streamTask,
-      options.onEvent
+      options.onEvent,
+      options.logger ?? null,
+      sessionErrors
     );
   }
 
@@ -90,65 +133,106 @@ export class OpenCodeRuntime {
     model: string;
     title: string;
   }): Promise<PromptResult> {
-    const sessionResult = await this.client.session.create({
-      query: {
-        directory: this.repoPath
-      },
-      body: {
-        title: options.title
-      }
-    });
+    const sessionResult = await withTimeoutSignal(
+      OPENCODE_REQUEST_TIMEOUT_MS,
+      'create OpenCode session',
+      signal =>
+        this.client.session.create({
+          query: {
+            directory: this.repoPath
+          },
+          body: {
+            title: options.title
+          },
+          signal
+        })
+    );
     const session = unwrapSdkResult<NonNullable<typeof sessionResult.data>>(
       sessionResult,
       'Failed to create OpenCode session.'
     );
+    this.logger?.write('prompt.session.created', {
+      sessionId: session.id,
+      title: options.title
+    });
 
     try {
       const [providerID, modelID] = parseProviderModel(options.model);
-      const responseResult = await this.client.session.prompt({
-        path: {
-          id: session.id
-        },
-        query: {
-          directory: this.repoPath
-        },
-        body: {
-          agent: options.agent,
-          model: {
-            providerID,
-            modelID
-          },
-          parts: [
-            {
-              type: 'text',
-              text: options.prompt
-            }
-          ]
-        }
+      this.logger?.write('prompt.started', {
+        sessionId: session.id,
+        agent: options.agent,
+        providerID,
+        modelID,
+        title: options.title,
+        promptLength: options.prompt.length,
+        promptSha256: crypto.createHash('sha256').update(options.prompt).digest('hex').slice(0, 16)
       });
+      const responseResult = await withTimeoutSignal(
+        OPENCODE_REQUEST_TIMEOUT_MS,
+        'send OpenCode prompt',
+        signal =>
+          this.client.session.prompt({
+            path: {
+              id: session.id
+            },
+            query: {
+              directory: this.repoPath
+            },
+            body: {
+              agent: options.agent,
+              model: {
+                providerID,
+                modelID
+              },
+              parts: [
+                {
+                  type: 'text',
+                  text: options.prompt
+                }
+              ]
+            },
+            signal
+          })
+      );
       const response = unwrapSdkResult<NonNullable<typeof responseResult.data>>(
         responseResult,
         'OpenCode prompt failed.'
       );
 
-      const text = extractAssistantTextFromParts(response.parts);
-      if (!text) {
-        throw new Error('opencode returned no text response.');
-      }
+      let text = extractAssistantTextFromParts(response.parts);
+      this.logger?.write('prompt.response', {
+        sessionId: session.id,
+        messageId: response.info.id,
+        partCount: response.parts.length,
+        partTypes: response.parts.map(part => part.type),
+        inlineAssistantTextLength: text.length
+      });
+
+      text = await this.waitForPromptCompletion(session.id, text);
 
       return {
         sessionId: session.id,
         text
       };
     } finally {
+      this.sessionErrors.delete(session.id);
       try {
-        await this.client.session.delete({
-          path: {
-            id: session.id
-          },
-          query: {
-            directory: this.repoPath
-          }
+        await withTimeoutSignal(
+          OPENCODE_DELETE_TIMEOUT_MS,
+          'delete OpenCode session',
+          signal =>
+            this.client.session.delete({
+              path: {
+                id: session.id
+              },
+              query: {
+                directory: this.repoPath
+              },
+              signal
+            })
+        );
+        this.logger?.write('prompt.session.deleted', {
+          sessionId: session.id
         });
       } catch (error) {
         this.onEvent?.({
@@ -163,6 +247,10 @@ export class OpenCodeRuntime {
             }
           }
         });
+        this.logger?.write('prompt.session.delete_failed', {
+          sessionId: session.id,
+          message: error instanceof Error ? error.message : String(error)
+        });
       }
     }
   }
@@ -171,6 +259,88 @@ export class OpenCodeRuntime {
     this.streamAbortController.abort();
     this.closeServer();
     await this.streamTask.catch(() => undefined);
+    this.logger?.write('runtime.closed');
+  }
+
+  private async waitForPromptCompletion(sessionId: string, initialText: string): Promise<string> {
+    const timeoutMs = OPENCODE_POLL_TIMEOUT_MS;
+    const startedAt = Date.now();
+    let attempt = 0;
+    let latestText = initialText;
+
+    while (Date.now() - startedAt < timeoutMs) {
+      attempt += 1;
+      const remainingMs = Math.max(
+        1_000,
+        Math.min(OPENCODE_REQUEST_TIMEOUT_MS, timeoutMs - (Date.now() - startedAt))
+      );
+      const messagesResult = await withTimeoutSignal(
+        remainingMs,
+        'read OpenCode session messages',
+        signal =>
+          this.client.session.messages({
+            path: {
+              id: sessionId
+            },
+            query: {
+              directory: this.repoPath
+            },
+            signal
+          })
+      );
+      const messages = unwrapSdkResult<NonNullable<typeof messagesResult.data>>(
+        messagesResult,
+        'Failed to read OpenCode session messages.'
+      );
+
+      const latestAssistantMessage = getLatestAssistantMessage(messages);
+      const text = latestAssistantMessage ? extractAssistantTextFromParts(latestAssistantMessage.parts) : '';
+      const completed = Boolean(latestAssistantMessage?.info.time.completed);
+      const messageError = latestAssistantMessage
+        ? getErrorMessage(latestAssistantMessage.info.error, '')
+        : '';
+
+      if (text) {
+        latestText = text;
+      }
+
+      this.logger?.write('prompt.wait.iteration', {
+        sessionId,
+        attempt,
+        messageCount: messages.length,
+        assistantMessageCount: messages.filter(message => message.info.role === 'assistant').length,
+        latestAssistantPartTypes: latestAssistantMessage?.parts.map(part => part.type) ?? [],
+        latestAssistantTextLength: text.length,
+        latestAssistantCompleted: completed,
+        latestAssistantError: messageError ?? null,
+        sessionError: this.sessionErrors.get(sessionId) ?? null
+      });
+
+      if (messageError) {
+        throw new Error(messageError);
+      }
+
+      const sessionError = this.sessionErrors.get(sessionId);
+      if (sessionError) {
+        throw new Error(sessionError);
+      }
+
+      if (completed) {
+        if (latestText) {
+          return latestText;
+        }
+
+        throw new Error('OpenCode completed the prompt without any assistant text output.');
+      }
+
+      await delay(500);
+    }
+
+    if (latestText) {
+      return latestText;
+    }
+
+    throw new Error(`Timed out waiting for OpenCode assistant response for session '${sessionId}'.`);
   }
 }
 
@@ -203,4 +373,87 @@ function unwrapSdkResult<T>(
       : fallbackMessage;
 
   throw new Error(errorMessage);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function withTimeoutSignal<T>(
+  timeoutMs: number,
+  operation: string,
+  callback: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new Error(`${operation} timed out after ${timeoutMs}ms.`));
+  }, timeoutMs);
+
+  try {
+    return await callback(controller.signal);
+  } catch (error) {
+    if (controller.signal.aborted && controller.signal.reason instanceof Error) {
+      throw controller.signal.reason;
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function findAvailablePort(): Promise<number> {
+  return await new Promise<number>((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('Failed to allocate an OpenCode server port.')));
+        return;
+      }
+
+      const {port} = address;
+      server.close(error => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve(port);
+      });
+    });
+  });
+}
+
+function getLatestAssistantMessage(
+  messages: Array<{
+    info: Message;
+    parts: Part[];
+  }>
+): {info: AssistantMessage; parts: Part[]} | undefined {
+  for (const message of [...messages].reverse()) {
+    if (message.info.role === 'assistant') {
+      return {
+        info: message.info,
+        parts: message.parts
+      };
+    }
+  }
+
+  return undefined;
+}
+
+function getErrorMessage(error: unknown, fallbackMessage: string): string {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'data' in error &&
+    typeof (error as {data?: {message?: unknown}}).data?.message === 'string'
+  ) {
+    return (error as {data: {message: string}}).data.message;
+  }
+
+  return fallbackMessage;
 }

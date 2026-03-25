@@ -16,6 +16,10 @@ export const OUTPUT_VALUES = ['json', 'markdown'] as const;
 
 export const STREAM_EVENT_LIMIT = 120;
 export const STREAM_TEXT_LIMIT = 2400;
+export const MAX_POLICY_CHECKS = 50;
+export const OPENCODE_REQUEST_TIMEOUT_MS = 120_000;
+export const OPENCODE_DELETE_TIMEOUT_MS = 5_000;
+export const OPENCODE_POLL_TIMEOUT_MS = 90_000;
 
 export const AZURE_API_KEY_ENV = 'AZURE_OPENAI_API_KEY';
 export const AZURE_BASE_URL_ENV = 'OPENSHRIKE_AZURE_OPENAI_BASE_URL';

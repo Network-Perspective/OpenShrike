@@ -84,6 +84,7 @@ export interface ScanCommandOptions {
   scanTarget?: string | undefined;
   mockOpencode: boolean;
   configPath?: string | undefined;
+  logPath?: string | undefined;
   ui: boolean;
 }
 

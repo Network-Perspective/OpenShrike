@@ -2,7 +2,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   AZURE_API_KEY_ENV,
-  AZURE_API_VERSION_ENV,
   AZURE_BASE_URL_ENV,
   CONFIG_DIRECTORY_NAME,
   CONFIG_FILE_NAME,
@@ -45,7 +44,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
   const config = options.force ? buildDefaultOpencodeConfig() : loaded?.config ?? buildDefaultOpencodeConfig();
   const requiredEnvVars = loaded?.requiredEnvVars.length
     ? loaded.requiredEnvVars
-    : [AZURE_API_KEY_ENV, AZURE_BASE_URL_ENV, AZURE_API_VERSION_ENV];
+    : [AZURE_API_KEY_ENV, AZURE_BASE_URL_ENV];
 
   if (!configAlreadyExists || options.force) {
     await fs.writeFile(configPath, `${serializeConfig(config)}\n`, 'utf8');

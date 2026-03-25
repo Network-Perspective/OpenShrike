@@ -20,6 +20,7 @@ const scanOptionsSchema = z
     scanTarget: z.string().trim().min(1).optional(),
     mockOpencode: z.boolean().default(false),
     configPath: z.string().trim().min(1).optional(),
+    logPath: z.string().trim().min(1).optional(),
     ui: z.boolean().default(true)
   })
   .superRefine((value, ctx) => {

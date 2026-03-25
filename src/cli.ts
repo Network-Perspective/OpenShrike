@@ -3,6 +3,7 @@
 import {Command} from 'commander';
 import {executeInitCommand} from './commands/init.js';
 import {executeScanCommand} from './commands/scan.js';
+import {normalizeCliError, renderCliErrorJson} from './lib/cli-error.js';
 import {DEFAULT_OUTPUT, DEFAULT_SCAN_SCOPE} from './lib/constants.js';
 
 const program = new Command();
@@ -27,6 +28,7 @@ program
   .option('--scan-target <TARGET>', 'Scope target: commit/range for commit, base branch for branch, diff spec for pr')
   .option('--mock-opencode', 'Emulate OpenCode calls locally (2-5s/check, ~90% pass)', false)
   .option('--config <PATH>', 'Path to the OpenCode runtime config', undefined)
+  .option('--log <PATH>', 'Write OpenCode/runtime debug logs as JSONL', undefined)
   .option('--no-ui', 'Disable the Ink live dashboard on stderr')
   .action(async (commandOptions: Record<string, unknown>) => {
     const exitCode = await executeScanCommand({
@@ -46,6 +48,7 @@ program
       scanTarget: asOptionalString(commandOptions.scanTarget),
       mockOpencode: Boolean(commandOptions.mockOpencode),
       configPath: asOptionalString(commandOptions.config),
+      logPath: asOptionalString(commandOptions.log),
       ui: commandOptions.ui !== false
     });
 
@@ -65,8 +68,8 @@ program
 try {
   await program.parseAsync(process.argv);
 } catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`Scan failed: ${message}`);
+  const cliError = normalizeCliError(error);
+  process.stdout.write(`${renderCliErrorJson(cliError)}\n`);
   process.exitCode = 1;
 }
 

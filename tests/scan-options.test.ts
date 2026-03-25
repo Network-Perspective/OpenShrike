@@ -46,10 +46,12 @@ describe('validateScanOptions', () => {
       outputFormat: 'markdown',
       scanScope: 'full',
       mockOpencode: true,
+      logPath: 'logs/opencode.jsonl',
       ui: false
     });
 
     expect(result.policyId).toBe('csharp-baseline');
     expect(result.outputFormat).toBe('markdown');
+    expect(result.logPath).toBe('logs/opencode.jsonl');
   });
 });

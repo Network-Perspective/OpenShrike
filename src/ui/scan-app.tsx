@@ -34,7 +34,9 @@ export function runScanWithInk(options: ScanCommandOptions): Promise<ScanReport>
       exitOnCtrlC: true
     });
 
-    void instance.waitUntilExit();
+    instance.waitUntilExit().catch(error => {
+      reject(error instanceof Error ? error : new Error(String(error)));
+    });
   });
 }
 
@@ -49,6 +51,7 @@ function ScanApp(props: {
   const [progress, setProgress] = useState<ProgressViewState>(createProgressViewState());
   const [streamState, setStreamState] = useState<RuntimeStreamState>(createRuntimeStreamState());
   const [streamViewportHeight, setStreamViewportHeight] = useState(0);
+  const [followStream, setFollowStream] = useState(true);
 
   const terminalWidth = Math.max(80, stdout.columns || 80);
   const terminalHeight = Math.max(16, (stdout.rows || 24) - 1);
@@ -67,46 +70,54 @@ function ScanApp(props: {
     }
 
     if (key.upArrow) {
+      setFollowStream(false);
       streamRef.current?.scrollBy(-1);
       return;
     }
 
     if (key.downArrow) {
       streamRef.current?.scrollBy(1);
+      setFollowStream(isPinnedToBottom(streamRef.current));
       return;
     }
 
     if (key.pageUp) {
+      setFollowStream(false);
       streamRef.current?.scrollBy(-Math.max(3, streamViewportHeight - 2));
       return;
     }
 
     if (key.pageDown) {
       streamRef.current?.scrollBy(Math.max(3, streamViewportHeight - 2));
+      setFollowStream(isPinnedToBottom(streamRef.current));
       return;
     }
 
     if (key.home) {
+      setFollowStream(false);
       streamRef.current?.scrollToTop();
       return;
     }
 
     if (key.end) {
       streamRef.current?.scrollToBottom();
+      setFollowStream(true);
     }
   });
 
   useEffect(() => {
     const handleResize = () => {
       streamRef.current?.remeasure();
-      streamRef.current?.scrollToBottom();
+      if (followStream) {
+        streamRef.current?.scrollToBottom();
+      }
     };
 
     stdout.on('resize', handleResize);
     return () => {
       stdout.off('resize', handleResize);
     };
-  }, [stdout]);
+  }, [followStream, stdout]);
 
   useEffect(() => {
     let active = true;
@@ -148,8 +159,10 @@ function ScanApp(props: {
   }, [exit, props]);
 
   useEffect(() => {
-    streamRef.current?.scrollToBottom();
-  }, [streamLines]);
+    if (followStream) {
+      streamRef.current?.scrollToBottom();
+    }
+  }, [followStream, streamLines]);
 
   return (
     <Box flexDirection="row" gap={1} width={terminalWidth} height={terminalHeight}>
@@ -240,7 +253,9 @@ function renderStatus(state: ProgressViewState) {
       {lines.map((line, index) => (
         <Text key={index}>{line}</Text>
       ))}
-      <Text color="cyan">Stream scroll: up/down, page up/down, home/end</Text>
+      <Text color="cyan">
+        Stream scroll: up/down, page up/down, home/end
+      </Text>
     </Box>
   );
 }
@@ -339,4 +354,12 @@ function buildStreamLines(state: RuntimeStreamState): StreamLine[] {
 
 function splitMultilineText(value: string): string[] {
   return value.split('\n').map(line => line || ' ');
+}
+
+function isPinnedToBottom(ref: ScrollViewRef | null): boolean {
+  if (!ref) {
+    return true;
+  }
+
+  return ref.getScrollOffset() >= ref.getBottomOffset();
 }

@@ -47,7 +47,6 @@ The default config keeps secrets out of source control by using `${ENV_VAR}` pla
 ```text
 AZURE_OPENAI_API_KEY
 OPENSHRIKE_AZURE_OPENAI_BASE_URL
-OPENSHRIKE_AZURE_OPENAI_API_VERSION
 ```
 
 If you run `shrike` inside a container, pass those variables with your normal container mechanism, for example an env-file derived from `.openshrike/runtime.env.example`.
@@ -73,6 +72,7 @@ Options:
 - `--agent <NAME>`
 - `--model <provider/model>`
 - `--config <PATH>`
+- `--log <PATH>`
 - `--mock-opencode`
 - `--no-ui`
 

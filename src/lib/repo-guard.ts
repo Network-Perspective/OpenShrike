@@ -6,18 +6,29 @@ interface RepoFileState {
   lastWriteMs: number;
 }
 
+export interface RepoMutationGuardOptions {
+  ignoredPaths?: string[] | undefined;
+}
+
 export class RepoMutationGuard {
   private constructor(
     private readonly repoPath: string,
-    private readonly before: Map<string, RepoFileState>
+    private readonly before: Map<string, RepoFileState>,
+    private readonly ignoredPaths: Set<string>
   ) {}
 
-  static async capture(repoPath: string): Promise<RepoMutationGuard> {
-    return new RepoMutationGuard(repoPath, await snapshotRepository(repoPath));
+  static async capture(
+    repoPath: string,
+    options: RepoMutationGuardOptions = {}
+  ): Promise<RepoMutationGuard> {
+    const ignoredPaths = new Set(
+      (options.ignoredPaths ?? []).map(value => normalizeRelativePath(value)).filter(Boolean)
+    );
+    return new RepoMutationGuard(repoPath, await snapshotRepository(repoPath, ignoredPaths), ignoredPaths);
   }
 
   async throwIfMutated(): Promise<void> {
-    const after = await snapshotRepository(this.repoPath);
+    const after = await snapshotRepository(this.repoPath, this.ignoredPaths);
     if (after.size !== this.before.size) {
       throw new Error('Read-only guardrail violation: agent execution modified repository files.');
     }
@@ -35,16 +46,20 @@ export class RepoMutationGuard {
   }
 }
 
-async function snapshotRepository(repoPath: string): Promise<Map<string, RepoFileState>> {
+async function snapshotRepository(
+  repoPath: string,
+  ignoredPaths: Set<string>
+): Promise<Map<string, RepoFileState>> {
   const snapshot = new Map<string, RepoFileState>();
-  await walk(repoPath, repoPath, snapshot);
+  await walk(repoPath, repoPath, snapshot, ignoredPaths);
   return snapshot;
 }
 
 async function walk(
   root: string,
   current: string,
-  snapshot: Map<string, RepoFileState>
+  snapshot: Map<string, RepoFileState>,
+  ignoredPaths: Set<string>
 ): Promise<void> {
   const entries = await fs.readdir(current, {withFileTypes: true});
 
@@ -56,8 +71,12 @@ async function walk(
       continue;
     }
 
+    if (isIgnoredPath(relativePath, ignoredPaths)) {
+      continue;
+    }
+
     if (entry.isDirectory()) {
-      await walk(root, fullPath, snapshot);
+      await walk(root, fullPath, snapshot, ignoredPaths);
       continue;
     }
 
@@ -71,4 +90,18 @@ async function walk(
       lastWriteMs: stats.mtimeMs
     });
   }
+}
+
+function isIgnoredPath(relativePath: string, ignoredPaths: Set<string>): boolean {
+  for (const ignoredPath of ignoredPaths) {
+    if (relativePath === ignoredPath || relativePath.startsWith(`${ignoredPath}/`)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function normalizeRelativePath(value: string): string {
+  return value.trim().replaceAll(path.sep, '/').replace(/^\.\/+/, '').replace(/\/+$/, '');
 }

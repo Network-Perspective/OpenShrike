@@ -1,14 +1,24 @@
 import type {Event} from '@opencode-ai/sdk';
+import {z} from 'zod';
 import {readCheckDefinition} from './checks.js';
 import {OpenCodeRuntime} from './runtime.js';
 import type {
-  AgentCheckPayload,
   CheckResult,
   Confidence,
   ScanScopeContext
 } from './types.js';
 
 const DEFAULT_VERSION = '0.1.0';
+const agentCheckPayloadSchema = z.object({
+  id: z.string().optional(),
+  version: z.string().optional(),
+  status: z.enum(['pass', 'fail', 'unknown']).optional(),
+  confidence: z.enum(['HIGH', 'MEDIUM', 'LOW']).optional(),
+  evidence: z.array(z.string()).optional(),
+  rationale: z.string().optional(),
+  remediation: z.array(z.string()).optional()
+});
+type ValidatedAgentCheckPayload = z.infer<typeof agentCheckPayloadSchema>;
 
 export interface EvaluateCheckOptions {
   checkId: string;
@@ -39,7 +49,7 @@ export async function evaluateCheck(options: EvaluateCheckOptions): Promise<Chec
   });
 
   const payloadJson = extractJsonObject(responseText.text);
-  const payload = JSON.parse(payloadJson) as AgentCheckPayload;
+  const payload = agentCheckPayloadSchema.parse(JSON.parse(payloadJson));
   validatePayload(payload, options.checkId);
   validateEvidenceScope(payload, options.scopeContext);
 
@@ -196,7 +206,7 @@ function extractByBraces(text: string): string {
   throw new Error('Could not find complete JSON object in agent response.');
 }
 
-function validatePayload(payload: AgentCheckPayload, expectedCheckId: string): void {
+function validatePayload(payload: ValidatedAgentCheckPayload, expectedCheckId: string): void {
   if ((payload.id ?? '').toLowerCase() !== expectedCheckId.toLowerCase()) {
     throw new Error(`Agent returned unexpected id '${payload.id}', expected '${expectedCheckId}'.`);
   }
@@ -210,7 +220,7 @@ function validatePayload(payload: AgentCheckPayload, expectedCheckId: string): v
   }
 }
 
-function validateEvidenceScope(payload: AgentCheckPayload, scopeContext: ScanScopeContext): void {
+function validateEvidenceScope(payload: ValidatedAgentCheckPayload, scopeContext: ScanScopeContext): void {
   if (scopeContext.isFullRepository || !payload.evidence?.length) {
     return;
   }

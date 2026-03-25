@@ -50,6 +50,41 @@ describe('runtime config', () => {
     expect(loaded.config.provider?.azure?.options?.apiKey).toBe('secret');
   });
 
+  it('normalizes Azure v1 baseURL and apiVersion options', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-config-'));
+    tempDirectories.push(tempRoot);
+
+    const configPath = path.join(tempRoot, 'opencode.json');
+    await fs.writeFile(
+      configPath,
+      `${serializeConfig({
+        model: 'azure/gpt-5.4-mini',
+        provider: {
+          azure: {
+            options: {
+              baseURL: 'https://example-resource.openai.azure.com/',
+              queryParams: {
+                'api-version': '2025-04-01-preview'
+              }
+            }
+          }
+        }
+      })}\n`,
+      'utf8'
+    );
+
+    const loaded = await loadRuntimeConfig(configPath, {
+      agent: 'shrike-checker',
+      model: 'azure/gpt-5.4-mini'
+    });
+
+    expect(loaded.config.provider?.azure?.options?.resourceName).toBe('example-resource');
+    expect(loaded.config.provider?.azure?.options?.baseURL).toBeUndefined();
+    expect(loaded.config.provider?.azure?.options?.apiVersion).toBeUndefined();
+    expect(loaded.config.provider?.azure?.options?.queryParams).toBeUndefined();
+    expect(loaded.requiredEnvVars).not.toContain('OPENSHRIKE_AZURE_OPENAI_API_VERSION');
+  });
+
   it('writes init files', async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-init-'));
     tempDirectories.push(tempRoot);
@@ -65,9 +100,8 @@ describe('runtime config', () => {
 
     expect(requiredEnv).toContain('AZURE_OPENAI_API_KEY');
     expect(requiredEnv).toContain('OPENSHRIKE_AZURE_OPENAI_BASE_URL');
-    expect(requiredEnv).toContain('OPENSHRIKE_AZURE_OPENAI_API_VERSION');
     expect(envExample).toContain('AZURE_OPENAI_API_KEY=');
     expect(envExample).toContain('OPENSHRIKE_AZURE_OPENAI_BASE_URL=');
-    expect(envExample).toContain('OPENSHRIKE_AZURE_OPENAI_API_VERSION=');
+    expect(envExample).not.toContain('OPENSHRIKE_AZURE_OPENAI_API_VERSION=');
   });
 });

@@ -20,3 +20,7 @@ coverage/
 # OS files
 .DS_Store
 Thumbs.db
+
+
+isolate.sh
+.openshrike-debug/*
