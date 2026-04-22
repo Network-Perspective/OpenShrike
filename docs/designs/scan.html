@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CODE_REV_OS Layout D</title>
+    <link rel="stylesheet" href="./code-rev-os.css" />
+  </head>
+  <body>
+    <main>
+      <section class="terminal-shell">
+        <div class="shell-inner">
+          <h2 class="section-title">OpenShrike Scan</h2>
+
+          <section class="module frame">
+            <div class="frame-inner">
+              <div class="summary-inline summary-inline-4">
+                <div class="summary-inline-item">
+                  <span class="label">Target</span>
+                  <strong>/src/core/auth</strong>
+                </div>
+                <div class="summary-inline-item">
+                  <span class="label">Duration</span>
+                  <strong>45.2s</strong>
+                </div>
+                <div class="summary-inline-item">
+                  <span class="label">Tokens In / Out</span>
+                  <strong>144K / 1K</strong>
+                </div>
+                <div class="summary-inline-item">
+                  <span class="label">Parallelism</span>
+                  <strong>8</strong>
+                </div>
+              </div>
+
+              <p class="compact-meta"><strong>25 TOTAL CHECKS</strong> <span class="muted-line">scanned</span></p>
+              <div class="progress-bar" aria-label="Result progress bar">
+                <div class="progress-segment failed"></div>
+                <div class="progress-segment inconclusive"></div>
+                <div class="progress-segment passed"></div>
+                <div class="progress-segment pending"></div>
+              </div>
+
+              <div class="score-row score-row-4">
+                <div class="score-cell failed">
+                  <span class="count">2 Failed</span>
+                </div>
+                <div class="score-cell inconclusive">
+                  <span class="count">3 Inconclusive</span>
+                </div>
+                <div class="score-cell passed">
+                  <span class="count">15 Passed</span>
+                </div>
+                <div class="score-cell pending">
+                  <span class="count">5 In progress</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="module">
+            <h2 class="section-title">
+              > <span class="tone-red">Failed Checks (1 of 2)</span>
+              <span class="failed-checks-nav muted-line">⇦ Prev  |  Next ⇒ | [L]ist | [D]etails</span>
+            </h2>
+
+            <article class="check-card">
+              <div class="chip-row">
+                <span class="chip fail"> Fail </span>
+                <span class="chip">Confidence: High</span>
+              </div>
+              <div class="check-body">
+                <section class="detail-block">
+                  <ul class="check-list failed-inline">
+                    <li>
+                      <span class="muted-line">BP-SEC-001:</span> Committed files do not contain secrets
+                    </li>
+                  </ul>
+                </section>
+
+                <section class="detail-block">
+                  <p class="detail-label">What Failed:</p>
+                  <p class="detail-text">
+                    Hardcoded API secret detected in database connection string initialization.
+                  </p>
+                </section>
+
+                <section class="detail-block">
+                  <p class="detail-label">Why:</p>
+                  <p class="detail-text">
+                    Storing secrets in plaintext source code allows unauthorized access if repository is compromised. Violates OWASP Top 10 A07:2021 Identification and Authentication Failures.
+                  </p>
+                </section>
+
+                <section class="detail-block">
+                  <p class="detail-label">Evidence:</p>
+                  <pre class="code-snippet"><code>40 | constructor() {
+41 |   this.host = process.env.DB_HOST;
+42 |   this.apiKey = "sk_live_xxxxxxxxx"; 
+43 |   this.connect();
+44 | }</code></pre>
+                </section>
+
+                <section class="detail-block">
+                  <p class="detail-label">Remediation:</p>
+                  <p class="detail-text remedy">
+                    Extract the secret to an environment variable or secure vault mechanism. Update line 42 to use `process.env.DB_API_KEY`.
+                  </p>
+                </section>
+              </div>
+            </article>
+          </section>
+
+          <section class="module">
+            <h2 class="section-title"><span class="tone-yellow">Inconclusive Checks (3)</span></h2>
+
+            <article class="check-card">
+              <div class="frame-inner">
+                <ul class="check-list inconclusive">
+                  <li><span class="tick">[~]</span><span class="muted-line">BP-SEC-014:</span> Sensitive data redaction in custom logger wrappers</li>
+                  <li><span class="tick">[~]</span><span class="muted-line">BP-ARCH-008:</span> Boundary validation on async event payload contracts</li>
+                  <li><span class="tick">[~]</span><span class="muted-line">BP-OPS-005:</span> Runtime secret rotation enforcement in worker nodes</li>
+                </ul>
+              </div>
+            </article>
+          </section>
+
+          <section class="module">
+            <h2 class="section-title"><span class="tone-green">Passed Checks (15)</span></h2>
+
+            <article class="check-card">
+              <div class="frame-inner">
+                <ul class="check-list">
+                  <li><span class="tick">[✓]</span><span class="muted-line">BP-ARCH-001:</span> Avoid hidden cross-module dependencies</li>
+                  <li><span class="tick">[✓]</span><span class="muted-line">BP-ARCH-002:</span> Dependency direction follows architectural boundaries</li>
+                  <li><span class="tick">[✓]</span><span class="muted-line">BP-SEC-005:</span> JWT signed</li>
+                  <li><span class="tick">[✓]</span><span class="muted-line">BP-SEC-006:</span> SQL injection prevention</li>
+                  <li><span class="tick">[✓]</span><span class="muted-line">BP-SEC-007:</span> XSS sanitization</li>
+                  <li><span class="tick">[✓]</span><span class="muted-line">BP-SEC-008:</span> Rate limit authentication</li>
+                  <li><span class="tick">[✓]</span><span class="muted-line">BP-SEC-009:</span> CSRF tokens</li>
+                  <li><span class="tick">[✓]</span><span class="muted-line">BP-SEC-010:</span> HSTS header</li>
+                  <li><span class="tick">[✓]</span><span class="muted-line">BP-SEC-011:</span> No eval</li>
+                </ul>
+              </div>
+            </article>
+          </section>
+
+          <footer class="controls-bar">[ESC] Exit |  [F1] Help |  [ARROWS]  Navigate | [ENTER] Details or List</footer>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

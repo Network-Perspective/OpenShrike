@@ -1,105 +1,172 @@
 # OpenShrike
 
-Security-first agentic code review CLI backed by OpenCode and a policy library.
-The active implementation is now TypeScript/Node with an Ink terminal UI.
+Security-first, self-hosted agentic code review for engineering best practices.
 
-![logo](docs/openshrike-logo.png)
+![OpenShrike logo](docs/openshrike-logo.png)
 
-## What changed
+OpenShrike evaluates code and development artifacts against a versioned policy
+library, using OpenCode as the execution runtime. It is designed for teams
+using agentic workflows that need review signal beyond traditional linting.
 
-- The TypeScript CLI lives in `src/` and is the active implementation.
-- The previous C# solution was moved to `archive/legacy-csharp/` for reference.
-- `shrike scan` now uses the OpenCode SDK and streams agent/tool activity into a separate live pane while the scan is running.
-- `shrike init` writes runtime config into `.openshrike/` using an OpenCode-compatible config file plus env-file helpers.
+## Project value
+
+- Policy-as-data: checks and policies live as markdown in `best_practices/`,
+  versioned with your codebase.
+- Security-first runtime: read-only review sessions, explicit runtime config,
+  and optional Docker isolation.
+- Agent-ready output: JSON and Markdown findings with evidence, rationale, and
+  remediation.
+- Local and CI parity: same `shrike scan` command surface across fast local and
+  hardened execution paths.
+
+## Typical use cases
+
+- Pre-PR self-review on uncommitted changes.
+- PR/branch scanning in CI with report artifacts.
+- Targeted verification for one high-risk check.
+- Security-conscious review workflows using `--runtime docker`.
+
+## Current implementation status
+
+- Active implementation is TypeScript/Node in `src/`.
+- Legacy C# implementation is archived in `archive/legacy-csharp/`.
+- `scan` supports runtime backends `native` and `docker`.
+- Parallel check workers are available via `--parallelism <N|auto>`.
+- The Ink terminal UI streams worker progress and runtime events (disable with
+  `--no-ui`).
 
 ## Quick start
 
-Install dependencies and build:
+Prerequisite: Node.js 22+.
 
 ```bash
 npm install
 npm run build
-```
-
-Generate runtime config in the current project:
-
-```bash
 ./shrike init --force
-```
-
-Run a policy scan:
-
-```bash
 ./shrike scan --policy csharp-baseline --repo .
 ```
 
-## Runtime config
+## Runtime config (`shrike init`)
 
-`shrike init` writes these files into `.openshrike/`:
+`./shrike init` writes these files to `.openshrike/`:
 
-- `opencode.json`: the runtime config consumed by OpenCode.
-- `required-env.txt`: one environment variable name per line for container/runtime wiring.
-- `runtime.env.example`: starter env-file with blank values.
-- `README.md`: short usage note for the generated files.
+- `opencode.json`: OpenCode runtime config.
+- `required-env.txt`: one required environment variable name per line.
+- `runtime.env.example`: starter env-file template.
+- `README.md`: local notes for generated runtime files.
 
-The default config keeps secrets out of source control by using `${ENV_VAR}` placeholders. The generated default expects:
+Default required variables:
 
 ```text
 AZURE_OPENAI_API_KEY
 OPENSHRIKE_AZURE_OPENAI_BASE_URL
 ```
 
-If you run `shrike` inside a container, pass those variables with your normal container mechanism, for example an env-file derived from `.openshrike/runtime.env.example`.
+Keep secrets out of git and provide them at runtime (for example, container env
+vars or `--env-file`).
 
 ## Scan usage
 
-Run exactly one of `--check` or `--policy`.
-
-Examples:
+`scan` requires exactly one of `--check` or `--policy`.
 
 ```bash
-./shrike scan --policy csharp-baseline --repo .
-./shrike scan --check csharp-rel-001-cancellation-tokens --repo . --scan-scope commit --scan-target HEAD~1..HEAD
-./shrike scan --policy csharp-baseline --repo . --scan-scope branch --scan-target origin/main
-./shrike scan --policy csharp-baseline --repo . --scan-scope pr --scan-target origin/main...HEAD
-./shrike scan --policy csharp-baseline --repo . --scan-scope full
+./shrike scan \
+  (--check <CHECK_ID> | --policy <POLICY_ID>) \
+  --repo <PATH> \
+  [--scan-scope uncommitted|commit|branch|pr|full] \
+  [--scan-target <TARGET>] \
+  [--runtime native|docker] \
+  [--parallelism <N|auto>] \
+  [--output json|markdown] \
+  [--config <PATH>] \
+  [--log <PATH>] \
+  [--artifacts-dir <PATH>] \
+  [--image <REF>] \
+  [--emit-bundle <PATH>] \
+  [--agent <NAME>] \
+  [--model <provider/model>] \
+  [--mock-opencode] \
+  [--no-ui]
 ```
 
-Options:
+Scope behavior:
 
-- `--output json|markdown`
-- `--emit-bundle <PATH>`
-- `--agent <NAME>`
-- `--model <provider/model>`
-- `--config <PATH>`
-- `--log <PATH>`
-- `--mock-opencode`
-- `--no-ui`
+- `uncommitted` (default): changed tracked/untracked files in the working tree.
+- `commit`: requires `--scan-target <COMMIT_OR_RANGE>`.
+- `branch`: requires `--scan-target <BASE_BRANCH>` and compares
+  `<BASE_BRANCH>...HEAD`.
+- `pr`: uses `--scan-target <DIFF_SPEC>` or defaults to `origin/main...HEAD`.
+- `full`: scans the entire repository.
 
-Scope values:
+Runtime behavior:
 
-- `uncommitted` (default)
-- `commit`
-- `branch`
-- `pr`
-- `full`
+- `--runtime native` is the default fast local loop.
+- `--runtime docker` runs an ephemeral worker container.
+- If Docker mode is used without `--image`, OpenShrike uses
+  `openshrike-runtime:dev` and builds it from
+  `docker/openshrike-runtime.Dockerfile` when missing.
+- `--artifacts-dir` controls where Docker worker artifacts are written (for
+  example `report.json` and scan logs).
 
-When stderr is interactive, `shrike scan` renders an Ink dashboard:
+Parallelism:
 
-- left side: progress, scope, counters, and optional detailed check lists
-- right side: streamed OpenCode events, assistant output, and reasoning text
+- `--parallelism 1` is the default.
+- `--parallelism auto` picks a safe concurrency level from available CPU and
+  check count.
 
-Toggle detail lists with `d`, `Ctrl+T`, or `Ctrl+O`.
+## Workflow examples
 
-Use mock mode when you want to test the UI/report flow without calling OpenCode:
+Fast local loop:
 
 ```bash
-./shrike scan --policy csharp-baseline --repo . --scan-scope full --mock-opencode
+./shrike scan --policy typescript-baseline --repo . --runtime native --parallelism auto
 ```
+
+PR/CI parity in Docker:
+
+```bash
+./shrike scan \
+  --policy csharp-baseline \
+  --repo . \
+  --scan-scope pr \
+  --scan-target origin/main...HEAD \
+  --runtime docker \
+  --parallelism auto \
+  --artifacts-dir artifacts/shrike \
+  --output json
+```
+
+Targeted single-check verification:
+
+```bash
+./shrike scan \
+  --check csharp-rel-001-cancellation-tokens \
+  --repo ../OpenShrike.TestsCsharp \
+  --scan-scope full \
+  --runtime docker
+```
+
+UI/report smoke test without OpenCode calls:
+
+```bash
+./shrike scan \
+  --policy csharp-baseline \
+  --repo . \
+  --scan-scope full \
+  --mock-opencode \
+  --no-ui
+```
+
+## Output and exit codes
+
+- `--output json` (default) emits machine-readable report data.
+- `--output markdown` emits a human-readable report.
+- Reports include an `execution` block with runtime and parallelism metadata.
+- Exit code `0`: no failing checks.
+- Exit code `2`: one or more failing checks.
+- Exit code `1`: command/runtime error.
 
 ## Development
-
-Common commands:
 
 ```bash
 npm run dev -- scan --policy csharp-baseline --repo .
@@ -108,7 +175,8 @@ npm run typecheck
 npm test
 ```
 
-The root `./shrike` launcher runs the built CLI when `dist/cli.js` exists and falls back to `tsx` during development.
+The `./shrike` launcher uses `tsx src/cli.ts` when available, and falls back to
+`dist/cli.js`.
 
 ## Publish and install
 
@@ -116,19 +184,6 @@ Create a framework bundle:
 
 ```bash
 scripts/publish.sh
-```
-
-This writes a runnable bundle to:
-
-```text
-.artifacts/publish/framework/
-  shrike
-  app/
-    dist/
-    node_modules/
-    best_practices/
-    package.json
-    ...
 ```
 
 Install from source with a symlink:
@@ -143,7 +198,7 @@ Install from the published framework bundle:
 scripts/install-local.sh --source .artifacts/publish/framework
 ```
 
-## Document map
+## Documentation map
 
 - [Vision and scope](docs/requirements/01-project-vision.md)
 - [Feature scope and phases](docs/requirements/02-feature-scope.md)
@@ -152,4 +207,6 @@ scripts/install-local.sh --source .artifacts/publish/framework
 - [Best practices library](docs/requirements/05-best-practices-library.md)
 - [Observability and feedback loop](docs/requirements/06-observability.md)
 - [Workflows and integrations](docs/requirements/07-workflows-and-integrations.md)
-- [Archived first implementation notes](docs/implementation/01-mvp-csharp-rel-001-implementation.md)
+- [MVP implementation notes](docs/implementation/01-mvp-csharp-rel-001-implementation.md)
+- [Fixture and branch workflow](docs/implementation/02-testscsharp-fixture-and-branches.md)
+- [Phase 2 runtime and parallel plan](docs/implementation/03-phase-2-docker-runtime-and-multi-agent-plan.md)
