@@ -1,6 +1,12 @@
 import type {ScanReport} from './types.js';
+import {
+  CHECK_STATUS_DISPLAY_ORDER,
+  getCheckStatusHeader,
+  sortChecksByStatus
+} from './report.js';
 
 export function renderScanReportMarkdown(report: ScanReport): string {
+  const checksByStatus = sortChecksByStatus(report.checks);
   const lines: string[] = [
     '# OpenShrike Scan Report',
     '',
@@ -8,37 +14,45 @@ export function renderScanReportMarkdown(report: ScanReport): string {
     `- Policy version: \`${report.policy_version}\``,
     `- Repository: \`${report.repo.path}\``,
     `- Summary: total \`${report.summary.total_checks}\`, pass \`${report.summary.passed}\`, fail \`${report.summary.failed}\`, unknown \`${report.summary.unknown}\``,
-    '',
-    '## Checks',
     ''
   ];
 
-  for (const check of report.checks) {
-    lines.push(`### \`${check.id}\``);
-    lines.push(`- Version: \`${check.version}\``);
-    lines.push(`- Status: \`${check.status}\``);
-    lines.push(`- Confidence: \`${check.confidence}\``);
-    lines.push(`- Rationale: ${check.rationale}`);
-    lines.push('- Evidence:');
-
-    if (check.evidence.length === 0) {
-      lines.push('  - none');
-    } else {
-      for (const evidence of check.evidence) {
-        lines.push(`  - \`${evidence}\``);
-      }
+  for (const status of CHECK_STATUS_DISPLAY_ORDER) {
+    const checks = checksByStatus.filter(check => check.status === status);
+    if (checks.length === 0) {
+      continue;
     }
 
-    lines.push('- Remediation:');
-    if (check.remediation.length === 0) {
-      lines.push('  - none');
-    } else {
-      for (const remediation of check.remediation) {
-        lines.push(`  - ${remediation}`);
-      }
-    }
-
+    lines.push(`## ${getCheckStatusHeader(status)}`);
     lines.push('');
+
+    for (const check of checks) {
+      lines.push(`### \`${check.id}\``);
+      lines.push(`- Version: \`${check.version}\``);
+      lines.push(`- Status: \`${check.status}\``);
+      lines.push(`- Confidence: \`${check.confidence}\``);
+      lines.push(`- Rationale: ${check.rationale}`);
+      lines.push('- Evidence:');
+
+      if (check.evidence.length === 0) {
+        lines.push('  - none');
+      } else {
+        for (const evidence of check.evidence) {
+          lines.push(`  - \`${evidence}\``);
+        }
+      }
+
+      lines.push('- Remediation:');
+      if (check.remediation.length === 0) {
+        lines.push('  - none');
+      } else {
+        for (const remediation of check.remediation) {
+          lines.push(`  - ${remediation}`);
+        }
+      }
+
+      lines.push('');
+    }
   }
 
   return lines.join('\n').trimEnd();

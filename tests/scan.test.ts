@@ -144,6 +144,8 @@ describe('runScan', () => {
       failed: 1,
       unknown: 0
     });
+    expect(report.checks.map(check => check.id)).toEqual(['check-b', 'check-a']);
+    expect(report.checks.map(check => check.status)).toEqual(['fail', 'pass']);
     expect(progress.map(event => event.type)).toEqual([
       'scope-resolved',
       'check-started',

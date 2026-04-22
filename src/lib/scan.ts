@@ -27,6 +27,7 @@ import {resolvePolicyDefinition} from './policies.js';
 import {runProcess} from './process.js';
 import {findToolRoot} from './project-root.js';
 import {RepoMutationGuard} from './repo-guard.js';
+import {sortChecksByStatus} from './report.js';
 import {createScanLogger} from './scan-log.js';
 import {type RuntimeEventEnvelope, OpenCodeRuntime} from './runtime.js';
 import {resolveScanScope} from './scope.js';
@@ -626,6 +627,8 @@ function buildReport(options: {
   effectiveParallelism: number;
   artifactsDir: string | null;
 }): ScanReport {
+  const sortedChecks = sortChecksByStatus(options.checks);
+
   return {
     bundle_id: options.bundleId,
     policy_version: options.policyVersion,
@@ -639,12 +642,12 @@ function buildReport(options: {
       artifacts_dir: options.artifactsDir
     },
     summary: {
-      total_checks: options.checks.length,
-      passed: options.checks.filter(check => check.status === 'pass').length,
-      failed: options.checks.filter(check => check.status === 'fail').length,
-      unknown: options.checks.filter(check => check.status === 'unknown').length
+      total_checks: sortedChecks.length,
+      passed: sortedChecks.filter(check => check.status === 'pass').length,
+      failed: sortedChecks.filter(check => check.status === 'fail').length,
+      unknown: sortedChecks.filter(check => check.status === 'unknown').length
     },
-    checks: options.checks
+    checks: sortedChecks
   };
 }
 
