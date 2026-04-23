@@ -74,6 +74,7 @@ export interface ScanProgressEvent {
   checkId: string | null;
   workerId: string | null;
   checkStatus: CheckStatus | null;
+  checkResult: CheckResult | null;
   passedCount: number;
   failedCount: number;
   unknownCount: number;

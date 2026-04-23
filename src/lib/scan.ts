@@ -122,12 +122,23 @@ export async function runNativeScan(
       completedCount: 0
     };
 
-    emitProgress(logger, hooks, 'scope-resolved', scopeContext, progressState, checkIds, null, null, null);
+    emitProgress(
+      logger,
+      hooks,
+      'scope-resolved',
+      scopeContext,
+      progressState,
+      checkIds,
+      null,
+      null,
+      null,
+      null
+    );
 
     const effectiveParallelism = resolveEffectiveParallelism(options.parallelism, checkIds.length);
 
     if (!scopeContext.isFullRepository && scopeContext.files.length === 0) {
-      emitProgress(logger, hooks, 'no-changes-in-scope', scopeContext, progressState, checkIds, null, null, null);
+      emitProgress(logger, hooks, 'no-changes-in-scope', scopeContext, progressState, checkIds, null, null, null, null);
       const checks = checkIds.map(createNoChangesResult);
       const report = buildReport({
         bundleId,
@@ -210,6 +221,7 @@ export async function runNativeScan(
             checkIds,
             checkId,
             workerId,
+            null,
             null
           );
 
@@ -239,7 +251,8 @@ export async function runNativeScan(
             checkIds,
             checkId,
             workerId,
-            result.status
+            result.status,
+            result
           );
         }
       });
@@ -580,7 +593,8 @@ function emitProgress(
   checkOrder: string[],
   checkId: string | null,
   workerId: string | null,
-  checkStatus: CheckResult['status'] | null
+  checkStatus: CheckResult['status'] | null,
+  checkResult: CheckResult | null
 ): void {
   const event = {
     type,
@@ -590,6 +604,7 @@ function emitProgress(
     checkId,
     workerId,
     checkStatus,
+    checkResult,
     passedCount: countChecks(progressState.resultsByCheckId, 'pass'),
     failedCount: countChecks(progressState.resultsByCheckId, 'fail'),
     unknownCount: countChecks(progressState.resultsByCheckId, 'unknown'),

@@ -21,6 +21,34 @@ export async function readCheckDefinition(checkId: string): Promise<string> {
   return await fs.readFile(resolvedPath, 'utf8');
 }
 
+export async function readCheckTitle(checkId: string): Promise<string> {
+  const definition = await readCheckDefinition(checkId);
+  return extractCheckTitleFromDefinition(definition, checkId);
+}
+
+export function extractCheckTitleFromDefinition(
+  definition: string,
+  fallbackTitle = 'Unknown check'
+): string {
+  for (const rawLine of definition.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (!line.startsWith('# ')) {
+      continue;
+    }
+
+    const heading = line.slice(2).trim();
+    const separatorIndex = heading.indexOf(':');
+    if (separatorIndex >= 0) {
+      const title = heading.slice(separatorIndex + 1).trim();
+      return title || fallbackTitle;
+    }
+
+    return heading || fallbackTitle;
+  }
+
+  return fallbackTitle;
+}
+
 async function findFileByName(directory: string, expectedFileName: string): Promise<string | null> {
   const entries = await fs.readdir(directory, {withFileTypes: true});
 

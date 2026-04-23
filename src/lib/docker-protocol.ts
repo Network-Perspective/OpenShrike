@@ -58,6 +58,7 @@ const scanProgressEventSchema = z.object({
   checkId: z.string().nullable(),
   workerId: z.string().nullable(),
   checkStatus: checkStatusSchema.nullable(),
+  checkResult: checkResultSchema.nullable(),
   passedCount: z.number().int().min(0),
   failedCount: z.number().int().min(0),
   unknownCount: z.number().int().min(0),

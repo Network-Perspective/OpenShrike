@@ -38,6 +38,7 @@ describe('docker protocol', () => {
         checkId: 'check-a',
         workerId: 'worker-1',
         checkStatus: null,
+        checkResult: null,
         passedCount: 0,
         failedCount: 0,
         unknownCount: 0,

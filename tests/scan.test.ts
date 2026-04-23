@@ -153,6 +153,15 @@ describe('runScan', () => {
       'check-started',
       'check-completed'
     ]);
+    expect(progress.filter(event => event.type === 'check-completed').map(event => event.checkResult?.id)).toEqual([
+      'check-a',
+      'check-b'
+    ]);
+    expect(progress.filter(event => event.type === 'check-completed').map(event => event.checkResult?.status)).toEqual([
+      'pass',
+      'fail'
+    ]);
+    expect(progress.filter(event => event.type !== 'check-completed').every(event => event.checkResult === null)).toBe(true);
   });
 
   it('downgrades inconclusive check errors to unknown and continues other checks', async () => {

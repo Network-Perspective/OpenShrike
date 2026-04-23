@@ -4,13 +4,23 @@ import {assembleBundleForCheck, assembleBundleForPolicy} from '../lib/bundle.js'
 import {renderScanReportMarkdown} from '../lib/markdown.js';
 import {validateScanOptions} from '../lib/scan-options.js';
 import {runScan} from '../lib/scan.js';
-import type {ScanCommandOptions} from '../lib/types.js';
-import {runScanWithInk} from '../ui/scan-app.js';
+import type {ScanCommandOptions, ScanReport} from '../lib/types.js';
+import {runScanWithInk, ScanUiCancelledError} from '../ui/scan-app.js';
 
 export async function executeScanCommand(rawOptions: Partial<ScanCommandOptions>): Promise<number> {
   const options = validateScanOptions(rawOptions);
   const shouldUseUi = options.ui && process.stderr.isTTY;
-  const report = shouldUseUi ? await runScanWithInk(options) : await runScan(options);
+  let report: ScanReport;
+
+  try {
+    report = shouldUseUi ? await runScanWithInk(options) : await runScan(options);
+  } catch (error) {
+    if (error instanceof ScanUiCancelledError) {
+      return 130;
+    }
+
+    throw error;
+  }
 
   if (options.emitBundlePath) {
     const bundle = options.policyId
