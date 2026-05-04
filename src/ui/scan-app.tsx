@@ -15,6 +15,13 @@ import type {
 } from '../lib/types.js';
 
 type SectionViewMode = 'detail' | 'list';
+type CheckDisplayStatus = CheckStatus | 'pending';
+
+export interface DisplayCheck {
+  id: string;
+  status: CheckDisplayStatus;
+  result: CheckResult | null;
+}
 
 export interface ScanSection {
   status: CheckStatus;
@@ -23,8 +30,7 @@ export interface ScanSection {
 }
 
 export interface BrowserState {
-  activeStatus: CheckStatus;
-  selectedByStatus: Record<CheckStatus, number>;
+  selectedCheckIndex: number;
   viewMode: SectionViewMode;
 }
 
@@ -56,6 +62,7 @@ interface ProgressViewState {
   scopeLabel: string;
   scopeFileCount: number;
   scopeIsFullRepository: boolean;
+  checkIds: string[];
   completedCount: number;
   totalChecks: number;
   passedCount: number;
@@ -71,13 +78,11 @@ interface SummaryMetricProps {
   width: number;
 }
 
-interface SectionModuleProps {
-  section: ScanSection;
+interface CheckListModuleProps {
+  checks: DisplayCheck[];
   browser: BrowserState;
-  count: number;
   isScanComplete: boolean;
   checkTitles: Record<string, string>;
-  repoPath: string;
 }
 
 const SECTION_ORDER: readonly CheckStatus[] = ['fail', 'unknown', 'pass'];
@@ -88,19 +93,22 @@ const SECTION_LABELS: Record<CheckStatus, string> = {
   pass: 'Passed Checks'
 };
 
-const STATUS_BADGES: Record<CheckStatus, string> = {
+const STATUS_BADGES: Record<CheckDisplayStatus, string> = {
+  pending: 'PENDING',
   fail: 'FAIL',
   unknown: 'INCONCLUSIVE',
   pass: 'PASS'
 };
 
-const STATUS_MARKERS: Record<CheckStatus, string> = {
+const STATUS_MARKERS: Record<CheckDisplayStatus, string> = {
+  pending: '[ ]',
   fail: '[x]',
   unknown: '[~]',
   pass: '[ok]'
 };
 
-const STATUS_COLORS: Record<CheckStatus, string> = {
+const STATUS_COLORS: Record<CheckDisplayStatus, string> = {
+  pending: 'gray',
   fail: 'redBright',
   unknown: 'yellowBright',
   pass: 'greenBright'
@@ -185,15 +193,16 @@ function ScanApp(props: {
 
   const terminalWidth = stdout.columns || 80;
   const terminalHeight = Math.max(12, (stdout.rows || 24) - 1);
-  const streamedReport = buildStreamedReport(streamedReportState);
-  const displayReport = report ?? streamedReport;
-  const displayChecks = displayReport?.checks ?? [];
+  const displayChecks = buildDisplayChecks({
+    checkIds: progress.checkIds,
+    streamedResultsByCheckId: streamedReportState.resultsByCheckId,
+    reportChecks: report?.checks
+  });
   const displayChecksKey = displayChecks
-    .map(check => `${check.id}:${check.status}:${check.version}`)
+    .map(check => `${check.id}:${check.status}:${check.result?.version ?? ''}`)
     .join('\u0000');
-  const sections = buildScanSections(displayReport);
-  const activeSection = getActiveSection(sections, browser);
-  const reportReady = displayReport !== null;
+  const selectedCheck = getSelectedCheck(displayChecks, browser);
+  const reportReady = displayChecks.length > 0;
   const isScanComplete = report !== null;
   const durationMs = finishedAtRef.current === null
     ? elapsedMs
@@ -239,12 +248,22 @@ function ScanApp(props: {
     }
 
     if (key.upArrow) {
-      scrollRef.current?.scrollBy(-1);
+      if (!reportReady || showHelp) {
+        scrollRef.current?.scrollBy(-1);
+      } else {
+        setBrowser(previous => moveBrowserSelection(previous, displayChecks, -1));
+      }
+
       return;
     }
 
     if (key.downArrow) {
-      scrollRef.current?.scrollBy(1);
+      if (!reportReady || showHelp) {
+        scrollRef.current?.scrollBy(1);
+      } else {
+        setBrowser(previous => moveBrowserSelection(previous, displayChecks, 1));
+      }
+
       return;
     }
 
@@ -273,12 +292,12 @@ function ScanApp(props: {
     }
 
     if (key.leftArrow) {
-      setBrowser(previous => moveBrowserSelection(previous, sections, -1));
+      setBrowser(previous => moveBrowserSelection(previous, displayChecks, -1));
       return;
     }
 
     if (key.rightArrow) {
-      setBrowser(previous => moveBrowserSelection(previous, sections, 1));
+      setBrowser(previous => moveBrowserSelection(previous, displayChecks, 1));
       return;
     }
 
@@ -344,7 +363,11 @@ function ScanApp(props: {
         setElapsedMs(finishedAtRef.current - startedAtRef.current);
         setProgress(previous => syncProgressWithReport(previous, completedReport));
         setReport(completedReport);
-        setBrowser(previous => syncBrowserState(previous, completedReport));
+        setBrowser(previous => syncBrowserState(previous, buildDisplayChecks({
+          checkIds: completedReport.checks.map(check => check.id),
+          streamedResultsByCheckId: streamedReportState.resultsByCheckId,
+          reportChecks: completedReport.checks
+        })));
       } catch (error) {
         if (!active) {
           return;
@@ -405,15 +428,12 @@ function ScanApp(props: {
       return;
     }
 
-    setBrowser(previous => syncBrowserState(previous, displayReport));
+    setBrowser(previous => syncBrowserState(previous, displayChecks));
   }, [displayChecksKey, reportReady]);
 
   useEffect(() => {
     const handleResize = () => {
       scrollRef.current?.remeasure();
-      if (!showHelp && reportReady) {
-        ensureActiveSectionVisible(scrollRef.current, browser.activeStatus);
-      }
     };
 
     stdout.on('resize', handleResize);
@@ -421,7 +441,7 @@ function ScanApp(props: {
     return () => {
       stdout.off('resize', handleResize);
     };
-  }, [browser.activeStatus, reportReady, showHelp, stdout]);
+  }, [stdout]);
 
   useEffect(() => {
     if (showHelp) {
@@ -429,10 +449,10 @@ function ScanApp(props: {
       return;
     }
 
-    if (reportReady) {
-      ensureActiveSectionVisible(scrollRef.current, browser.activeStatus);
+    if (browser.viewMode === 'detail') {
+      scrollRef.current?.scrollToTop();
     }
-  }, [browser.activeStatus, browser.viewMode, reportReady, showHelp]);
+  }, [browser.selectedCheckIndex, browser.viewMode, showHelp]);
 
   return (
     <Box width={terminalWidth} height={terminalHeight}>
@@ -457,6 +477,15 @@ function ScanApp(props: {
           >
             {showHelp ? (
               <HelpModule key="help" />
+            ) : browser.viewMode === 'detail' ? (
+              <DetailModule
+                key="detail"
+                check={selectedCheck}
+                selectedIndex={browser.selectedCheckIndex}
+                totalChecks={displayChecks.length}
+                checkTitles={checkTitles}
+                repoPath={report?.repo.path ?? path.resolve(props.options.repoPath)}
+              />
             ) : (
               <>
                 <SummaryModule
@@ -474,17 +503,13 @@ function ScanApp(props: {
                   passedCount={report?.summary.passed ?? progress.passedCount}
                   pendingCount={pendingCount}
                 />
-                {sections.map(section => (
-                  <SectionModule
-                    key={section.status}
-                    section={section}
-                    browser={browser}
-                    count={getSectionCount(section.status, report, progress)}
-                    isScanComplete={isScanComplete}
-                    checkTitles={checkTitles}
-                    repoPath={report?.repo.path ?? path.resolve(props.options.repoPath)}
-                  />
-                ))}
+                <CheckListModule
+                  key="checks"
+                  checks={displayChecks}
+                  browser={browser}
+                  isScanComplete={isScanComplete}
+                  checkTitles={checkTitles}
+                />
               </>
             )}
           </ScrollView>
@@ -575,45 +600,64 @@ function SummaryMetric(props: SummaryMetricProps) {
   );
 }
 
-function SectionModule(props: SectionModuleProps) {
-  const isActive = props.section.status === props.browser.activeStatus;
-  const borderColor = isActive ? 'cyan' : 'gray';
-  const titleColor = STATUS_COLORS[props.section.status];
-  const title = buildSectionTitle(props.section, props.browser, props.count);
-  const shouldRenderDetail = (
-    isActive &&
-    props.browser.viewMode === 'detail' &&
-    props.section.items.length > 0
-  );
+function CheckListModule(props: CheckListModuleProps) {
+  const title = buildChecksPaneTitle(props.checks, props.browser);
 
   return (
-    <Module borderColor={borderColor} marginBottom={1}>
+    <Module borderColor="cyan" marginBottom={1}>
       <Box justifyContent="space-between" gap={1}>
-        <Text color={titleColor} bold={isActive}>
+        <Text color="cyanBright" bold>
           {title}
         </Text>
-        {isActive && props.count > 0 ? (
-          <Text color="gray">
-            {'<- Prev | Next -> | [L]ist | [D]etails'}
-          </Text>
+        {props.checks.length > 0 ? (
+          <Text color="gray">{'<- / -> / Up / Down | [ENTER] Details'}</Text>
         ) : null}
       </Box>
 
       <Box marginTop={1} flexDirection="column">
-        {shouldRenderDetail ? (
+        <ListView
+          checks={props.checks}
+          browser={props.browser}
+          isScanComplete={props.isScanComplete}
+          checkTitles={props.checkTitles}
+        />
+      </Box>
+    </Module>
+  );
+}
+
+function DetailModule(props: {
+  check: DisplayCheck | null;
+  selectedIndex: number;
+  totalChecks: number;
+  checkTitles: Record<string, string>;
+  repoPath: string;
+}) {
+  const shortId = props.check ? formatCheckIdDisplay(props.check.id) : 'No Check';
+  const title = props.check ? formatCheckTitle(props.check, props.checkTitles) : 'No check selected';
+  const status = props.check?.status ?? 'pending';
+  const indexLabel = props.totalChecks > 0 ? `${props.selectedIndex + 1} of ${props.totalChecks}` : '0';
+
+  return (
+    <Module borderColor="cyan" marginBottom={1}>
+      <Box justifyContent="space-between" gap={1}>
+        <Text color={STATUS_COLORS[status]} bold>
+          {`> ${shortId} (${indexLabel})`}
+        </Text>
+        {props.totalChecks > 0 ? (
+          <Text color="gray">{'<- / -> / Up / Down | [ENTER] List'}</Text>
+        ) : null}
+      </Box>
+
+      <Box marginTop={1} flexDirection="column">
+        {props.check ? (
           <DetailView
-            check={getSelectedCheck(props.section, props.browser)!}
+            check={props.check}
             checkTitles={props.checkTitles}
             repoPath={props.repoPath}
           />
         ) : (
-          <ListView
-            section={props.section}
-            browser={props.browser}
-            count={props.count}
-            isScanComplete={props.isScanComplete}
-            checkTitles={props.checkTitles}
-          />
+          <Text color="gray">No check selected.</Text>
         )}
       </Box>
     </Module>
@@ -621,13 +665,14 @@ function SectionModule(props: SectionModuleProps) {
 }
 
 function DetailView(props: {
-  check: CheckResult;
+  check: DisplayCheck;
   checkTitles: Record<string, string>;
   repoPath: string;
 }) {
   const title = formatCheckTitle(props.check, props.checkTitles);
   const shortId = formatCheckIdDisplay(props.check.id);
   const outcomeLabel = getOutcomeLabel(props.check.status);
+  const result = props.check.result;
 
   return (
     <Box flexDirection="column">
@@ -635,7 +680,7 @@ function DetailView(props: {
         <Text color={STATUS_COLORS[props.check.status]} bold>
           [{STATUS_BADGES[props.check.status]}]
         </Text>
-        <Text>[Confidence: {formatConfidence(props.check.confidence)}]</Text>
+        {result ? <Text>[Confidence: {formatConfidence(result.confidence)}]</Text> : null}
       </Box>
 
       <Box marginTop={1}>
@@ -650,22 +695,26 @@ function DetailView(props: {
       </DetailBlock>
 
       <DetailBlock label="Why">
-        {renderMultilineText(props.check.rationale)}
+        {renderMultilineText(
+          result?.rationale ?? 'Check is pending execution or still running.'
+        )}
       </DetailBlock>
 
       <DetailBlock label="Evidence">
-        <EvidenceBlock evidence={props.check.evidence} repoPath={props.repoPath} />
+        <EvidenceBlock evidence={result?.evidence ?? []} repoPath={props.repoPath} />
       </DetailBlock>
 
       <DetailBlock label="Remediation">
-        {props.check.remediation.length > 0 ? (
+        {result && result.remediation.length > 0 ? (
           <Box flexDirection="column">
-            {props.check.remediation.map((item, index) => (
+            {result.remediation.map((item, index) => (
               <Text key={`${props.check.id}-remediation-${index}`}>- {item}</Text>
             ))}
           </Box>
         ) : (
-          <Text>No remediation provided.</Text>
+          <Text>
+            {result ? 'No remediation provided.' : 'No remediation available until the check completes.'}
+          </Text>
         )}
       </DetailBlock>
     </Box>
@@ -701,31 +750,25 @@ function CodeBlock(props: {lines: Array<{number: number; text: string}>}) {
 }
 
 function ListView(props: {
-  section: ScanSection;
+  checks: DisplayCheck[];
   browser: BrowserState;
-  count: number;
   isScanComplete: boolean;
   checkTitles: Record<string, string>;
 }) {
-  if (props.section.items.length === 0) {
+  if (props.checks.length === 0) {
     return (
       <Text color="gray">
-        {props.isScanComplete
-          ? `No ${props.section.title.toLowerCase()} in this report.`
-          : `No ${props.section.title.toLowerCase()} yet.`}
+        {props.isScanComplete ? 'No checks in this report.' : 'Checks will appear when scope resolves.'}
       </Text>
     );
   }
 
-  const selectedIndex = clampSelectedIndex(
-    props.browser.selectedByStatus[props.section.status],
-    props.section.items.length
-  );
+  const selectedIndex = clampSelectedIndex(props.browser.selectedCheckIndex, props.checks.length);
 
   return (
     <Box flexDirection="column">
-      {props.section.items.map((check, index) => {
-        const isActiveRow = props.section.status === props.browser.activeStatus && selectedIndex === index;
+      {props.checks.map((check, index) => {
+        const isActiveRow = selectedIndex === index;
         const prefix = isActiveRow ? '>' : ' ';
         const shortId = formatCheckIdDisplay(check.id);
         const title = formatCheckTitle(check, props.checkTitles);
@@ -735,7 +778,7 @@ function ListView(props: {
             <Text color={isActiveRow ? 'cyanBright' : 'gray'}>{`${prefix} `}</Text>
             <Text color={STATUS_COLORS[check.status]}>{`${STATUS_MARKERS[check.status]} `}</Text>
             <Text color="gray">{`${shortId}: `}</Text>
-            <Text bold={isActiveRow}>{title}</Text>
+            <Text color={STATUS_COLORS[check.status]} bold={isActiveRow}>{title}</Text>
           </Box>
         );
       })}
@@ -802,8 +845,8 @@ function HelpModule() {
         Help
       </Text>
       <Box marginTop={1} flexDirection="column">
-        <Text>Left / Right: move to the previous or next check.</Text>
-        <Text>Up / Down: scroll the report one line at a time.</Text>
+        <Text>Left / Right / Up / Down: move to the previous or next check.</Text>
+        <Text>When Help is open, Up / Down scroll the report one line at a time.</Text>
         <Text>Page Up / Page Down: scroll the report by a page.</Text>
         <Text>D: open detail view for the current check.</Text>
         <Text>L: switch detail view back to list view.</Text>
@@ -864,6 +907,7 @@ function createProgressViewState(): ProgressViewState {
     scopeLabel: 'Resolving scope',
     scopeFileCount: 0,
     scopeIsFullRepository: false,
+    checkIds: [],
     completedCount: 0,
     totalChecks: 0,
     passedCount: 0,
@@ -883,6 +927,7 @@ function applyProgressEvent(
     scopeLabel: event.scopeLabel,
     scopeFileCount: event.scopeFileCount,
     scopeIsFullRepository: event.isFullRepository,
+    checkIds: [...event.checkIds],
     completedCount: event.completedCount,
     totalChecks: event.totalChecks,
     passedCount: event.passedCount,
@@ -1021,128 +1066,83 @@ export function buildScanSections(report: Pick<ScanReport, 'checks'> | null): Sc
   }));
 }
 
+function buildDisplayChecks(options: {
+  checkIds: string[];
+  streamedResultsByCheckId: Record<string, CheckResult>;
+  reportChecks: CheckResult[] | undefined;
+}): DisplayCheck[] {
+  const reportById = new Map((options.reportChecks ?? []).map(check => [check.id, check] as const));
+  const checkIds: string[] = [];
+  const seen = new Set<string>();
+
+  const appendId = (checkId: string) => {
+    if (seen.has(checkId)) {
+      return;
+    }
+
+    seen.add(checkId);
+    checkIds.push(checkId);
+  };
+
+  options.checkIds.forEach(appendId);
+  (options.reportChecks ?? []).forEach(check => appendId(check.id));
+  Object.keys(options.streamedResultsByCheckId).forEach(appendId);
+
+  return checkIds.map(checkId => {
+    const result = reportById.get(checkId) ?? options.streamedResultsByCheckId[checkId] ?? null;
+    return {
+      id: checkId,
+      status: result?.status ?? 'pending',
+      result
+    };
+  });
+}
+
 export function createInitialBrowserState(report: Pick<ScanReport, 'checks'> | null): BrowserState {
-  const sections = buildScanSections(report);
-  const firstNonEmptySection = sections.find(section => section.items.length > 0);
+  const checks = report?.checks ?? [];
+  const firstFailureIndex = checks.findIndex(check => check.status === 'fail');
 
   return {
-    activeStatus: firstNonEmptySection?.status ?? 'fail',
-    selectedByStatus: {
-      fail: 0,
-      unknown: 0,
-      pass: 0
-    },
-    viewMode: 'detail'
+    selectedCheckIndex: firstFailureIndex >= 0 ? firstFailureIndex : 0,
+    viewMode: 'list'
   };
 }
 
 export function syncBrowserState(
   state: BrowserState,
-  report: Pick<ScanReport, 'checks'> | null
+  checks: readonly DisplayCheck[]
 ): BrowserState {
-  const sections = buildScanSections(report);
-  const firstNonEmptySection = sections.find(section => section.items.length > 0);
-  if (!firstNonEmptySection) {
-    return state;
+  if (checks.length === 0) {
+    return {
+      ...state,
+      selectedCheckIndex: 0
+    };
   }
-
-  const selectedByStatus = {
-    fail: clampSelectedIndex(
-      state.selectedByStatus.fail,
-      sections.find(section => section.status === 'fail')!.items.length
-    ),
-    unknown: clampSelectedIndex(
-      state.selectedByStatus.unknown,
-      sections.find(section => section.status === 'unknown')!.items.length
-    ),
-    pass: clampSelectedIndex(
-      state.selectedByStatus.pass,
-      sections.find(section => section.status === 'pass')!.items.length
-    )
-  };
-  const activeSection = sections.find(section => section.status === state.activeStatus);
 
   return {
     ...state,
-    activeStatus: activeSection && activeSection.items.length > 0
-      ? activeSection.status
-      : firstNonEmptySection.status,
-    selectedByStatus
+    selectedCheckIndex: clampSelectedIndex(state.selectedCheckIndex, checks.length)
   };
 }
 
 export function moveBrowserSelection(
   state: BrowserState,
-  sections: readonly ScanSection[],
+  checks: readonly DisplayCheck[],
   direction: -1 | 1
 ): BrowserState {
-  const nonEmptySections = sections.filter(section => section.items.length > 0);
-  if (nonEmptySections.length === 0) {
-    return state;
-  }
-
-  const currentStatus = nonEmptySections.some(section => section.status === state.activeStatus)
-    ? state.activeStatus
-    : nonEmptySections[0]!.status;
-  const currentSectionIndex = nonEmptySections.findIndex(section => section.status === currentStatus);
-  const currentSection = nonEmptySections[currentSectionIndex]!;
-  const currentIndex = clampSelectedIndex(
-    state.selectedByStatus[currentStatus],
-    currentSection.items.length
-  );
-
-  if (direction === 1) {
-    if (currentIndex < currentSection.items.length - 1) {
-      return {
-        ...state,
-        activeStatus: currentStatus,
-        selectedByStatus: {
-          ...state.selectedByStatus,
-          [currentStatus]: currentIndex + 1
-        }
-      };
-    }
-
-    const nextSection = nonEmptySections[currentSectionIndex + 1];
-    if (!nextSection) {
-      return state;
-    }
-
+  if (checks.length === 0) {
     return {
       ...state,
-      activeStatus: nextSection.status,
-      selectedByStatus: {
-        ...state.selectedByStatus,
-        [currentStatus]: currentIndex,
-        [nextSection.status]: 0
-      }
+      selectedCheckIndex: 0
     };
   }
 
-  if (currentIndex > 0) {
-    return {
-      ...state,
-      activeStatus: currentStatus,
-      selectedByStatus: {
-        ...state.selectedByStatus,
-        [currentStatus]: currentIndex - 1
-      }
-    };
-  }
-
-  const previousSection = nonEmptySections[currentSectionIndex - 1];
-  if (!previousSection) {
-    return state;
-  }
+  const currentIndex = clampSelectedIndex(state.selectedCheckIndex, checks.length);
+  const nextIndex = clampSelectedIndex(currentIndex + direction, checks.length);
 
   return {
     ...state,
-    activeStatus: previousSection.status,
-    selectedByStatus: {
-      ...state.selectedByStatus,
-      [currentStatus]: currentIndex,
-      [previousSection.status]: Math.max(0, previousSection.items.length - 1)
-    }
+    selectedCheckIndex: nextIndex
   };
 }
 
@@ -1160,69 +1160,29 @@ function setBrowserViewMode(state: BrowserState, viewMode: SectionViewMode): Bro
   };
 }
 
-function getActiveSection(
-  sections: readonly ScanSection[],
-  browser: BrowserState
-): ScanSection {
-  return sections.find(section => section.status === browser.activeStatus) ?? sections[0]!;
-}
-
 function getSelectedCheck(
-  section: ScanSection,
+  checks: readonly DisplayCheck[],
   browser: BrowserState
-): CheckResult | null {
-  if (section.items.length === 0) {
+): DisplayCheck | null {
+  if (checks.length === 0) {
     return null;
   }
 
-  const index = clampSelectedIndex(browser.selectedByStatus[section.status], section.items.length);
-  return section.items[index] ?? null;
+  const index = clampSelectedIndex(browser.selectedCheckIndex, checks.length);
+  return checks[index] ?? null;
 }
 
-function getSectionCount(
-  status: CheckStatus,
-  report: ScanReport | null,
-  progress: ProgressViewState
-): number {
-  if (report) {
-    switch (status) {
-      case 'fail':
-        return report.summary.failed;
-      case 'unknown':
-        return report.summary.unknown;
-      case 'pass':
-        return report.summary.passed;
-    }
+function buildChecksPaneTitle(checks: readonly DisplayCheck[], browser: BrowserState): string {
+  if (checks.length === 0) {
+    return 'Checks';
   }
 
-  switch (status) {
-    case 'fail':
-      return progress.failedCount;
-    case 'unknown':
-      return progress.unknownCount;
-    case 'pass':
-      return progress.passedCount;
-  }
-}
-
-function buildSectionTitle(
-  section: ScanSection,
-  browser: BrowserState,
-  count: number
-): string {
-  const isActive = section.status === browser.activeStatus;
-  const prefix = isActive ? '> ' : '';
-
-  if (!isActive || count === 0) {
-    return `${prefix}${section.title} (${count})`;
-  }
-
-  const selectedIndex = clampSelectedIndex(browser.selectedByStatus[section.status], count);
-  return `${prefix}${section.title} (${selectedIndex + 1} of ${count})`;
+  const selectedIndex = clampSelectedIndex(browser.selectedCheckIndex, checks.length);
+  return `Checks (${selectedIndex + 1} of ${checks.length})`;
 }
 
 function formatCheckTitle(
-  check: CheckResult,
+  check: DisplayCheck,
   checkTitles: Record<string, string>
 ): string {
   return checkTitles[check.id] ?? check.id;
@@ -1245,8 +1205,10 @@ function formatConfidence(value: CheckResult['confidence']): string {
   return value.slice(0, 1) + value.slice(1).toLowerCase();
 }
 
-function getOutcomeLabel(status: CheckStatus): string {
+function getOutcomeLabel(status: CheckDisplayStatus): string {
   switch (status) {
+    case 'pending':
+      return 'What Is Running';
     case 'fail':
       return 'What Failed';
     case 'unknown':
@@ -1256,14 +1218,18 @@ function getOutcomeLabel(status: CheckStatus): string {
   }
 }
 
-function formatOutcome(check: CheckResult): string {
-  switch (check.status) {
+function formatOutcome(check: DisplayCheck): string {
+  if (!check.result) {
+    return 'Check is pending execution or still running.';
+  }
+
+  switch (check.result.status) {
     case 'fail':
-      return `Returned FAIL with ${formatConfidence(check.confidence)} confidence.`;
+      return `Returned FAIL with ${formatConfidence(check.result.confidence)} confidence.`;
     case 'unknown':
-      return `Returned INCONCLUSIVE with ${formatConfidence(check.confidence)} confidence.`;
+      return `Returned INCONCLUSIVE with ${formatConfidence(check.result.confidence)} confidence.`;
     case 'pass':
-      return `Returned PASS with ${formatConfidence(check.confidence)} confidence.`;
+      return `Returned PASS with ${formatConfidence(check.result.confidence)} confidence.`;
   }
 }
 

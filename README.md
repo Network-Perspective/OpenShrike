@@ -8,6 +8,12 @@ OpenShrike evaluates code and development artifacts against a versioned policy
 library, using OpenCode as the execution runtime. It is designed for teams
 using agentic workflows that need review signal beyond traditional linting.
 
+Screenshots
+
+![scan screenshot](docs/scan-screenshot.png)
+
+![check screenshot](docs/check-screenshot.png)
+
 ## Project value
 
 - Policy-as-data: checks and policies live as markdown in `best_practices/`,

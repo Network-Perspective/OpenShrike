@@ -35,6 +35,7 @@ describe('docker protocol', () => {
         scopeLabel: 'full repository',
         scopeFileCount: 0,
         isFullRepository: true,
+        checkIds: ['check-a'],
         checkId: 'check-a',
         workerId: 'worker-1',
         checkStatus: null,

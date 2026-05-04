@@ -601,6 +601,7 @@ function emitProgress(
     scopeLabel: scopeContext.label,
     scopeFileCount: scopeContext.files.length,
     isFullRepository: scopeContext.isFullRepository,
+    checkIds: [...checkOrder],
     checkId,
     workerId,
     checkStatus,

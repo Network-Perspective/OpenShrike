@@ -71,6 +71,7 @@ export interface ScanProgressEvent {
   scopeLabel: string;
   scopeFileCount: number;
   isFullRepository: boolean;
+  checkIds: string[];
   checkId: string | null;
   workerId: string | null;
   checkStatus: CheckStatus | null;

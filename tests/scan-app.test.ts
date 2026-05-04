@@ -34,7 +34,7 @@ describe('buildScanSections', () => {
 });
 
 describe('createInitialBrowserState', () => {
-  it('defaults to the first failed check in detail view', () => {
+  it('defaults to the first failed check in list view', () => {
     const state = createInitialBrowserState(makeReport([
       ['fail-a', 'fail'],
       ['unknown-a', 'unknown'],
@@ -42,24 +42,19 @@ describe('createInitialBrowserState', () => {
     ]));
 
     expect(state).toEqual({
-      activeStatus: 'fail',
-      selectedByStatus: {
-        fail: 0,
-        unknown: 0,
-        pass: 0
-      },
-      viewMode: 'detail'
+      selectedCheckIndex: 0,
+      viewMode: 'list'
     });
   });
 
-  it('falls back to the first non-empty status section', () => {
+  it('falls back to index 0 when there are no failed checks', () => {
     const state = createInitialBrowserState(makeReport([
       ['unknown-a', 'unknown'],
       ['pass-a', 'pass']
     ]));
 
-    expect(state.activeStatus).toBe('unknown');
-    expect(state.viewMode).toBe('detail');
+    expect(state.selectedCheckIndex).toBe(0);
+    expect(state.viewMode).toBe('list');
   });
 });
 
@@ -83,57 +78,53 @@ describe('streamed report state', () => {
     expect(buildStreamedReport(afterCompletion)?.checks.map(check => check.id)).toEqual(['fail-a']);
   });
 
-  it('moves browser focus to the first non-empty section while streaming', () => {
-    const state = syncBrowserState(createInitialBrowserState(null), makeReport([
+  it('keeps the selected index in bounds while streaming', () => {
+    const initial = {
+      ...createInitialBrowserState(null),
+      selectedCheckIndex: 7
+    };
+    const state = syncBrowserState(initial, toDisplayChecks(makeReport([
       ['pass-a', 'pass']
-    ]));
+    ])));
 
-    expect(state.activeStatus).toBe('pass');
-    expect(state.viewMode).toBe('detail');
+    expect(state.selectedCheckIndex).toBe(0);
+    expect(state.viewMode).toBe('list');
   });
 });
 
 describe('moveBrowserSelection', () => {
-  it('moves within a section and then to the next section boundary', () => {
+  it('moves through the ordered check list', () => {
     const report = makeReport([
       ['fail-a', 'fail'],
       ['fail-b', 'fail'],
       ['unknown-a', 'unknown'],
       ['pass-a', 'pass']
     ]);
-    const sections = buildScanSections(report);
+    const checks = toDisplayChecks(report);
 
-    const afterFirstMove = moveBrowserSelection(createInitialBrowserState(report), sections, 1);
-    expect(afterFirstMove.activeStatus).toBe('fail');
-    expect(afterFirstMove.selectedByStatus.fail).toBe(1);
+    const afterFirstMove = moveBrowserSelection(createInitialBrowserState(report), checks, 1);
+    expect(afterFirstMove.selectedCheckIndex).toBe(1);
 
-    const afterSecondMove = moveBrowserSelection(afterFirstMove, sections, 1);
-    expect(afterSecondMove.activeStatus).toBe('unknown');
-    expect(afterSecondMove.selectedByStatus.unknown).toBe(0);
+    const afterSecondMove = moveBrowserSelection(afterFirstMove, checks, 1);
+    expect(afterSecondMove.selectedCheckIndex).toBe(2);
   });
 
-  it('moves to the previous section when navigating left from the first item', () => {
+  it('moves to the previous check when navigating left', () => {
     const report = makeReport([
       ['fail-a', 'fail'],
       ['fail-b', 'fail'],
       ['unknown-a', 'unknown'],
       ['pass-a', 'pass']
     ]);
-    const sections = buildScanSections(report);
+    const checks = toDisplayChecks(report);
     const state = {
       ...createInitialBrowserState(report),
-      activeStatus: 'unknown' as const,
-      selectedByStatus: {
-        fail: 0,
-        unknown: 0,
-        pass: 0
-      }
+      selectedCheckIndex: 2
     };
 
-    const previous = moveBrowserSelection(state, sections, -1);
+    const previous = moveBrowserSelection(state, checks, -1);
 
-    expect(previous.activeStatus).toBe('fail');
-    expect(previous.selectedByStatus.fail).toBe(1);
+    expect(previous.selectedCheckIndex).toBe(1);
   });
 });
 
@@ -143,8 +134,8 @@ describe('toggleBrowserViewMode', () => {
       ['fail-a', 'fail']
     ]));
 
-    expect(toggleBrowserViewMode(initial).viewMode).toBe('list');
-    expect(toggleBrowserViewMode(toggleBrowserViewMode(initial)).viewMode).toBe('detail');
+    expect(toggleBrowserViewMode(initial).viewMode).toBe('detail');
+    expect(toggleBrowserViewMode(toggleBrowserViewMode(initial)).viewMode).toBe('list');
   });
 });
 
@@ -204,6 +195,14 @@ function makeReport(checks: Array<[string, CheckResult['status']]>): Pick<ScanRe
   };
 }
 
+function toDisplayChecks(report: Pick<ScanReport, 'checks'>) {
+  return report.checks.map(check => ({
+    id: check.id,
+    status: check.status,
+    result: check
+  }));
+}
+
 function makeCheckResult(id: string, status: CheckResult['status']): CheckResult {
   return {
     id,
@@ -227,6 +226,7 @@ function makeProgressEvent(overrides: Partial<{
     scopeLabel: 'full repository',
     scopeFileCount: 0,
     isFullRepository: true,
+    checkIds: ['check-a'],
     checkId: null,
     workerId: null,
     checkStatus: null,
