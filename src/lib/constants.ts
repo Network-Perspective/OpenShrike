@@ -4,11 +4,12 @@ export const DEFAULT_PROVIDER = 'azure';
 export const DEFAULT_OUTPUT = 'json';
 export const DEFAULT_SCAN_SCOPE = 'uncommitted';
 export const DEFAULT_RUNTIME_MODE = 'native';
-export const DEFAULT_PARALLELISM = 1;
+export const DEFAULT_PARALLELISM = 'auto';
 export const DEFAULT_DOCKER_IMAGE = 'openshrike-runtime:dev';
 
 export const CONFIG_DIRECTORY_NAME = '.openshrike';
 export const CONFIG_FILE_NAME = 'opencode.json';
+export const PROJECT_CONFIG_FILE_NAME = 'project.json';
 export const RUNTIME_ENV_FILE_NAME = 'runtime.env';
 export const RUNTIME_ENV_EXAMPLE_FILE_NAME = 'runtime.env.example';
 export const REQUIRED_ENV_FILE_NAME = 'required-env.txt';

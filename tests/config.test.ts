@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 import {loadRuntimeConfig, serializeConfig} from '../src/lib/config.js';
-import {runInitCommand} from '../src/lib/init.js';
+import {loadProjectConfig, loadProjectConfigForRepo} from '../src/lib/project-config.js';
+import {writeShrikeInitFiles} from '../src/lib/init/write.js';
 
 const tempDirectories: string[] = [];
 
@@ -89,19 +90,52 @@ describe('runtime config', () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-init-'));
     tempDirectories.push(tempRoot);
 
-    const result = await runInitCommand({
-      cwd: tempRoot,
-      force: true
+    const result = await writeShrikeInitFiles({
+      repoRoot: tempRoot,
+      policyId: 'typescript-baseline',
+      model: 'azure/gpt-5.4-mini',
+      runtimeMode: 'native',
+      projectType: 'typescript',
+      detectedFrom: ['package.json', 'tsconfig.json'],
+      opencodeSetup: 'existing-config'
     });
 
-    expect(await fs.readFile(result.configPath, 'utf8')).toContain('"$schema": "https://opencode.ai/config.json"');
-    const requiredEnv = await fs.readFile(result.requiredEnvFilePath, 'utf8');
-    const envExample = await fs.readFile(result.envExamplePath, 'utf8');
+    const runtimeConfig = await loadRuntimeConfig(result.opencodeConfigPath, {
+      agent: 'shrike-checker',
+      model: 'azure/gpt-5.4-mini'
+    });
+    const projectConfig = await loadProjectConfig(result.projectConfigPath);
+    const readme = await fs.readFile(result.readmePath, 'utf8');
 
-    expect(requiredEnv).toContain('AZURE_OPENAI_API_KEY');
-    expect(requiredEnv).toContain('OPENSHRIKE_AZURE_OPENAI_BASE_URL');
-    expect(envExample).toContain('AZURE_OPENAI_API_KEY=');
-    expect(envExample).toContain('OPENSHRIKE_AZURE_OPENAI_BASE_URL=');
-    expect(envExample).not.toContain('OPENSHRIKE_AZURE_OPENAI_API_VERSION=');
+    expect(runtimeConfig.config.$schema).toBe('https://opencode.ai/config.json');
+    expect(runtimeConfig.config.provider).toBeUndefined();
+    expect(runtimeConfig.config.agent?.['shrike-checker']?.model).toBe('azure/gpt-5.4-mini');
+    expect(projectConfig.config.scan.defaultId).toBe('typescript-baseline');
+    expect(projectConfig.config.runtime.configPath).toBe('.openshrike/opencode.json');
+    expect(projectConfig.config.init.detectedFrom).toEqual(['package.json', 'tsconfig.json']);
+    expect(readme).toContain('`project.json`');
+    expect(readme).toContain('`opencode.json`');
+  });
+
+  it('loads project config from a nested repository path', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-project-config-'));
+    tempDirectories.push(tempRoot);
+
+    await writeShrikeInitFiles({
+      repoRoot: tempRoot,
+      policyId: 'typescript-baseline',
+      model: 'azure/gpt-5.4-mini',
+      runtimeMode: 'native',
+      projectType: 'typescript',
+      detectedFrom: ['package.json', 'tsconfig.json'],
+      opencodeSetup: 'existing-config'
+    });
+
+    const nestedPath = path.join(tempRoot, 'src', 'feature');
+    await fs.mkdir(nestedPath, {recursive: true});
+    const loaded = await loadProjectConfigForRepo(nestedPath);
+
+    expect(loaded?.repoRoot).toBe(tempRoot);
+    expect(loaded?.config.scan.defaultId).toBe('typescript-baseline');
   });
 });

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {z} from 'zod';
 import {
   DEFAULT_PARALLELISM,
@@ -8,12 +9,37 @@ import {
   RUNTIME_MODE_VALUES,
   SCOPE_VALUES
 } from './constants.js';
+import {
+  loadProjectConfigForRepo,
+  resolveOptionalProjectConfigRelativePath,
+  resolveProjectConfigRelativePath
+} from './project-config.js';
 import type {ScanCommandOptions} from './types.js';
 
 const parallelismSchema = z.union([
   z.literal('auto'),
   z.coerce.number().int().min(1)
 ]);
+
+const rawScanOptionsSchema = z.object({
+  checkId: z.string().trim().min(1).optional(),
+  policyId: z.string().trim().min(1).optional(),
+  repoPath: z.string().trim().min(1).optional(),
+  outputFormat: z.enum(OUTPUT_VALUES).optional(),
+  agent: z.string().trim().min(1).optional(),
+  model: z.string().trim().min(1).optional(),
+  emitBundlePath: z.string().trim().min(1).optional(),
+  scanScope: z.enum(SCOPE_VALUES).optional(),
+  scanTarget: z.string().trim().min(1).optional(),
+  mockOpencode: z.boolean().optional(),
+  configPath: z.string().trim().min(1).optional(),
+  logPath: z.string().trim().min(1).optional(),
+  runtimeMode: z.enum(RUNTIME_MODE_VALUES).optional(),
+  image: z.string().trim().min(1).optional(),
+  artifactsDir: z.string().trim().min(1).optional(),
+  parallelism: parallelismSchema.optional(),
+  ui: z.boolean().optional()
+});
 
 const scanOptionsSchema = z
   .object({
@@ -63,4 +89,47 @@ const scanOptionsSchema = z
 
 export function validateScanOptions(input: unknown): ScanCommandOptions {
   return scanOptionsSchema.parse(input);
+}
+
+export async function resolveScanOptions(input: unknown): Promise<ScanCommandOptions> {
+  const rawOptions = rawScanOptionsSchema.parse(input);
+  const repoPathForDiscovery = path.resolve(rawOptions.repoPath ?? '.');
+  const loadedProjectConfig = await loadProjectConfigForRepo(repoPathForDiscovery);
+  const merged = {
+    ...mapProjectConfigToScanOptions(loadedProjectConfig),
+    ...rawOptions
+  };
+
+  if (!merged.repoPath) {
+    merged.repoPath = loadedProjectConfig
+      ? resolveProjectConfigRelativePath(loadedProjectConfig, loadedProjectConfig.config.scan.repo)
+      : '.';
+  }
+
+  return validateScanOptions(merged);
+}
+
+function mapProjectConfigToScanOptions(
+  loadedProjectConfig: Awaited<ReturnType<typeof loadProjectConfigForRepo>>
+): Partial<ScanCommandOptions> {
+  if (!loadedProjectConfig) {
+    return {};
+  }
+
+  const {config} = loadedProjectConfig;
+  return {
+    ...(config.scan.defaultKind === 'policy'
+      ? {policyId: config.scan.defaultId}
+      : {checkId: config.scan.defaultId}),
+    repoPath: resolveProjectConfigRelativePath(loadedProjectConfig, config.scan.repo),
+    outputFormat: config.scan.output,
+    agent: config.runtime.agent,
+    model: config.runtime.model,
+    scanScope: config.scan.scope,
+    configPath: resolveProjectConfigRelativePath(loadedProjectConfig, config.runtime.configPath),
+    runtimeMode: config.runtime.mode,
+    artifactsDir: resolveOptionalProjectConfigRelativePath(loadedProjectConfig, config.scan.artifactsDir),
+    parallelism: config.runtime.parallelism,
+    ui: config.scan.ui
+  };
 }

@@ -3,13 +3,10 @@ import path from 'node:path';
 import type {Config} from '@opencode-ai/sdk';
 import {z} from 'zod';
 import {
-  AZURE_BASE_URL_ENV,
-  AZURE_API_KEY_ENV,
   CONFIG_DIRECTORY_NAME,
   CONFIG_FILE_NAME,
   DEFAULT_AGENT_NAME,
-  DEFAULT_MODEL,
-  DEFAULT_PROVIDER
+  DEFAULT_MODEL
 } from './constants.js';
 import {findToolRoot} from './project-root.js';
 
@@ -95,43 +92,24 @@ export function parseRuntimeConfigContent(
   };
 }
 
-export function buildDefaultOpencodeConfig(): Config {
+export function buildDefaultOpencodeConfig(model = DEFAULT_MODEL): Config {
+  const permission: NonNullable<Config['permission']> = {
+    bash: 'allow',
+    edit: 'deny',
+    webfetch: 'deny',
+    doom_loop: 'deny',
+    external_directory: 'deny'
+  };
+
   return {
     $schema: 'https://opencode.ai/config.json',
-    model: DEFAULT_MODEL,
-    provider: {
-      [DEFAULT_PROVIDER]: {
-        env: [AZURE_API_KEY_ENV, AZURE_BASE_URL_ENV],
-        options: {
-          apiKey: `\${${AZURE_API_KEY_ENV}}`,
-          baseURL: `\${${AZURE_BASE_URL_ENV}}`,
-          timeout: 120_000
-        },
-        models: {
-          'gpt-5.4-mini': {
-            name: 'gpt-5.4-mini'
-          }
-        }
-      }
-    },
-    permission: {
-      bash: 'allow',
-      edit: 'deny',
-      webfetch: 'deny',
-      doom_loop: 'deny',
-      external_directory: 'deny'
-    },
+    model,
+    permission,
     agent: {
       [DEFAULT_AGENT_NAME]: {
         description: 'Runs OpenShrike checks in a read-only review session.',
-        model: DEFAULT_MODEL,
-        permission: {
-          bash: 'allow',
-          edit: 'deny',
-          webfetch: 'deny',
-          doom_loop: 'deny',
-          external_directory: 'deny'
-        }
+        model,
+        permission
       }
     }
   };
