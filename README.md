@@ -49,7 +49,7 @@ Prerequisite: Node.js 22+.
 npm install
 npm run build
 ./shrike init --force
-./shrike scan --policy csharp-baseline --repo .
+./shrike scan --policy typescript-baseline --repo .
 ```
 
 ## Runtime config (`shrike init`)
