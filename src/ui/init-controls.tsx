@@ -15,13 +15,23 @@ export interface SelectListItem {
   selected: boolean;
 }
 
+export interface HistoryStep {
+  prompt: string;
+  responseLines: string[];
+  tone?: 'normal' | 'warning' | 'error' | undefined;
+}
+
 export function DialogFrame(props: {
   title: string;
   children: React.ReactNode;
+  prefix?: string | undefined;
 }) {
+  const prefix = props.prefix ?? '';
+
   return (
     <Box flexDirection="column">
       <Box>
+        {prefix ? <Text color={initTheme.secondary}>{prefix}</Text> : null}
         <Text color={initTheme.railMuted}>┌</Text>
         <Text>  </Text>
         <Text color={initTheme.title}>{props.title}</Text>
@@ -54,21 +64,43 @@ export function DialogLine(props: {
 export function DialogPrompt(props: {
   prompt: string;
   tone?: 'normal' | 'warning' | 'error' | undefined;
+  symbol?: string | undefined;
+  symbolColor?: string | undefined;
 }) {
   const color = props.tone === 'error'
     ? initTheme.danger
     : props.tone === 'warning'
       ? initTheme.warning
       : initTheme.primary;
+  const symbol = props.symbol ?? '◆';
+  const symbolColor = props.symbolColor ?? initTheme.accent;
 
   return (
     <Box>
       <Box>
-        <Text color={initTheme.accent}>◆</Text>
+        <Text color={symbolColor}>{symbol}</Text>
         <Text>  </Text>
         <Text color={color}>{props.prompt}</Text>
       </Box>
     </Box>
+  );
+}
+
+export function DialogHistoryStep(props: HistoryStep) {
+  return (
+    <>
+      <DialogPrompt
+        prompt={props.prompt}
+        tone={props.tone}
+        symbol="◇"
+        symbolColor={initTheme.selected}
+      />
+      {props.responseLines.map((line, index) => (
+        <DialogLine key={`${props.prompt}:${index}`} railTone="muted">
+          <Text color={line.trim().length > 0 ? initTheme.primary : initTheme.secondary}>{line || ' '}</Text>
+        </DialogLine>
+      ))}
+    </>
   );
 }
 

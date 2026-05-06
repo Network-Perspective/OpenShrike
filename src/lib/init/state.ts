@@ -20,7 +20,7 @@ export type ExistingInitAction = 'update' | 'replace' | 'exit';
 export type OpenCodeDiscoveryAction = 'use-discovered' | 'auth-login' | 'exit';
 export type OpenCodeInstallAction = 'install-curl' | 'install-npm' | 'install-brew' | 'back';
 export type SuccessAction = 'run-scan' | 'change-defaults' | 'exit';
-export type ChangeDefaultsAction = 'policy' | 'model' | 'runtime' | 'back';
+export type ChangeDefaultsAction = 'policy' | 'model' | 'runtime' | 'done';
 
 export interface InitSelections {
   model?: string | undefined;

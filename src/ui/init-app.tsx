@@ -1,6 +1,15 @@
 import React, {useState} from 'react';
-import {Box, Text, render, useApp, useInput} from 'ink';
-import {DialogFrame, DialogLine, DialogPrompt, KeyHintBar, SelectList, SummaryBlock, type DialogRailTone} from './init-controls.js';
+import {Box, Text, render, useInput} from 'ink';
+import {
+  DialogFrame,
+  DialogHistoryStep,
+  DialogLine,
+  DialogPrompt,
+  KeyHintBar,
+  SelectList,
+  SummaryBlock,
+  type DialogRailTone
+} from './init-controls.js';
 import {INIT_DIALOG_TITLE, initTheme} from './init-theme.js';
 
 export class InitUiCancelledError extends Error {
@@ -37,43 +46,103 @@ export type InitScreenResult<T extends string> =
   | {type: 'submit'; value: T}
   | {type: 'back'};
 
+export interface InitHistoryItem {
+  screen: string;
+  prompt: string;
+  responseLines: string[];
+  tone?: 'normal' | 'warning' | 'error' | undefined;
+}
+
+export interface InitUiSession {
+  showScreen<T extends string>(
+    spec: InitScreenSpec<T>,
+    history: InitHistoryItem[]
+  ): Promise<InitScreenResult<T>>;
+  suspend(): void;
+  close(): void;
+}
+
+class InkInitUiSession implements InitUiSession {
+  private instance: ReturnType<typeof render> | null = null;
+  private screenVersion = 0;
+
+  async showScreen<T extends string>(
+    spec: InitScreenSpec<T>,
+    history: InitHistoryItem[]
+  ): Promise<InitScreenResult<T>> {
+    this.screenVersion += 1;
+
+    return await new Promise<InitScreenResult<T>>((resolve, reject) => {
+      const node = (
+        <InitScreenView
+          key={this.screenVersion}
+          spec={spec}
+          history={history}
+          onResolve={result => {
+            resolve(result);
+          }}
+          onCancel={() => {
+            reject(new InitUiCancelledError());
+          }}
+        />
+      );
+
+      if (this.instance) {
+        this.instance.rerender(node);
+        return;
+      }
+
+      this.instance = render(node, {
+        stdout: process.stderr,
+        exitOnCtrlC: false
+      });
+    });
+  }
+
+  suspend(): void {
+    if (!this.instance) {
+      return;
+    }
+
+    this.instance.clear();
+    this.instance.unmount();
+    this.instance.cleanup();
+    this.instance = null;
+  }
+
+  close(): void {
+    this.suspend();
+  }
+}
+
+export function createInitUiSession(): InitUiSession {
+  return new InkInitUiSession();
+}
+
 export async function runInitScreen<T extends string>(
   spec: InitScreenSpec<T>
 ): Promise<InitScreenResult<T>> {
-  return await new Promise<InitScreenResult<T>>((resolve, reject) => {
-    const instance = render(
-      <InitScreenView
-        spec={spec}
-        onResolve={result => {
-          resolve(result);
-        }}
-        onCancel={() => {
-          reject(new InitUiCancelledError());
-        }}
-      />,
-      {
-        stdout: process.stderr,
-        exitOnCtrlC: false
-      }
-    );
+  const session = createInitUiSession();
 
-    instance.waitUntilExit().catch(error => {
-      reject(error instanceof Error ? error : new Error(String(error)));
-    });
-  });
+  try {
+    return await session.showScreen(spec, []);
+  } finally {
+    session.close();
+  }
 }
 
 function InitScreenView<T extends string>(props: {
   spec: InitScreenSpec<T>;
+  history: InitHistoryItem[];
   onResolve: (result: InitScreenResult<T>) => void;
   onCancel: () => void;
 }) {
-  const {exit} = useApp();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(() =>
     resolveInitialIndex(props.spec.options, props.spec.initialValue)
   );
   const [showHelp, setShowHelp] = useState(false);
+  const [isSettled, setIsSettled] = useState(false);
 
   const filteredOptions = getFilteredOptions(props.spec.options, query, Boolean(props.spec.searchable));
   const effectiveIndex = filteredOptions.length === 0
@@ -81,21 +150,25 @@ function InitScreenView<T extends string>(props: {
     : Math.min(selectedIndex, filteredOptions.length - 1);
 
   useInput((input, key) => {
+    if (isSettled) {
+      return;
+    }
+
     if (key.ctrl && input === 'c') {
+      setIsSettled(true);
       props.onCancel();
-      exit();
       return;
     }
 
     if (key.escape && props.spec.allowCancel !== false) {
+      setIsSettled(true);
       props.onCancel();
-      exit();
       return;
     }
 
     if ((input === 'b' || input === 'B') && props.spec.allowBack) {
+      setIsSettled(true);
       props.onResolve({type: 'back'});
-      exit();
       return;
     }
 
@@ -137,23 +210,56 @@ function InitScreenView<T extends string>(props: {
     }
 
     if (key.return && filteredOptions.length > 0) {
+      setIsSettled(true);
       props.onResolve({
         type: 'submit',
         value: filteredOptions[effectiveIndex]!.value
       });
-      exit();
     }
   });
 
+  return (
+    <InitScreenLayout
+      spec={props.spec}
+      history={props.history}
+      query={query}
+      showHelp={showHelp}
+      filteredOptions={filteredOptions}
+      effectiveIndex={effectiveIndex}
+    />
+  );
+}
+
+export function InitScreenLayout<T extends string>(props: {
+  spec: InitScreenSpec<T>;
+  history: InitHistoryItem[];
+  query: string;
+  showHelp: boolean;
+  filteredOptions: InitScreenOption<T>[];
+  effectiveIndex: number;
+}) {
   const hints = buildHintBar(props.spec);
   const headerRailTone: DialogRailTone = 'muted';
   const choiceRailTone: DialogRailTone = 'active';
 
   return (
-    <DialogFrame title={props.spec.title ?? INIT_DIALOG_TITLE}>
+    <DialogFrame
+      title={props.spec.title ?? INIT_DIALOG_TITLE}
+      prefix={undefined}
+    >
       <DialogLine railTone={headerRailTone} />
+      {props.history.map((item, index) => (
+        <React.Fragment key={`${index}:${item.screen}:${item.prompt}`}>
+          <DialogHistoryStep
+            prompt={item.prompt}
+            responseLines={item.responseLines}
+            tone={item.tone}
+          />
+          <DialogLine railTone={headerRailTone} />
+        </React.Fragment>
+      ))}
       <DialogPrompt prompt={props.spec.prompt} tone={props.spec.tone} />
-      <DialogLine railTone="muted" />
+      <DialogLine railTone={headerRailTone} />
       {renderTextLines(props.spec.bodyLines, headerRailTone)}
       {props.spec.summaryItems && props.spec.summaryItems.length > 0 ? (
         <SummaryBlock items={props.spec.summaryItems} railTone={headerRailTone} />
@@ -162,16 +268,16 @@ function InitScreenView<T extends string>(props: {
       {props.spec.searchable ? (
         <DialogLine railTone={choiceRailTone}>
           <Text color={initTheme.secondary}>{`${props.spec.searchLabel ?? 'Search'}: `}</Text>
-          {query.length > 0 ? <Text color={initTheme.primary}>{query}</Text> : null}
+          {props.query.length > 0 ? <Text color={initTheme.primary}>{props.query}</Text> : null}
           <Text backgroundColor={initTheme.cursor}> </Text>
         </DialogLine>
       ) : null}
-      {filteredOptions.length > 0 ? (
+      {props.filteredOptions.length > 0 ? (
         <SelectList
-          items={filteredOptions.map((option, index) => ({
+          items={props.filteredOptions.map((option, index) => ({
             label: option.label,
             detail: option.detail,
-            selected: index === effectiveIndex
+            selected: index === props.effectiveIndex
           }))}
           railTone={choiceRailTone}
         />
@@ -182,7 +288,7 @@ function InitScreenView<T extends string>(props: {
       )}
       {renderTextLines(props.spec.noteLines, choiceRailTone)}
       <DialogLine railTone={choiceRailTone} />
-      {showHelp && props.spec.helpLines && props.spec.helpLines.length > 0 ? (
+      {props.showHelp && props.spec.helpLines && props.spec.helpLines.length > 0 ? (
         <>
           {renderTextLines(props.spec.helpLines, choiceRailTone)}
           <DialogLine railTone={choiceRailTone} />

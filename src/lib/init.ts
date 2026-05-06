@@ -3,7 +3,13 @@ import path from 'node:path';
 import {DEFAULT_RUNTIME_MODE} from './constants.js';
 import {listPolicyCatalog} from './policies.js';
 import {findToolRoot} from './project-root.js';
-import {runInitScreen, InitUiCancelledError, type InitScreenOption} from '../ui/init-app.js';
+import {
+  createInitUiSession,
+  InitUiCancelledError,
+  type InitHistoryItem,
+  type InitUiSession,
+  type InitScreenOption
+} from '../ui/init-app.js';
 import type {
   ChangeDefaultsAction,
   ExistingInitAction,
@@ -41,6 +47,7 @@ export class InitCommandCancelledError extends Error {
 }
 
 type SelectionFlow = 'initial' | 'change-model' | 'change-policy';
+type ChangeDefaultsOrigin = 'success' | 'existing-init';
 
 export async function runInitCommand(options: InitCommandOptions): Promise<InitResult> {
   if (!process.stdin.isTTY || !process.stderr.isTTY) {
@@ -51,13 +58,22 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
   const context = await buildWizardContext(options, toolRoot);
   let screen: InitScreen = context.existingInit.existingFiles.length > 0 ? 'existing-init' : 'opencode-discovery';
   let selectionFlow: SelectionFlow = 'initial';
+  let changeDefaultsOrigin: ChangeDefaultsOrigin = 'success';
+  const history: InitHistoryItem[] = [];
+  const ui = createInitUiSession();
 
-  while (true) {
-    try {
+  try {
+    while (true) {
       switch (screen) {
         case 'existing-init': {
-          const selection = await runInitScreen<ExistingInitAction>({
-            prompt: 'Project is already initialized',
+          const prompt = 'Project is already initialized';
+          const optionsForScreen: InitScreenOption<ExistingInitAction>[] = [
+            {value: 'update', label: 'Update existing setup'},
+            {value: 'replace', label: 'Clear and run setup again'},
+            {value: 'exit', label: 'Exit without changes'}
+          ];
+          const selection = await ui.showScreen<ExistingInitAction>({
+            prompt,
             bodyLines: [
               'Existing files:',
               ...context.existingInit.existingFiles.map(filePath => `${toRepoRelative(context.repoRoot, filePath)}`),
@@ -74,28 +90,35 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
                 value: context.existingProjectConfig?.config.runtime.model ?? 'auto'
               }
             ],
-            options: [
-              {value: 'update', label: 'Update existing setup'},
-              {value: 'replace', label: 'Clear and run setup again'},
-              {value: 'exit', label: 'Exit without changes'}
-            ],
+            options: optionsForScreen,
             initialValue: context.forceReplace ? 'replace' : 'update',
             allowCancel: true
-          });
+          }, history);
 
-          if (selection.type === 'submit') {
-            if (selection.value === 'exit') {
-              return buildExitResult(context);
-            }
-
-            if (selection.value === 'replace') {
-              resetSelections(context, false);
-            } else {
-              resetSelections(context, true);
-            }
-
-            screen = 'opencode-discovery';
+          if (selection.type !== 'submit') {
+            break;
           }
+
+          if (selection.value === 'exit') {
+            return buildExitResult(context);
+          }
+
+          pushSelectedHistory(history, 'existing-init', prompt, optionsForScreen, selection.value);
+
+          if (selection.value === 'update') {
+            resetSelections(context, true);
+            changeDefaultsOrigin = 'existing-init';
+            screen = 'change-defaults';
+            break;
+          }
+
+          if (selection.value === 'replace') {
+            resetSelections(context, false);
+          } else {
+            resetSelections(context, true);
+          }
+
+          screen = 'opencode-discovery';
           break;
         }
 
@@ -118,25 +141,30 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             break;
           }
 
-          const selection = await runInitScreen<OpenCodeDiscoveryAction>({
-            prompt: context.opencode.status === 'ready' ? 'OpenCode discovery' : 'OpenCode authentication required',
+          const prompt = context.opencode.status === 'ready'
+            ? 'OpenCode discovery'
+            : 'OpenCode authentication required';
+          const optionsForScreen: InitScreenOption<OpenCodeDiscoveryAction>[] = context.opencode.status === 'ready'
+            ? [
+                {value: 'use-discovered', label: 'Use discovered OpenCode config'},
+                {value: 'auth-login', label: 'Re-authenticate with `opencode auth login`'},
+                {value: 'exit', label: 'Exit without changes'}
+              ]
+            : [
+                {value: 'auth-login', label: 'Launch `opencode auth login`'},
+                {value: 'exit', label: 'Exit without changes'}
+              ];
+          const selection = await ui.showScreen<OpenCodeDiscoveryAction>({
+            prompt,
             bodyLines: buildOpenCodeDiscoveryLines(context),
             summaryItems: buildOpenCodeDiscoverySummary(context),
-            options: context.opencode.status === 'ready'
-              ? [
-                  {value: 'use-discovered', label: 'Use discovered OpenCode config'},
-                  {value: 'auth-login', label: 'Re-authenticate with `opencode auth login`'},
-                  {value: 'exit', label: 'Exit without changes'}
-                ]
-              : [
-                  {value: 'auth-login', label: 'Launch `opencode auth login`'},
-                  {value: 'exit', label: 'Exit without changes'}
-                ],
+            options: optionsForScreen,
             allowBack: context.existingInit.existingFiles.length > 0,
             allowCancel: true
-          });
+          }, history);
 
           if (selection.type === 'back') {
+            popHistoryForScreen(history, 'existing-init');
             screen = 'existing-init';
             break;
           }
@@ -147,6 +175,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
 
           if (selection.value === 'auth-login') {
             try {
+              ui.suspend();
               await runOpencodeAuthLogin(context);
               await refreshOpenCodeDiscovery(context, toolRoot);
             } catch (error) {
@@ -166,6 +195,8 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             break;
           }
 
+          pushSelectedHistory(history, 'opencode-discovery', prompt, optionsForScreen, selection.value);
+
           if (context.opencode.models.length === 1) {
             context.selections.model = context.opencode.models[0];
             screen = 'policy-selection';
@@ -176,23 +207,26 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
         }
 
         case 'opencode-install': {
+          const prompt = 'OpenCode not found';
           const installOptions = getOpenCodeInstallOptions();
-          const selection = await runInitScreen<OpenCodeInstallAction>({
-            prompt: 'OpenCode not found',
+          const optionsForScreen: InitScreenOption<OpenCodeInstallAction>[] = installOptions.map(option => ({
+            value: option.id,
+            label: option.label
+          }));
+          const selection = await ui.showScreen<OpenCodeInstallAction>({
+            prompt,
             bodyLines: [
               '`opencode` is not available on PATH and no repo-local binary was found.',
               '',
               'Select an install method:'
             ],
-            options: installOptions.map(option => ({
-              value: option.id,
-              label: option.label
-            })),
+            options: optionsForScreen,
             allowBack: true,
             allowCancel: true
-          });
+          }, history);
 
           if (selection.type === 'back' || selection.value === 'back') {
+            popHistoryForScreen(history, 'opencode-discovery');
             screen = 'opencode-discovery';
             break;
           }
@@ -204,6 +238,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
           }
 
           try {
+            ui.suspend();
             await runExternalCommand(selectedInstall.command, selectedInstall.args, {
               cwd: context.repoRoot,
               shell: selectedInstall.shell ?? false
@@ -225,12 +260,13 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
         }
 
         case 'model-selection': {
+          const prompt = 'Select default model';
           const modelOptions = context.opencode.models.map(model => ({
             value: model,
             label: model
           }));
-          const selection = await runInitScreen<string>({
-            prompt: 'Select default model',
+          const selection = await ui.showScreen<string>({
+            prompt,
             bodyLines: [
               'Multiple models were found in your OpenCode config.',
               'Smaller models are fine for local scans, e.g. `gpt-5.4-mini` or a Haiku-class model.'
@@ -241,28 +277,32 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             searchLabel: 'Search',
             allowBack: true,
             allowCancel: true
-          });
+          }, history);
 
           if (selection.type === 'back') {
-            screen = selectionFlow === 'change-model' ? 'change-defaults' : 'opencode-discovery';
+            const previousScreen = selectionFlow === 'change-model' ? 'change-defaults' : 'opencode-discovery';
+            popHistoryForScreen(history, previousScreen);
+            screen = previousScreen;
             break;
           }
 
           context.selections.model = selection.value;
           if (selectionFlow === 'change-model') {
-            await writeSelectionsOrShowError(context, 'success', 'success');
-            screen = context.error ? 'error' : 'success';
+            await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults');
+            screen = context.error ? 'error' : 'change-defaults';
             selectionFlow = 'initial';
           } else {
+            pushSelectedHistory(history, 'model-selection', prompt, modelOptions, selection.value);
             screen = 'policy-selection';
           }
           break;
         }
 
         case 'policy-selection': {
+          const prompt = 'Select default policy';
           const policyOptions = buildPolicyOptions(context);
-          const selection = await runInitScreen<string>({
-            prompt: 'Select default policy',
+          const selection = await ui.showScreen<string>({
+            prompt,
             bodyLines: [
               `Detected project type: ${context.projectDetection.recommended.label}`,
               `Evidence: ${context.selections.detectedFrom.join(', ')}`
@@ -278,27 +318,42 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             ],
             allowBack: true,
             allowCancel: true
-          });
+          }, history);
 
           if (selection.type === 'back') {
-            screen = selectionFlow === 'change-policy'
+            const previousScreen = selectionFlow === 'change-policy'
               ? 'change-defaults'
               : context.opencode.models.length > 1
                 ? 'model-selection'
                 : 'opencode-discovery';
+            popHistoryForScreen(history, previousScreen);
+            screen = previousScreen;
             break;
           }
 
           context.selections.policyId = selection.value;
-          await writeSelectionsOrShowError(context, 'success', 'success');
-          screen = context.error ? 'error' : 'success';
-          selectionFlow = 'initial';
+          if (selectionFlow === 'change-policy') {
+            await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults');
+            screen = context.error ? 'error' : 'change-defaults';
+            selectionFlow = 'initial';
+          } else {
+            pushSelectedHistory(history, 'policy-selection', prompt, policyOptions, selection.value);
+            await writeSelectionsOrShowError(context, 'success', 'success');
+            screen = context.error ? 'error' : 'success';
+            selectionFlow = 'initial';
+          }
           break;
         }
 
         case 'success': {
-          const selection = await runInitScreen<SuccessAction>({
-            prompt: 'Setup complete',
+          const prompt = 'Setup complete';
+          const optionsForScreen: InitScreenOption<SuccessAction>[] = [
+            {value: 'run-scan', label: 'Run `shrike scan`'},
+            {value: 'change-defaults', label: 'Change saved defaults'},
+            {value: 'exit', label: 'Exit'}
+          ];
+          const selection = await ui.showScreen<SuccessAction>({
+            prompt,
             bodyLines: ['Repository initialized for Shrike.'],
             summaryItems: [
               {label: 'Provider', value: resolveProviderLabel(context.selections.model, context.opencode.providers)},
@@ -306,13 +361,9 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
               {label: 'Default policy', value: context.selections.policyId},
               {label: 'Runtime mode', value: context.selections.runtimeMode}
             ],
-            options: [
-              {value: 'run-scan', label: 'Run `shrike scan`'},
-              {value: 'change-defaults', label: 'Change saved defaults'},
-              {value: 'exit', label: 'Exit'}
-            ],
+            options: optionsForScreen,
             allowCancel: true
-          });
+          }, history);
 
           if (selection.type !== 'submit') {
             break;
@@ -323,6 +374,8 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
           }
 
           if (selection.value === 'change-defaults') {
+            pushSelectedHistory(history, 'success', prompt, optionsForScreen, selection.value);
+            changeDefaultsOrigin = 'success';
             screen = 'change-defaults';
             break;
           }
@@ -331,23 +384,33 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
         }
 
         case 'change-defaults': {
-          const options: InitScreenOption<ChangeDefaultsAction>[] = [
+          const prompt = 'Change saved defaults';
+          const optionsForScreen: InitScreenOption<ChangeDefaultsAction>[] = [
             {value: 'policy', label: `Policy: ${context.selections.policyId}`},
             ...(context.opencode.models.length > 1
               ? [{value: 'model' as const, label: `Model: ${context.selections.model ?? 'default'}`}]
               : []),
             {value: 'runtime', label: `Runtime: ${context.selections.runtimeMode}`},
-            {value: 'back', label: 'Back'}
+            {value: 'done', label: 'Done'}
           ];
 
-          const selection = await runInitScreen<ChangeDefaultsAction>({
-            prompt: 'Change saved defaults',
-            options,
+          const selection = await ui.showScreen<ChangeDefaultsAction>({
+            prompt,
+            options: optionsForScreen,
             allowBack: true,
             allowCancel: true
-          });
+          }, history);
 
-          if (selection.type === 'back' || selection.value === 'back') {
+          if (selection.type === 'back') {
+            popHistoryForScreen(history, changeDefaultsOrigin);
+            screen = changeDefaultsOrigin;
+            break;
+          }
+
+          if (selection.value === 'done') {
+            if (changeDefaultsOrigin === 'success') {
+              popHistoryForScreen(history, 'success');
+            }
             screen = 'success';
             break;
           }
@@ -369,26 +432,29 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
         }
 
         case 'runtime-selection': {
-          const selection = await runInitScreen<RuntimeMode>({
-            prompt: 'Select runtime mode',
+          const prompt = 'Select runtime mode';
+          const optionsForScreen: InitScreenOption<RuntimeMode>[] = [
+            {value: 'native', label: 'native'},
+            {value: 'docker', label: 'docker'}
+          ];
+          const selection = await ui.showScreen<RuntimeMode>({
+            prompt,
             bodyLines: ['Choose how `shrike scan` should run by default.'],
-            options: [
-              {value: 'native', label: 'native'},
-              {value: 'docker', label: 'docker'}
-            ],
+            options: optionsForScreen,
             initialValue: context.selections.runtimeMode,
             allowBack: true,
             allowCancel: true
-          });
+          }, history);
 
           if (selection.type === 'back') {
+            popHistoryForScreen(history, 'change-defaults');
             screen = 'change-defaults';
             break;
           }
 
           context.selections.runtimeMode = selection.value;
-          await writeSelectionsOrShowError(context, 'success', 'success');
-          screen = context.error ? 'error' : 'success';
+          await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults');
+          screen = context.error ? 'error' : 'change-defaults';
           break;
         }
 
@@ -398,7 +464,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             break;
           }
 
-          const selection = await runInitScreen<'retry' | 'back' | 'cancel'>({
+          const selection = await ui.showScreen<'retry' | 'back' | 'cancel'>({
             prompt: context.error.prompt,
             tone: 'error',
             bodyLines: context.error.lines,
@@ -409,7 +475,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             ],
             allowBack: false,
             allowCancel: true
-          });
+          }, history);
 
           if (selection.type !== 'submit') {
             break;
@@ -420,6 +486,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
           }
 
           if (selection.value === 'back') {
+            popHistoryForScreen(history, context.error.backScreen);
             screen = context.error.backScreen;
             context.error = null;
             break;
@@ -428,18 +495,20 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
           const retryAction = context.error.retryAction ?? 'none';
           const retryScreen = context.error.retryScreen;
           context.error = null;
-          await handleRetryAction(context, retryAction, toolRoot, retryScreen);
+          await handleRetryAction(context, retryAction, toolRoot, retryScreen, ui);
           screen = context.error ? 'error' : retryScreen;
           break;
         }
       }
-    } catch (error) {
-      if (error instanceof InitUiCancelledError) {
-        throw new InitCommandCancelledError();
-      }
-
-      throw error;
     }
+  } catch (error) {
+    if (error instanceof InitUiCancelledError) {
+      throw new InitCommandCancelledError();
+    }
+
+    throw error;
+  } finally {
+    ui.close();
   }
 }
 
@@ -584,6 +653,30 @@ function buildPolicyOptions(context: InitWizardContext): InitScreenOption<string
     }));
 }
 
+function pushSelectedHistory<T extends string>(
+  history: InitHistoryItem[],
+  screen: string,
+  prompt: string,
+  options: InitScreenOption<T>[],
+  value: T
+): void {
+  history.push({
+    screen,
+    prompt,
+    responseLines: [resolveOptionLabel(options, value)]
+  });
+}
+
+function popHistoryForScreen(history: InitHistoryItem[], screen: string): void {
+  if (history.at(-1)?.screen === screen) {
+    history.pop();
+  }
+}
+
+function resolveOptionLabel<T extends string>(options: InitScreenOption<T>[], value: T): string {
+  return options.find(option => option.value === value)?.label ?? value;
+}
+
 async function writeSelectionsOrShowError(
   context: InitWizardContext,
   retryScreen: Exclude<InitScreen, 'error'>,
@@ -616,7 +709,8 @@ async function handleRetryAction(
   context: InitWizardContext,
   retryAction: NonNullable<InitWizardContext['error']>['retryAction'],
   toolRoot: string,
-  retryScreen: Exclude<InitScreen, 'error'>
+  retryScreen: Exclude<InitScreen, 'error'>,
+  ui: InitUiSession
 ): Promise<void> {
   try {
     switch (retryAction) {
@@ -624,6 +718,7 @@ async function handleRetryAction(
         await refreshOpenCodeDiscovery(context, toolRoot);
         return;
       case 'auth-login':
+        ui.suspend();
         await runOpencodeAuthLogin(context);
         await refreshOpenCodeDiscovery(context, toolRoot);
         return;
@@ -632,6 +727,7 @@ async function handleRetryAction(
       case 'install-brew': {
         const option = getOpenCodeInstallOptions().find(candidate => candidate.id === retryAction);
         if (option?.command && option.args) {
+          ui.suspend();
           await runExternalCommand(option.command, option.args, {
             cwd: context.repoRoot,
             shell: option.shell ?? false
