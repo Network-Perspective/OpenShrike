@@ -1,176 +1,184 @@
 # OpenShrike
 
-Security-first, self-hosted agentic code review for engineering best practices.
+Turn engineering best practices into tests your team can run and enforce.
 
 ![OpenShrike logo](docs/openshrike-logo.png)
 
-OpenShrike evaluates code and development artifacts against a versioned policy
-library, using OpenCode as the execution runtime. It is designed for teams
-using agentic workflows that need review signal beyond traditional linting.
+OpenShrike is a security-first, self-hosted implementation of a new kind of
+test: best-practice tests.
 
-Screenshots
+It is built for the gap between linters and unit tests. Linters catch style and
+syntax. Unit tests check behavior. OpenShrike checks whether a change follows
+the engineering practices your team already relies on in production:
+architectural boundaries, test discipline, input validation, timeouts, secrets
+handling, observability, API safety, and similar review standards.
+
+Those standards live as versioned Markdown checks and policies in
+[best_practices/](best_practices/). That makes them reviewable, portable, and
+easy to tailor to a specific codebase, language, architecture, and risk
+profile. It lets teams materialize established best practices as enforceable
+tests for their own project. OpenShrike executes them with OpenCode and
+produces findings with evidence, rationale, and remediation.
 
 ![scan screenshot](docs/scan-screenshot.png)
 
-![check screenshot](docs/check-screenshot.png)
+## Why OpenShrike
 
-## Project value
+- Turn tribal knowledge, review comments, and design standards into concrete,
+  repeatable checks.
+- Tailor policies to the project instead of forcing a one-size-fits-all rule
+  set.
+- Focus on high-signal engineering risks, not formatting noise.
+- Run the same review locally and in CI.
+- Keep execution self-hosted with `native` and `docker` runtimes.
 
-- Policy-as-data: checks and policies live as markdown in `best_practices/`,
-  versioned with your codebase.
-- Security-first runtime: read-only review sessions, explicit runtime config,
-  and optional Docker isolation.
-- Agent-ready output: JSON and Markdown findings with evidence, rationale, and
-  remediation.
-- Local and CI parity: same `shrike scan` command surface across fast local and
-  hardened execution paths.
+## Simple workflow
 
-## Typical use cases
+Assume `shrike` is on your `PATH`. If you are running directly from this
+repository, use `./shrike` instead.
 
-- Pre-PR self-review on uncommitted changes.
-- PR/branch scanning in CI with report artifacts.
-- Targeted verification for one high-risk check.
-- Security-conscious review workflows using `--runtime docker`.
+```bash
+shrike init
+shrike scan
+```
 
-## Current implementation status
+- `shrike init` is interactive. It detects the project, helps establish
+  AI provider access, lets you choose defaults, and writes
+  `.openshrike/project.json` plus `.openshrike/opencode.json`.
+- `shrike scan` uses those saved defaults automatically. By default it scans
+  uncommitted changes in the current repository.
+- Re-run `shrike init` when you want to change the default policy, model, or
+  runtime settings.
 
-- Active implementation is TypeScript/Node in `src/`.
-- Legacy C# implementation is archived in `archive/legacy-csharp/`.
-- `scan` supports runtime backends `native` and `docker`.
-- Parallel check workers are available via `--parallelism <N|auto>`.
-- The Ink terminal UI streams worker progress and runtime events (disable with
-  `--no-ui`).
-
-## Quick start
+## Install From Source
 
 Prerequisite: Node.js 22+.
 
 ```bash
 npm install
 npm run build
-./shrike init --force
-./shrike scan --policy typescript-baseline --repo .
+scripts/install-local.sh --source ./shrike --link
 ```
 
-## Runtime config (`shrike init`)
+If `~/.local/bin` is not on your `PATH`, add it in your shell profile.
+`shrike init` expects an interactive terminal.
 
-`./shrike init` writes these files to `.openshrike/`:
+## What Gets Tested
 
-- `opencode.json`: OpenCode runtime config.
-- `required-env.txt`: one required environment variable name per line.
-- `runtime.env.example`: starter env-file template.
-- `README.md`: local notes for generated runtime files.
+OpenShrike policies are bundles of checks for things like:
 
-Default required variables:
+- architecture and dependency boundaries,
+- behavior-covering and deterministic tests,
+- boundary validation and secret hygiene,
+- time budgets, retries, and cancellation,
+- deployability, health signals, and observability,
+- API and data-shaping safety.
 
-```text
-AZURE_OPENAI_API_KEY
-OPENSHRIKE_AZURE_OPENAI_BASE_URL
-```
+The bundled library is documented in
+[best_practices/README.md](best_practices/README.md). The goal is not to
+duplicate linters. The goal is to enforce the practices that actually keep
+systems safe, maintainable, observable, and reliable.
 
-Keep secrets out of git and provide them at runtime (for example, container env
-vars or `--env-file`).
+## Command Reference
 
-## Scan usage
+### `shrike init`
 
-`scan` requires exactly one of `--check` or `--policy`.
+Interactive setup for the local `.openshrike/` directory.
 
 ```bash
-./shrike scan \
-  (--check <CHECK_ID> | --policy <POLICY_ID>) \
-  --repo <PATH> \
+shrike init [--force]
+```
+
+- `--force`: prefer replacing generated setup when initialization already
+  exists.
+
+### `shrike scan`
+
+After `shrike init`, a plain `shrike scan` uses saved defaults from
+`.openshrike/project.json`. Without saved defaults, `scan` requires exactly one
+of `--check` or `--policy`.
+
+```bash
+shrike scan \
+  [--check <CHECK_ID> | --policy <POLICY_ID>] \
+  [--repo <PATH>] \
+  [--output json|markdown] \
+  [--agent <NAME>] \
+  [--model <PROVIDER/MODEL>] \
+  [--emit-bundle <PATH>] \
   [--scan-scope uncommitted|commit|branch|pr|full] \
   [--scan-target <TARGET>] \
-  [--runtime native|docker] \
-  [--parallelism <N|auto>] \
-  [--output json|markdown] \
+  [--mock-opencode] \
   [--config <PATH>] \
   [--log <PATH>] \
-  [--artifacts-dir <PATH>] \
+  [--runtime native|docker] \
   [--image <REF>] \
-  [--emit-bundle <PATH>] \
-  [--agent <NAME>] \
-  [--model <provider/model>] \
-  [--mock-opencode] \
+  [--artifacts-dir <PATH>] \
+  [--parallelism <N|auto>] \
   [--no-ui]
 ```
 
-Scope behavior:
+Common behavior:
 
-- `uncommitted` (default): changed tracked/untracked files in the working tree.
-- `commit`: requires `--scan-target <COMMIT_OR_RANGE>`.
-- `branch`: requires `--scan-target <BASE_BRANCH>` and compares
+- `--repo .`, `--output json`, `--scan-scope uncommitted`, `--runtime native`,
+  and `--parallelism auto` are the default values when not overridden by saved
+  project settings.
+- `commit` requires `--scan-target <COMMIT_OR_RANGE>`.
+- `branch` requires `--scan-target <BASE_BRANCH>` and compares
   `<BASE_BRANCH>...HEAD`.
-- `pr`: uses `--scan-target <DIFF_SPEC>` or defaults to `origin/main...HEAD`.
-- `full`: scans the entire repository.
-
-Runtime behavior:
-
-- `--runtime native` is the default fast local loop.
+- `pr` uses `--scan-target <DIFF_SPEC>` or defaults to `origin/main...HEAD`.
+- `full` scans the whole repository.
 - `--runtime docker` runs an ephemeral worker container.
-- If Docker mode is used without `--image`, OpenShrike uses
+- If Docker is selected without `--image`, OpenShrike uses
   `openshrike-runtime:dev` and builds it from
-  `docker/openshrike-runtime.Dockerfile` when missing.
-- `--artifacts-dir` controls where Docker worker artifacts are written (for
-  example `report.json` and scan logs).
+  `docker/openshrike-runtime.Dockerfile` when needed.
+- `--artifacts-dir` controls where runtime artifacts such as `report.json` and
+  logs are written.
+- `--mock-opencode` exercises the scan path without live OpenCode calls.
+- `--no-ui` disables the live terminal dashboard on stderr.
 
-Parallelism:
+## Examples
 
-- `--parallelism 1` is the default.
-- `--parallelism auto` picks a safe concurrency level from available CPU and
-  check count.
-
-## Workflow examples
-
-Fast local loop:
+Use saved defaults:
 
 ```bash
-./shrike scan --policy typescript-baseline --repo . --runtime native --parallelism auto
+shrike scan
 ```
 
-PR/CI parity in Docker:
+Run a specific policy without saved defaults:
 
 ```bash
-./shrike scan \
+shrike scan --policy typescript-baseline --repo .
+```
+
+Run a single check against a full repository:
+
+```bash
+shrike scan \
+  --check csharp-rel-001-cancellation-tokens \
+  --repo ../OpenShrike.TestsCsharp \
+  --scan-scope full
+```
+
+Run a PR-style scan in Docker:
+
+```bash
+shrike scan \
   --policy csharp-baseline \
   --repo . \
   --scan-scope pr \
   --scan-target origin/main...HEAD \
   --runtime docker \
-  --parallelism auto \
-  --artifacts-dir artifacts/shrike \
   --output json
 ```
 
-Targeted single-check verification:
+## Output And Exit Codes
 
-```bash
-./shrike scan \
-  --check csharp-rel-001-cancellation-tokens \
-  --repo ../OpenShrike.TestsCsharp \
-  --scan-scope full \
-  --runtime docker
-```
-
-UI/report smoke test without OpenCode calls:
-
-```bash
-./shrike scan \
-  --policy csharp-baseline \
-  --repo . \
-  --scan-scope full \
-  --mock-opencode \
-  --no-ui
-```
-
-## Output and exit codes
-
-- `--output json` (default) emits machine-readable report data.
+- `--output json` emits machine-readable report data.
 - `--output markdown` emits a human-readable report.
-- Reports include an `execution` block with runtime and parallelism metadata.
 - Exit code `0`: no failing checks.
 - Exit code `2`: one or more failing checks.
-- Exit code `1`: command/runtime error.
+- Exit code `1`: command or runtime error.
 
 ## Development
 
@@ -181,21 +189,15 @@ npm run typecheck
 npm test
 ```
 
-The `./shrike` launcher uses `tsx src/cli.ts` when available, and falls back to
+The `./shrike` launcher uses `tsx src/cli.ts` when available and falls back to
 `dist/cli.js`.
 
-## Publish and install
+## Publish And Install
 
 Create a framework bundle:
 
 ```bash
 scripts/publish.sh
-```
-
-Install from source with a symlink:
-
-```bash
-scripts/install-local.sh --source ./shrike --link
 ```
 
 Install from the published framework bundle:
@@ -204,7 +206,7 @@ Install from the published framework bundle:
 scripts/install-local.sh --source .artifacts/publish/framework
 ```
 
-## Documentation map
+## Documentation Map
 
 - [Vision and scope](docs/requirements/01-project-vision.md)
 - [Feature scope and phases](docs/requirements/02-feature-scope.md)
