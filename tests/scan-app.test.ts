@@ -1,14 +1,21 @@
 import {describe, expect, it} from 'vitest';
 import type {CheckResult, ScanReport} from '../src/lib/types.js';
 import {
+  buildCheckListEntryDisplay,
+  buildProgressSegments,
   buildStreamedReport,
   buildScanSections,
   createInitialBrowserState,
   createStreamedReportState,
+  deriveProgressCounts,
+  formatCheckListLabel,
   formatCheckIdDisplay,
+  formatStatusMarker,
   moveBrowserSelection,
   parseEvidenceLocation,
   reduceStreamedReportState,
+  resolveEscapeKeyAction,
+  resolveVerticalArrowAction,
   resolveEvidenceWindow,
   syncBrowserState,
   toggleBrowserViewMode
@@ -143,6 +150,160 @@ describe('formatCheckIdDisplay', () => {
   it('shortens check ids to the uppercase prefix ending in the numeric code', () => {
     expect(formatCheckIdDisplay('bp-sec-004-sensitive-data-not-logged')).toBe('BP-SEC-004');
     expect(formatCheckIdDisplay('csharp-rel-001-cancellation-tokens')).toBe('CSHARP-REL-001');
+  });
+});
+
+describe('formatCheckListLabel', () => {
+  it('renders checks as name followed by the short id in parentheses', () => {
+    const check = toDisplayChecks(makeReport([
+      ['bp-sec-004-sensitive-data-not-logged', 'fail']
+    ]))[0]!;
+
+    expect(formatCheckListLabel(check, {
+      'bp-sec-004-sensitive-data-not-logged': 'Sensitive data is not logged'
+    })).toBe('Sensitive data is not logged (BP-SEC-004)');
+  });
+});
+
+describe('formatStatusMarker', () => {
+  it('uses the updated pass marker and blinks running checks', () => {
+    expect(formatStatusMarker('pass')).toBe('[v]');
+    expect(formatStatusMarker('running', true)).toBe('[.]');
+    expect(formatStatusMarker('running', false)).toBe('[ ]');
+  });
+});
+
+describe('buildCheckListEntryDisplay', () => {
+  it('renders running checks in bright white with the short id after the title', () => {
+    const display = buildCheckListEntryDisplay({
+      id: 'bp-sec-004-sensitive-data-not-logged',
+      status: 'running',
+      result: null
+    }, {
+      'bp-sec-004-sensitive-data-not-logged': 'Sensitive data is not logged'
+    }, {
+      blinkOn: true
+    });
+
+    expect(display).toEqual({
+      marker: '[.]',
+      statusColor: 'whiteBright',
+      title: 'Sensitive data is not logged',
+      idLabel: 'BP-SEC-004',
+      label: 'Sensitive data is not logged (BP-SEC-004)'
+    });
+  });
+});
+
+describe('resolveEscapeKeyAction', () => {
+  it('goes back to the list from detail view before exiting', () => {
+    expect(resolveEscapeKeyAction({
+      showExitConfirm: false,
+      showHelp: false,
+      viewMode: 'detail',
+      isScanComplete: false
+    })).toBe('back-to-list');
+  });
+
+  it('prompts before exiting while a scan is still running', () => {
+    expect(resolveEscapeKeyAction({
+      showExitConfirm: false,
+      showHelp: false,
+      viewMode: 'list',
+      isScanComplete: false
+    })).toBe('prompt-exit-confirm');
+  });
+
+  it('exits directly once the scan is complete', () => {
+    expect(resolveEscapeKeyAction({
+      showExitConfirm: false,
+      showHelp: false,
+      viewMode: 'list',
+      isScanComplete: true
+    })).toBe('exit');
+  });
+});
+
+describe('resolveVerticalArrowAction', () => {
+  it('scrolls in detail view instead of changing the selected check', () => {
+    expect(resolveVerticalArrowAction({
+      reportReady: true,
+      showHelp: false,
+      viewMode: 'detail'
+    })).toBe('scroll');
+  });
+
+  it('navigates between checks in list view when the report is ready', () => {
+    expect(resolveVerticalArrowAction({
+      reportReady: true,
+      showHelp: false,
+      viewMode: 'list'
+    })).toBe('navigate');
+  });
+
+  it('scrolls when help is open or before checks are ready', () => {
+    expect(resolveVerticalArrowAction({
+      reportReady: true,
+      showHelp: true,
+      viewMode: 'list'
+    })).toBe('scroll');
+
+    expect(resolveVerticalArrowAction({
+      reportReady: false,
+      showHelp: false,
+      viewMode: 'list'
+    })).toBe('scroll');
+  });
+});
+
+describe('deriveProgressCounts', () => {
+  it('separates running checks from not-yet-started pending work', () => {
+    expect(deriveProgressCounts({
+      isScanComplete: false,
+      totalChecks: 10,
+      completedCount: 4,
+      runningCheckIds: ['check-a', 'check-b']
+    })).toEqual({
+      inProgressCount: 2,
+      pendingCount: 4
+    });
+  });
+
+  it('clears unfinished counts after the scan completes', () => {
+    expect(deriveProgressCounts({
+      isScanComplete: true,
+      totalChecks: 10,
+      completedCount: 10,
+      runningCheckIds: ['check-a']
+    })).toEqual({
+      inProgressCount: 0,
+      pendingCount: 0
+    });
+  });
+});
+
+describe('buildProgressSegments', () => {
+  it('adds a dedicated white segment for checks that are in progress', () => {
+    const segments = buildProgressSegments({
+      failedCount: 1,
+      unknownCount: 1,
+      passedCount: 2,
+      inProgressCount: 1,
+      pendingCount: 1,
+      width: 12
+    });
+
+    expect(segments.map(segment => segment.key)).toEqual([
+      'failed',
+      'unknown',
+      'passed',
+      'running',
+      'pending'
+    ]);
+    expect(segments[3]).toMatchObject({
+      key: 'running',
+      backgroundColor: 'whiteBright'
+    });
   });
 });
 

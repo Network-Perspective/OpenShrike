@@ -15,7 +15,10 @@ import type {
 } from '../lib/types.js';
 
 type SectionViewMode = 'detail' | 'list';
-type CheckDisplayStatus = CheckStatus | 'pending';
+type CheckDisplayStatus = CheckStatus | 'pending' | 'running';
+type ExitConfirmationChoice = 'yes' | 'no';
+export type EscapeKeyAction = 'dismiss-exit-confirm' | 'back-to-list' | 'prompt-exit-confirm' | 'exit';
+export type VerticalArrowAction = 'scroll' | 'navigate';
 
 export interface DisplayCheck {
   id: string;
@@ -83,6 +86,7 @@ interface CheckListModuleProps {
   browser: BrowserState;
   isScanComplete: boolean;
   checkTitles: Record<string, string>;
+  blinkOn: boolean;
 }
 
 const SECTION_ORDER: readonly CheckStatus[] = ['fail', 'unknown', 'pass'];
@@ -95,6 +99,7 @@ const SECTION_LABELS: Record<CheckStatus, string> = {
 
 const STATUS_BADGES: Record<CheckDisplayStatus, string> = {
   pending: 'PENDING',
+  running: 'RUNNING',
   fail: 'FAIL',
   unknown: 'INCONCLUSIVE',
   pass: 'PASS'
@@ -102,13 +107,15 @@ const STATUS_BADGES: Record<CheckDisplayStatus, string> = {
 
 const STATUS_MARKERS: Record<CheckDisplayStatus, string> = {
   pending: '[ ]',
+  running: '[.]',
   fail: '[x]',
   unknown: '[~]',
-  pass: '[ok]'
+  pass: '[v]'
 };
 
 const STATUS_COLORS: Record<CheckDisplayStatus, string> = {
   pending: 'gray',
+  running: 'whiteBright',
   fail: 'redBright',
   unknown: 'yellowBright',
   pass: 'greenBright'
@@ -188,6 +195,9 @@ function ScanApp(props: {
   const [browser, setBrowser] = useState<BrowserState>(createInitialBrowserState(null));
   const [checkTitles, setCheckTitles] = useState<Record<string, string>>({});
   const [showHelp, setShowHelp] = useState(false);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [exitConfirmChoice, setExitConfirmChoice] = useState<ExitConfirmationChoice>('no');
+  const [exitAfterDismiss, setExitAfterDismiss] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
 
@@ -195,6 +205,7 @@ function ScanApp(props: {
   const terminalHeight = Math.max(12, (stdout.rows || 24) - 1);
   const displayChecks = buildDisplayChecks({
     checkIds: progress.checkIds,
+    runningCheckIds: progress.runningCheckIds,
     streamedResultsByCheckId: streamedReportState.resultsByCheckId,
     reportChecks: report?.checks
   });
@@ -207,10 +218,14 @@ function ScanApp(props: {
   const durationMs = finishedAtRef.current === null
     ? elapsedMs
     : finishedAtRef.current - startedAtRef.current;
-  const pendingCount = isScanComplete
-    ? 0
-    : Math.max(0, progress.totalChecks - progress.completedCount);
+  const blinkOn = !isScanComplete && Math.floor(elapsedMs / 500) % 2 === 0;
   const totalChecks = report?.summary.total_checks ?? progress.totalChecks;
+  const {inProgressCount, pendingCount} = deriveProgressCounts({
+    isScanComplete,
+    totalChecks,
+    completedCount: progress.completedCount,
+    runningCheckIds: progress.runningCheckIds
+  });
   const metricWidth = Math.max(14, Math.floor((terminalWidth - 12) / 4));
   const progressBarWidth = Math.max(24, terminalWidth - 8);
   const metricValueWidth = Math.max(8, metricWidth - 2);
@@ -220,11 +235,71 @@ function ScanApp(props: {
   const parallelismLabel = report?.execution
     ? String(report.execution.effective_parallelism)
     : formatRequestedParallelism(props.options.parallelism);
-  const footerText = showHelp
-    ? '[ESC] Exit | [F1] Help'
-    : '[ESC] Exit | [F1] Help | [ARROWS] Navigate | [ENTER] Details or List';
+  const footerText = buildFooterText({
+    showExitConfirm,
+    showHelp,
+    viewMode: browser.viewMode
+  });
+
+  const cancelAndExit = () => {
+    props.onCancel();
+    process.exitCode = 130;
+    exit();
+    setImmediate(() => {
+      process.exit(130);
+    });
+  };
+
+  const completeAndExit = (completedReport: ScanReport) => {
+    props.onDone(completedReport);
+    exit();
+  };
+
+  const dismissExitConfirm = () => {
+    setShowExitConfirm(false);
+    setExitConfirmChoice('no');
+  };
+
+  const confirmCancelExit = () => {
+    dismissExitConfirm();
+    setExitAfterDismiss(true);
+  };
 
   useInput((input, key) => {
+    if (showExitConfirm) {
+      const normalizedInput = input.toLowerCase();
+
+      if (key.escape || normalizedInput === 'n') {
+        dismissExitConfirm();
+        return;
+      }
+
+      if (normalizedInput === 'y') {
+        confirmCancelExit();
+        return;
+      }
+
+      if (key.leftArrow || key.upArrow) {
+        setExitConfirmChoice('yes');
+        return;
+      }
+
+      if (key.rightArrow || key.downArrow) {
+        setExitConfirmChoice('no');
+        return;
+      }
+
+      if (key.return) {
+        if (exitConfirmChoice === 'yes') {
+          confirmCancelExit();
+        } else {
+          dismissExitConfirm();
+        }
+      }
+
+      return;
+    }
+
     if (isHelpInput(input)) {
       setShowHelp(previous => !previous);
       scrollRef.current?.scrollToTop();
@@ -232,23 +307,41 @@ function ScanApp(props: {
     }
 
     if (key.escape) {
-      if (report) {
-        props.onDone(report);
-        exit();
-      } else {
-        props.onCancel();
-        process.exitCode = 130;
-        exit();
-        setImmediate(() => {
-          process.exit(130);
-        });
+      const escapeAction = resolveEscapeKeyAction({
+        showExitConfirm,
+        showHelp,
+        viewMode: browser.viewMode,
+        isScanComplete
+      });
+
+      if (escapeAction === 'back-to-list') {
+        setBrowser(previous => setBrowserViewMode(previous, 'list'));
+        return;
+      }
+
+      if (escapeAction === 'prompt-exit-confirm') {
+        setShowExitConfirm(true);
+        setExitConfirmChoice('no');
+        return;
+      }
+
+      if (escapeAction === 'exit') {
+        if (report) {
+          completeAndExit(report);
+        }
+
+        return;
       }
 
       return;
     }
 
     if (key.upArrow) {
-      if (!reportReady || showHelp) {
+      if (resolveVerticalArrowAction({
+        reportReady,
+        showHelp,
+        viewMode: browser.viewMode
+      }) === 'scroll') {
         scrollRef.current?.scrollBy(-1);
       } else {
         setBrowser(previous => moveBrowserSelection(previous, displayChecks, -1));
@@ -258,7 +351,11 @@ function ScanApp(props: {
     }
 
     if (key.downArrow) {
-      if (!reportReady || showHelp) {
+      if (resolveVerticalArrowAction({
+        reportReady,
+        showHelp,
+        viewMode: browser.viewMode
+      }) === 'scroll') {
         scrollRef.current?.scrollBy(1);
       } else {
         setBrowser(previous => moveBrowserSelection(previous, displayChecks, 1));
@@ -365,6 +462,7 @@ function ScanApp(props: {
         setReport(completedReport);
         setBrowser(previous => syncBrowserState(previous, buildDisplayChecks({
           checkIds: completedReport.checks.map(check => check.id),
+          runningCheckIds: [],
           streamedResultsByCheckId: streamedReportState.resultsByCheckId,
           reportChecks: completedReport.checks
         })));
@@ -430,6 +528,24 @@ function ScanApp(props: {
 
     setBrowser(previous => syncBrowserState(previous, displayChecks));
   }, [displayChecksKey, reportReady]);
+
+  useEffect(() => {
+    if (!report) {
+      return;
+    }
+
+    dismissExitConfirm();
+    setExitAfterDismiss(false);
+  }, [report]);
+
+  useEffect(() => {
+    if (!exitAfterDismiss || showExitConfirm) {
+      return;
+    }
+
+    setExitAfterDismiss(false);
+    cancelAndExit();
+  }, [exitAfterDismiss, showExitConfirm]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -501,6 +617,7 @@ function ScanApp(props: {
                   failedCount={report?.summary.failed ?? progress.failedCount}
                   unknownCount={report?.summary.unknown ?? progress.unknownCount}
                   passedCount={report?.summary.passed ?? progress.passedCount}
+                  inProgressCount={inProgressCount}
                   pendingCount={pendingCount}
                 />
                 <CheckListModule
@@ -509,6 +626,7 @@ function ScanApp(props: {
                   browser={browser}
                   isScanComplete={isScanComplete}
                   checkTitles={checkTitles}
+                  blinkOn={blinkOn}
                 />
               </>
             )}
@@ -518,6 +636,13 @@ function ScanApp(props: {
           <Text color="gray">{footerText}</Text>
         </Box>
       </Box>
+      {showExitConfirm ? (
+        <ExitConfirmationDialog
+          terminalWidth={terminalWidth}
+          terminalHeight={terminalHeight}
+          selectedChoice={exitConfirmChoice}
+        />
+      ) : null}
     </Box>
   );
 }
@@ -534,12 +659,14 @@ function SummaryModule(props: {
   failedCount: number;
   unknownCount: number;
   passedCount: number;
+  inProgressCount: number;
   pendingCount: number;
 }) {
   const progressSegments = buildProgressSegments({
     failedCount: props.failedCount,
     unknownCount: props.unknownCount,
     passedCount: props.passedCount,
+    inProgressCount: props.inProgressCount,
     pendingCount: props.pendingCount,
     width: props.progressBarWidth
   });
@@ -580,7 +707,7 @@ function SummaryModule(props: {
           failedCount={props.failedCount}
           unknownCount={props.unknownCount}
           passedCount={props.passedCount}
-          pendingCount={props.pendingCount}
+          inProgressCount={props.inProgressCount}
         />
       </Box>
 
@@ -620,9 +747,62 @@ function CheckListModule(props: CheckListModuleProps) {
           browser={props.browser}
           isScanComplete={props.isScanComplete}
           checkTitles={props.checkTitles}
+          blinkOn={props.blinkOn}
         />
       </Box>
     </Module>
+  );
+}
+
+function ExitConfirmationDialog(props: {
+  terminalWidth: number;
+  terminalHeight: number;
+  selectedChoice: ExitConfirmationChoice;
+}) {
+  const dialogWidth = Math.min(
+    props.terminalWidth,
+    Math.max(24, Math.min(props.terminalWidth - 4, 76))
+  );
+
+  return (
+    <Box
+      position="absolute"
+      width={props.terminalWidth}
+      height={props.terminalHeight}
+      justifyContent="center"
+      alignItems="center"
+      backgroundColor="black"
+    >
+      <Box width={dialogWidth} flexDirection="column" backgroundColor="black">
+        <Module borderColor="yellowBright">
+          <Text color="yellowBright" bold>
+            Exit Running Scan?
+          </Text>
+
+          <Box marginTop={1} flexDirection="column">
+            <Text>Scan is currently running.</Text>
+            <Text>Are you sure you want to exit and abandon the current scan?</Text>
+          </Box>
+
+          <Box marginTop={1} gap={1}>
+            <ConfirmChoice label="Yes" isSelected={props.selectedChoice === 'yes'} />
+            <ConfirmChoice label="No" isSelected={props.selectedChoice === 'no'} />
+          </Box>
+
+          <Box marginTop={1}>
+            <Text color="gray">Left / Right / Up / Down to select. Enter to confirm. Esc to stay.</Text>
+          </Box>
+        </Module>
+      </Box>
+    </Box>
+  );
+}
+
+function ConfirmChoice(props: {label: string; isSelected: boolean}) {
+  return props.isSelected ? (
+    <Text color="black" backgroundColor="whiteBright">{` ${props.label} `}</Text>
+  ) : (
+    <Text color="gray">{` ${props.label} `}</Text>
   );
 }
 
@@ -645,7 +825,7 @@ function DetailModule(props: {
           {`> ${shortId} (${indexLabel})`}
         </Text>
         {props.totalChecks > 0 ? (
-          <Text color="gray">{'<- / -> / Up / Down | [ENTER] List'}</Text>
+          <Text color="gray">{'<- / -> Check | Up / Down Scroll | [ENTER] List'}</Text>
         ) : null}
       </Box>
 
@@ -754,6 +934,7 @@ function ListView(props: {
   browser: BrowserState;
   isScanComplete: boolean;
   checkTitles: Record<string, string>;
+  blinkOn: boolean;
 }) {
   if (props.checks.length === 0) {
     return (
@@ -770,15 +951,16 @@ function ListView(props: {
       {props.checks.map((check, index) => {
         const isActiveRow = selectedIndex === index;
         const prefix = isActiveRow ? '>' : ' ';
-        const shortId = formatCheckIdDisplay(check.id);
-        const title = formatCheckTitle(check, props.checkTitles);
+        const display = buildCheckListEntryDisplay(check, props.checkTitles, {
+          blinkOn: props.blinkOn
+        });
 
         return (
           <Box key={check.id} flexDirection="row" flexWrap="wrap">
             <Text color={isActiveRow ? 'cyanBright' : 'gray'}>{`${prefix} `}</Text>
-            <Text color={STATUS_COLORS[check.status]}>{`${STATUS_MARKERS[check.status]} `}</Text>
-            <Text color="gray">{`${shortId}: `}</Text>
-            <Text color={STATUS_COLORS[check.status]} bold={isActiveRow}>{title}</Text>
+            <Text color={display.statusColor}>{`${display.marker} `}</Text>
+            <Text color={display.statusColor} bold={isActiveRow}>{display.title}</Text>
+            <Text color="gray">{` (${display.idLabel})`}</Text>
           </Box>
         );
       })}
@@ -845,13 +1027,13 @@ function HelpModule() {
         Help
       </Text>
       <Box marginTop={1} flexDirection="column">
-        <Text>Left / Right / Up / Down: move to the previous or next check.</Text>
-        <Text>When Help is open, Up / Down scroll the report one line at a time.</Text>
+        <Text>List view: Left / Right / Up / Down move to the previous or next check.</Text>
+        <Text>Detail view and Help: Up / Down scroll the report one line at a time.</Text>
         <Text>Page Up / Page Down: scroll the report by a page.</Text>
         <Text>D: open detail view for the current check.</Text>
         <Text>L: switch detail view back to list view.</Text>
         <Text>Enter: toggle between detail and list for the current section.</Text>
-        <Text>Esc: exit the scan UI.</Text>
+        <Text>Esc: return to the list from detail view. While a scan is running, Esc asks for confirmation before exiting.</Text>
         <Text>F1: toggle this help screen.</Text>
       </Box>
     </Module>
@@ -882,14 +1064,14 @@ function ScoreRow(props: {
   failedCount: number;
   unknownCount: number;
   passedCount: number;
-  pendingCount: number;
+  inProgressCount: number;
 }) {
   return (
     <Box flexWrap="wrap">
       <ScoreCell label={`${props.failedCount} Failed`} color="redBright" width={props.cellWidth} />
       <ScoreCell label={`${props.unknownCount} Inconclusive`} color="yellowBright" width={props.cellWidth} />
       <ScoreCell label={`${props.passedCount} Passed`} color="greenBright" width={props.cellWidth} />
-      <ScoreCell label={`${props.pendingCount} Pending`} color="gray" width={props.cellWidth} />
+      <ScoreCell label={`${props.inProgressCount} In progress`} color="whiteBright" width={props.cellWidth} />
     </Box>
   );
 }
@@ -1068,10 +1250,12 @@ export function buildScanSections(report: Pick<ScanReport, 'checks'> | null): Sc
 
 function buildDisplayChecks(options: {
   checkIds: string[];
+  runningCheckIds: string[];
   streamedResultsByCheckId: Record<string, CheckResult>;
   reportChecks: CheckResult[] | undefined;
 }): DisplayCheck[] {
   const reportById = new Map((options.reportChecks ?? []).map(check => [check.id, check] as const));
+  const runningCheckIds = new Set(options.runningCheckIds);
   const checkIds: string[] = [];
   const seen = new Set<string>();
 
@@ -1092,7 +1276,7 @@ function buildDisplayChecks(options: {
     const result = reportById.get(checkId) ?? options.streamedResultsByCheckId[checkId] ?? null;
     return {
       id: checkId,
-      status: result?.status ?? 'pending',
+      status: result?.status ?? (runningCheckIds.has(checkId) ? 'running' : 'pending'),
       result
     };
   });
@@ -1188,6 +1372,44 @@ function formatCheckTitle(
   return checkTitles[check.id] ?? check.id;
 }
 
+export function formatCheckListLabel(
+  check: DisplayCheck,
+  checkTitles: Record<string, string>
+): string {
+  return `${formatCheckTitle(check, checkTitles)} (${formatCheckIdDisplay(check.id)})`;
+}
+
+export function formatStatusMarker(status: CheckDisplayStatus, blinkOn = true): string {
+  if (status === 'running' && !blinkOn) {
+    return '[ ]';
+  }
+
+  return STATUS_MARKERS[status];
+}
+
+export function buildCheckListEntryDisplay(
+  check: DisplayCheck,
+  checkTitles: Record<string, string>,
+  options: {blinkOn: boolean}
+): {
+  marker: string;
+  statusColor: string;
+  title: string;
+  idLabel: string;
+  label: string;
+} {
+  const title = formatCheckTitle(check, checkTitles);
+  const idLabel = formatCheckIdDisplay(check.id);
+
+  return {
+    marker: formatStatusMarker(check.status, options.blinkOn),
+    statusColor: STATUS_COLORS[check.status],
+    title,
+    idLabel,
+    label: `${title} (${idLabel})`
+  };
+}
+
 export function formatCheckIdDisplay(checkId: string): string {
   const parts = checkId
     .split('-')
@@ -1208,6 +1430,8 @@ function formatConfidence(value: CheckResult['confidence']): string {
 function getOutcomeLabel(status: CheckDisplayStatus): string {
   switch (status) {
     case 'pending':
+      return 'What Is Pending';
+    case 'running':
       return 'What Is Running';
     case 'fail':
       return 'What Failed';
@@ -1220,7 +1444,9 @@ function getOutcomeLabel(status: CheckDisplayStatus): string {
 
 function formatOutcome(check: DisplayCheck): string {
   if (!check.result) {
-    return 'Check is pending execution or still running.';
+    return check.status === 'running'
+      ? 'Check is currently running.'
+      : 'Check is pending execution.';
   }
 
   switch (check.result.status) {
@@ -1360,10 +1586,11 @@ function formatEvidenceLabel(location: EvidenceLocation): string {
     : `${location.filePath}:${location.startLine}-${location.endLine}`;
 }
 
-function buildProgressSegments(options: {
+export function buildProgressSegments(options: {
   failedCount: number;
   unknownCount: number;
   passedCount: number;
+  inProgressCount: number;
   pendingCount: number;
   width: number;
 }): Array<{key: string; text: string; color: string; backgroundColor: string}> {
@@ -1371,6 +1598,7 @@ function buildProgressSegments(options: {
     options.failedCount +
     options.unknownCount +
     options.passedCount +
+    options.inProgressCount +
     options.pendingCount
   );
 
@@ -1389,6 +1617,7 @@ function buildProgressSegments(options: {
     {key: 'failed', count: options.failedCount, color: 'redBright', backgroundColor: 'red'},
     {key: 'unknown', count: options.unknownCount, color: 'yellowBright', backgroundColor: 'yellow'},
     {key: 'passed', count: options.passedCount, color: 'greenBright', backgroundColor: 'green'},
+    {key: 'running', count: options.inProgressCount, color: 'black', backgroundColor: 'whiteBright'},
     {key: 'pending', count: options.pendingCount, color: 'gray', backgroundColor: 'blackBright'}
   ];
 
@@ -1410,6 +1639,28 @@ function buildProgressSegments(options: {
       backgroundColor: segment.backgroundColor
     };
   });
+}
+
+export function deriveProgressCounts(options: {
+  isScanComplete: boolean;
+  totalChecks: number;
+  completedCount: number;
+  runningCheckIds: string[];
+}): {inProgressCount: number; pendingCount: number} {
+  if (options.isScanComplete) {
+    return {
+      inProgressCount: 0,
+      pendingCount: 0
+    };
+  }
+
+  const inProgressCount = options.runningCheckIds.length;
+  const pendingCount = Math.max(0, options.totalChecks - options.completedCount - inProgressCount);
+
+  return {
+    inProgressCount,
+    pendingCount
+  };
 }
 
 function ensureActiveSectionVisible(
@@ -1448,6 +1699,55 @@ function clampSelectedIndex(index: number, itemCount: number): number {
 
 function isHelpInput(input: string): boolean {
   return HELP_INPUTS.has(input.toLowerCase());
+}
+
+export function resolveEscapeKeyAction(options: {
+  showExitConfirm: boolean;
+  showHelp: boolean;
+  viewMode: SectionViewMode;
+  isScanComplete: boolean;
+}): EscapeKeyAction {
+  if (options.showExitConfirm) {
+    return 'dismiss-exit-confirm';
+  }
+
+  if (!options.showHelp && options.viewMode === 'detail') {
+    return 'back-to-list';
+  }
+
+  return options.isScanComplete ? 'exit' : 'prompt-exit-confirm';
+}
+
+export function resolveVerticalArrowAction(options: {
+  reportReady: boolean;
+  showHelp: boolean;
+  viewMode: SectionViewMode;
+}): VerticalArrowAction {
+  if (!options.reportReady || options.showHelp || options.viewMode === 'detail') {
+    return 'scroll';
+  }
+
+  return 'navigate';
+}
+
+function buildFooterText(options: {
+  showExitConfirm: boolean;
+  showHelp: boolean;
+  viewMode: SectionViewMode;
+}): string {
+  if (options.showExitConfirm) {
+    return '[ESC] Stay | [ARROWS] Select | [ENTER] Confirm';
+  }
+
+  if (options.showHelp) {
+    return '[ESC] Exit | [F1] Help';
+  }
+
+  if (options.viewMode === 'detail') {
+    return '[ESC] List | [F1] Help | [UP/DOWN] Scroll | [<- / ->] Check | [ENTER] List';
+  }
+
+  return '[ESC] Exit | [F1] Help | [ARROWS] Navigate | [ENTER] Details';
 }
 
 function formatDuration(durationMs: number): string {
