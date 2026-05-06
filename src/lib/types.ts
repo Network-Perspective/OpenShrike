@@ -1,6 +1,17 @@
 export type OutputFormat = 'json' | 'markdown';
 export type RuntimeMode = 'native' | 'docker';
 export type ParallelismValue = number | 'auto';
+export type ProjectType =
+  | 'typescript'
+  | 'javascript'
+  | 'python'
+  | 'python-ml'
+  | 'pytorch'
+  | 'csharp'
+  | 'go'
+  | 'java'
+  | 'shared';
+export type ProjectConfigDefaultKind = 'check' | 'policy';
 
 export type ScanScopeKind =
   | 'uncommitted'
@@ -115,6 +126,32 @@ export interface ScanCommandOptions {
   artifactsDir?: string | undefined;
   parallelism: ParallelismValue;
   ui: boolean;
+}
+
+export interface ShrikeProjectConfig {
+  $schema?: string | undefined;
+  version: 1;
+  init: {
+    projectType: ProjectType;
+    detectedFrom: string[];
+    opencodeSetup: 'existing-config' | 'auth-login';
+  };
+  runtime: {
+    configPath: string;
+    agent: string;
+    model?: string | undefined;
+    mode: RuntimeMode;
+    parallelism: ParallelismValue;
+  };
+  scan: {
+    defaultKind: ProjectConfigDefaultKind;
+    defaultId: string;
+    repo: string;
+    scope: ScanScopeKind;
+    output: OutputFormat;
+    ui: boolean;
+    artifactsDir: string | null;
+  };
 }
 
 export interface AgentCheckPayload {

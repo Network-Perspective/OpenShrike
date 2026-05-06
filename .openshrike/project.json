@@ -1,0 +1,29 @@
+{
+  "$schema": "https://openshrike.dev/schema/project.json",
+  "version": 1,
+  "init": {
+    "projectType": "typescript",
+    "detectedFrom": [
+      "tsconfig.json",
+      "package.json",
+      "src/**/*.ts"
+    ],
+    "opencodeSetup": "existing-config"
+  },
+  "runtime": {
+    "configPath": ".openshrike/opencode.json",
+    "agent": "shrike-checker",
+    "model": "azure/gpt-5.4-mini",
+    "mode": "native",
+    "parallelism": "auto"
+  },
+  "scan": {
+    "defaultKind": "policy",
+    "defaultId": "typescript-baseline",
+    "repo": ".",
+    "scope": "uncommitted",
+    "output": "json",
+    "ui": true,
+    "artifactsDir": null
+  }
+}

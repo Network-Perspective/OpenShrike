@@ -2,13 +2,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {assembleBundleForCheck, assembleBundleForPolicy} from '../lib/bundle.js';
 import {renderScanReportMarkdown} from '../lib/markdown.js';
-import {validateScanOptions} from '../lib/scan-options.js';
+import {resolveScanOptions} from '../lib/scan-options.js';
 import {runScan} from '../lib/scan.js';
 import type {ScanCommandOptions, ScanReport} from '../lib/types.js';
 import {runScanWithInk, ScanUiCancelledError} from '../ui/scan-app.js';
 
 export async function executeScanCommand(rawOptions: Partial<ScanCommandOptions>): Promise<number> {
-  const options = validateScanOptions(rawOptions);
+  const options = await resolveScanOptions(rawOptions);
   const shouldUseUi = options.ui && process.stderr.isTTY;
   let report: ScanReport;
 

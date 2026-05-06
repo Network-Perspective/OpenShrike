@@ -1,19 +1,25 @@
-import path from 'node:path';
-import {runInitCommand} from '../lib/init.js';
+import {executeScanCommand} from './scan.js';
+import {InitCommandCancelledError, runInitCommand} from '../lib/init.js';
 
 export async function executeInitCommand(options: {force: boolean}): Promise<number> {
-  const result = await runInitCommand({
-    cwd: process.cwd(),
-    force: options.force
-  });
+  try {
+    const result = await runInitCommand({
+      cwd: process.cwd(),
+      force: options.force
+    });
 
-  console.error(`Wrote OpenCode config to ${relative(result.configPath)}`);
-  console.error(`Listed required env vars in ${relative(result.requiredEnvFilePath)}`);
-  console.error(`Wrote example env file to ${relative(result.envExamplePath)}`);
+    if (result.action === 'run-scan') {
+      return await executeScanCommand({
+        repoPath: result.repoRoot
+      });
+    }
 
-  return 0;
-}
+    return 0;
+  } catch (error) {
+    if (error instanceof InitCommandCancelledError) {
+      return 130;
+    }
 
-function relative(filePath: string): string {
-  return path.relative(process.cwd(), filePath) || '.';
+    throw error;
+  }
 }
