@@ -5,10 +5,17 @@ APP="openshrike"
 REPO="${OPENSHRIKE_REPO:-Network-Perspective/OpenShrike}"
 DEFAULT_BRANCH="${OPENSHRIKE_DEFAULT_BRANCH:-main}"
 
-MUTED='\033[0;2m'
-RED='\033[0;31m'
-ORANGE='\033[38;5;214m'
-NC='\033[0m'
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  MUTED=$'\033[0;2m'
+  RED=$'\033[0;31m'
+  ORANGE=$'\033[38;5;214m'
+  NC=$'\033[0m'
+else
+  MUTED=""
+  RED=""
+  ORANGE=""
+  NC=""
+fi
 
 usage() {
   cat <<EOF
@@ -48,7 +55,7 @@ while [[ $# -gt 0 ]]; do
     -v|--version)
       requested_version="${2:-}"
       if [[ -z "$requested_version" ]]; then
-        echo -e "${RED}Error: --version requires a value.${NC}" >&2
+        printf '%sError: --version requires a value.%s\n' "$RED" "$NC" >&2
         exit 1
       fi
       shift 2
@@ -60,7 +67,7 @@ while [[ $# -gt 0 ]]; do
     --bin-dir)
       bin_dir="${2:-}"
       if [[ -z "$bin_dir" ]]; then
-        echo -e "${RED}Error: --bin-dir requires a value.${NC}" >&2
+        printf '%sError: --bin-dir requires a value.%s\n' "$RED" "$NC" >&2
         exit 1
       fi
       shift 2
@@ -68,7 +75,7 @@ while [[ $# -gt 0 ]]; do
     --install-dir)
       install_base="${2:-}"
       if [[ -z "$install_base" ]]; then
-        echo -e "${RED}Error: --install-dir requires a value.${NC}" >&2
+        printf '%sError: --install-dir requires a value.%s\n' "$RED" "$NC" >&2
         exit 1
       fi
       shift 2
@@ -78,7 +85,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      echo -e "${ORANGE}Warning: ignoring unknown option '$1'.${NC}" >&2
+      printf "%sWarning: ignoring unknown option '%s'.%s\n" "$ORANGE" "$1" "$NC" >&2
       shift
       ;;
   esac
@@ -90,7 +97,7 @@ current_link="${install_base}/current"
 print_message() {
   local level="$1"
   local message="$2"
-  local color="${NC}"
+  local color=""
 
   case "$level" in
     warning)
@@ -101,7 +108,7 @@ print_message() {
       ;;
   esac
 
-  printf '%b%s%b\n' "$color" "$message" "$NC"
+  printf '%s%s%s\n' "$color" "$message" "$NC"
 }
 
 fail() {
@@ -118,12 +125,24 @@ download_to_file() {
   local output="$2"
 
   if has_command curl; then
-    curl -fsSL "$url" -o "$output"
+    if [[ -t 2 ]]; then
+      curl -fL --progress-bar "$url" -o "$output"
+    else
+      curl -fsSL "$url" -o "$output"
+    fi
     return 0
   fi
 
   if has_command wget; then
-    wget -qO "$output" "$url"
+    if [[ -t 2 ]]; then
+      if wget --help 2>&1 | grep -q -- '--show-progress'; then
+        wget -q --show-progress -O "$output" "$url"
+      else
+        wget -O "$output" "$url"
+      fi
+    else
+      wget -qO "$output" "$url"
+    fi
     return 0
   fi
 
