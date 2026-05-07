@@ -139,6 +139,7 @@ describe('runInitCommand', () => {
 
     expect(projectConfig.config.init.projectType).toBe('typescript');
     expect(projectConfig.config.init.opencodeSetup).toBe('existing-config');
+    expect(projectConfig.config.init.seedPolicyId).toBe('typescript-baseline');
     expect(projectConfig.config.init.detectedFrom).toHaveLength(3);
     expect(projectConfig.config.init.detectedFrom).toEqual(expect.arrayContaining([
       'package.json',
@@ -153,14 +154,18 @@ describe('runInitCommand', () => {
       parallelism: 'auto'
     });
     expect(projectConfig.config.scan).toEqual({
-      defaultKind: 'policy',
-      defaultId: 'typescript-baseline',
+      defaultKind: 'project-checks',
+      defaultId: '.openshrike/checks',
       repo: '.',
       scope: 'uncommitted',
       output: 'markdown',
       ui: true,
       artifactsDir: null
     });
+    expect(result.projectConfig?.init.seedPolicyId).toBe('typescript-baseline');
+    await expect(fs.readdir(path.join(repoRoot, '.openshrike', 'checks'))).resolves.toContain(
+      'typescript-arch-001-external-data-not-cast-to-trusted-types.md'
+    );
     expect(runtimeConfig.config.model).toBe('azure/gpt-5.4');
     expect(runtimeConfig.config.agent?.['shrike-checker']?.model).toBe('azure/gpt-5.4');
   });
@@ -329,7 +334,8 @@ describe('runInitCommand', () => {
     const projectConfig = await loadProjectConfig(path.join(repoRoot, '.openshrike', 'project.json'));
     expect(projectConfig.config.runtime.mode).toBe('docker');
     expect(projectConfig.config.runtime.model).toBe('azure/gpt-5.4-mini');
-    expect(projectConfig.config.scan.defaultId).toBe('typescript-baseline');
+    expect(projectConfig.config.scan.defaultId).toBe('.openshrike/checks');
+    expect(projectConfig.config.init.seedPolicyId).toBe('typescript-baseline');
     expect(projectConfig.config.init.detectedFrom).toEqual(['package.json', 'tsconfig.json']);
   });
 

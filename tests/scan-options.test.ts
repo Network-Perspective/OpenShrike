@@ -79,6 +79,22 @@ describe('validateScanOptions', () => {
     expect(result.parallelism).toBe('auto');
   });
 
+  it('accepts project-local checks input without a policy id', () => {
+    const result = validateScanOptions({
+      projectChecksDir: '.openshrike/checks',
+      repoPath: '.',
+      outputFormat: 'markdown',
+      scanScope: 'full',
+      mockOpencode: true,
+      runtimeMode: 'native',
+      parallelism: 1,
+      ui: false
+    });
+
+    expect(result.projectChecksDir).toBe('.openshrike/checks');
+    expect(result.policyId).toBeUndefined();
+  });
+
   it('merges repo-local project defaults before validation', async () => {
     const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-scan-options-'));
     tempDirectories.push(repoRoot);
@@ -101,7 +117,8 @@ describe('validateScanOptions', () => {
       mockOpencode: true
     });
 
-    expect(result.policyId).toBe('typescript-baseline');
+    expect(result.projectChecksDir).toBe(path.join(repoRoot, '.openshrike', 'checks'));
+    expect(result.policyId).toBeUndefined();
     expect(result.repoPath).toBe(nestedRepoPath);
     expect(result.configPath).toBe(path.join(repoRoot, '.openshrike', 'opencode.json'));
     expect(result.runtimeMode).toBe('native');
@@ -133,7 +150,8 @@ describe('validateScanOptions', () => {
         mockOpencode: true
       });
 
-      expect(result.policyId).toBe('typescript-baseline');
+      expect(result.projectChecksDir).toBe(path.join(repoRoot, '.openshrike', 'checks'));
+      expect(result.policyId).toBeUndefined();
       expect(result.repoPath).toBe(repoRoot);
       expect(result.configPath).toBe(path.join(repoRoot, '.openshrike', 'opencode.json'));
     } finally {
@@ -141,7 +159,7 @@ describe('validateScanOptions', () => {
     }
   });
 
-  it('lets explicit CLI values override repo-local defaults', async () => {
+  it('lets an explicit check filter override repo-local defaults', async () => {
     const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-scan-options-override-'));
     tempDirectories.push(repoRoot);
 
@@ -157,14 +175,36 @@ describe('validateScanOptions', () => {
 
     const result = await resolveScanOptions({
       repoPath: repoRoot,
-      policyId: 'shared-foundation',
+      checkId: 'typescript-api-001-public-boundary-types-avoid-any',
       runtimeMode: 'docker',
       ui: false,
       mockOpencode: true
     });
 
-    expect(result.policyId).toBe('shared-foundation');
+    expect(result.projectChecksDir).toBe(path.join(repoRoot, '.openshrike', 'checks'));
+    expect(result.checkId).toBe('typescript-api-001-public-boundary-types-avoid-any');
     expect(result.runtimeMode).toBe('docker');
     expect(result.ui).toBe(false);
+  });
+
+  it('rejects policy overrides when project-local checks are configured', async () => {
+    const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-scan-options-policy-'));
+    tempDirectories.push(repoRoot);
+
+    await writeShrikeInitFiles({
+      repoRoot,
+      policyId: 'typescript-baseline',
+      model: 'azure/gpt-5.4-mini',
+      runtimeMode: 'native',
+      projectType: 'typescript',
+      detectedFrom: ['package.json', 'tsconfig.json'],
+      opencodeSetup: 'existing-config'
+    });
+
+    await expect(resolveScanOptions({
+      repoPath: repoRoot,
+      policyId: 'shared-foundation',
+      mockOpencode: true
+    })).rejects.toThrow(/project-local checks/i);
   });
 });

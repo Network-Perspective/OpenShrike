@@ -164,6 +164,48 @@ describe('runScan', () => {
     expect(progress.filter(event => event.type !== 'check-completed').every(event => event.checkResult === null)).toBe(true);
   });
 
+  it('uses only project-local checks when a project checks directory is configured', async () => {
+    const repoRoot = await makeRepoRoot();
+    const projectChecksDir = path.join(repoRoot, '.openshrike', 'checks');
+    const runtime = {
+      close: vi.fn().mockResolvedValue(undefined)
+    };
+
+    await fs.mkdir(projectChecksDir, {recursive: true});
+    await fs.writeFile(path.join(projectChecksDir, 'custom-a.md'), '# Custom A\n', 'utf8');
+    await fs.writeFile(path.join(projectChecksDir, 'custom-b.md'), '# Custom B\n', 'utf8');
+
+    mockResolveScanScope.mockResolvedValue(makeScope({}));
+    mockLoadRuntimeConfig.mockResolvedValue({
+      configPath: '/tmp/opencode.json',
+      config: {},
+      requiredEnvVars: [],
+      missingEnvVars: []
+    });
+    mockRuntimeCreate.mockResolvedValue(runtime);
+    mockRepoGuardCapture.mockResolvedValue({
+      throwIfMutated: vi.fn().mockResolvedValue(undefined)
+    });
+    mockEvaluateCheck
+      .mockResolvedValueOnce(makeCheckResult('custom-a', 'pass'))
+      .mockResolvedValueOnce(makeCheckResult('custom-b', 'fail'));
+
+    const report = await runScan(makeOptions(repoRoot, {
+      projectChecksDir
+    }));
+
+    expect(mockResolvePolicyDefinition).not.toHaveBeenCalled();
+    expect(report.bundle_id).toBe('project-checks');
+    expect(report.summary).toEqual({
+      total_checks: 2,
+      passed: 1,
+      failed: 1,
+      unknown: 0
+    });
+    expect(report.checks.map(check => check.id)).toEqual(['custom-b', 'custom-a']);
+    expect(runtime.close).toHaveBeenCalledOnce();
+  });
+
   it('downgrades inconclusive check errors to unknown and continues other checks', async () => {
     const repoRoot = await makeRepoRoot();
     const {CheckEvaluationError} = await vi.importActual<typeof import('../src/lib/evaluator.js')>('../src/lib/evaluator.js');

@@ -83,7 +83,10 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             summaryItems: [
               {
                 label: 'policy',
-                value: context.existingProjectConfig?.config.scan.defaultId ?? 'unknown'
+                value: resolveSavedPolicyId(
+                  context.existingProjectConfig?.config,
+                  context.policyCatalog.map(policy => policy.id)
+                ) ?? 'unknown'
               },
               {
                 label: 'model',
@@ -523,10 +526,10 @@ async function buildWizardContext(
     policyCatalog.map(policy => policy.id),
     projectDetection
   );
-  const defaultPolicyId = existingProjectConfig?.config.scan.defaultId
-    && policyCatalog.some(policy => policy.id === existingProjectConfig.config.scan.defaultId)
-    ? existingProjectConfig.config.scan.defaultId
-    : defaultPolicyOrder[0] ?? 'shared-foundation';
+  const defaultPolicyId = resolveSavedPolicyId(
+    existingProjectConfig?.config,
+    policyCatalog.map(policy => policy.id)
+  ) ?? defaultPolicyOrder[0] ?? 'shared-foundation';
 
   return {
     repoRoot,
@@ -555,10 +558,19 @@ async function buildWizardContext(
 }
 
 function resetSelections(context: InitWizardContext, includeExistingDefaults: boolean): void {
+  const defaultPolicyOrder = rankPoliciesForProject(
+    context.policyCatalog.map(policy => policy.id),
+    context.projectDetection
+  );
+  const fallbackPolicyId = defaultPolicyOrder[0] ?? 'shared-foundation';
+
   if (includeExistingDefaults && context.existingProjectConfig?.config) {
     context.selections = {
       model: context.existingProjectConfig.config.runtime.model ?? context.opencode.defaultModel ?? context.opencode.models[0],
-      policyId: context.existingProjectConfig.config.scan.defaultId,
+      policyId: resolveSavedPolicyId(
+        context.existingProjectConfig.config,
+        context.policyCatalog.map(policy => policy.id)
+      ) ?? fallbackPolicyId,
       runtimeMode: context.existingProjectConfig.config.runtime.mode,
       projectType: context.existingProjectConfig.config.init.projectType,
       detectedFrom: context.existingProjectConfig.config.init.detectedFrom,
@@ -567,14 +579,9 @@ function resetSelections(context: InitWizardContext, includeExistingDefaults: bo
     return;
   }
 
-  const defaultPolicyOrder = rankPoliciesForProject(
-    context.policyCatalog.map(policy => policy.id),
-    context.projectDetection
-  );
-
   context.selections = {
     model: context.opencode.defaultModel ?? context.opencode.models[0],
-    policyId: defaultPolicyOrder[0] ?? 'shared-foundation',
+    policyId: fallbackPolicyId,
     runtimeMode: DEFAULT_RUNTIME_MODE,
     projectType: context.projectDetection.recommended.projectType,
     detectedFrom: context.projectDetection.recommended.evidence,
@@ -686,6 +693,20 @@ function popHistoryForScreen(history: InitHistoryItem[], screen: string): void {
 
 function resolveOptionLabel<T extends string>(options: InitScreenOption<T>[], value: T): string {
   return options.find(option => option.value === value)?.label ?? value;
+}
+
+function resolveSavedPolicyId(
+  config: ShrikeProjectConfig | null | undefined,
+  availablePolicyIds: string[]
+): string | null {
+  const candidate = config?.init.seedPolicyId
+    ?? (config?.scan.defaultKind === 'policy' ? config.scan.defaultId : undefined);
+
+  if (!candidate) {
+    return null;
+  }
+
+  return availablePolicyIds.includes(candidate) ? candidate : null;
 }
 
 async function writeSelectionsOrShowError(

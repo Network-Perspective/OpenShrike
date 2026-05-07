@@ -22,6 +22,7 @@ import {
   type DockerScanRequest,
   tryDecodeDockerWireMessage
 } from './docker-protocol.js';
+import {resolveProjectCheckSelection} from './checks.js';
 import {CheckEvaluationError, evaluateCheck, getCheckEvaluationOriginalOutput} from './evaluator.js';
 import {resolvePolicyDefinition} from './policies.js';
 import {runProcess} from './process.js';
@@ -88,6 +89,7 @@ export async function runNativeScan(
       repoPath: repoFullPath,
       policyId: options.policyId ?? null,
       checkId: options.checkId ?? null,
+      projectChecksDir: options.projectChecksDir ?? null,
       scanScope: options.scanScope,
       scanTarget: options.scanTarget ?? null,
       outputFormat: options.outputFormat,
@@ -107,17 +109,17 @@ export async function runNativeScan(
       throw new Error(`Repository path not found: ${repoFullPath}`);
     }
 
-    const policy = options.policyId ? await resolvePolicyDefinition(options.policyId) : null;
-    const checkIds = policy ? policy.checkIds : [options.checkId!];
+    const checkSelection = await resolveScanCheckSelection(options);
+    const checkIds = checkSelection.checkIds;
     if (checkIds.length > MAX_POLICY_CHECKS) {
       throw new CliError(
         'POLICY_TOO_LARGE',
-        `Policy expands to ${checkIds.length} checks, which exceeds the maximum supported ${MAX_POLICY_CHECKS}.`
+        `Check selection expands to ${checkIds.length} checks, which exceeds the maximum supported ${MAX_POLICY_CHECKS}.`
       );
     }
 
-    const bundleId = policy?.id ?? options.checkId!;
-    const policyVersion = policy?.version ?? new Date().toISOString().slice(0, 10);
+    const bundleId = checkSelection.bundleId;
+    const policyVersion = checkSelection.version;
     const scopeContext = await resolveScanScope(repoFullPath, options.scanScope, options.scanTarget);
     const progressState: ProgressState = {
       resultsByCheckId: new Map<string, CheckResult>(),
@@ -245,6 +247,7 @@ export async function runNativeScan(
             agent: agentName,
             model,
             runtimeConfigPath: runtimeConfig?.configPath,
+            projectChecksDir: options.projectChecksDir,
             scopeContext,
             emulateOpencode: options.mockOpencode,
             runtime,
@@ -345,10 +348,17 @@ async function runDockerScan(
   const requestHostPath = path.join(artifactsDir, DOCKER_SCAN_REQUEST_FILE);
   const reportHostPath = path.join(artifactsDir, DOCKER_SCAN_REPORT_FILE);
   const logHostPath = path.join(artifactsDir, path.basename(options.logPath ?? DOCKER_SCAN_LOG_FILE));
+  const projectChecksHostPath = options.projectChecksDir ? path.resolve(options.projectChecksDir) : null;
+  const workspaceHostPath = resolveDockerWorkspaceHostPath(repoFullPath, projectChecksHostPath);
+  const repoContainerPath = resolveDockerWorkspacePath(workspaceHostPath, repoFullPath);
+  const projectChecksContainerPath = projectChecksHostPath
+    ? resolveDockerWorkspacePath(workspaceHostPath, projectChecksHostPath)
+    : undefined;
   const request: DockerScanRequest = {
     options: {
       ...options,
-      repoPath: '/workspace/repo',
+      repoPath: repoContainerPath,
+      ...(projectChecksContainerPath ? {projectChecksDir: projectChecksContainerPath} : {}),
       runtimeMode: 'docker',
       logPath: '/io/' + path.basename(logHostPath),
       artifactsDir: '/io',
@@ -362,7 +372,7 @@ async function runDockerScan(
   const dockerArgs = [
     'run',
     '--rm',
-    '--mount', `type=bind,src=${repoFullPath},dst=/workspace/repo,readonly`,
+    '--mount', `type=bind,src=${workspaceHostPath},dst=/workspace/repo,readonly`,
     '--mount', `type=bind,src=${artifactsDir},dst=/io`,
     '--workdir', '/workspace/tool'
   ];
@@ -587,6 +597,61 @@ async function runChecks(options: {
   }
 }
 
+async function resolveScanCheckSelection(options: ScanCommandOptions): Promise<{
+  bundleId: string;
+  version: string;
+  checkIds: string[];
+}> {
+  if (options.projectChecksDir) {
+    const selection = await resolveProjectCheckSelection(options.projectChecksDir, options.checkId);
+    return {
+      bundleId: options.checkId ? selection.checkIds[0]! : 'project-checks',
+      version: selection.version,
+      checkIds: selection.checkIds
+    };
+  }
+
+  const policy = options.policyId ? await resolvePolicyDefinition(options.policyId) : null;
+  return {
+    bundleId: policy?.id ?? options.checkId!,
+    version: policy?.version ?? new Date().toISOString().slice(0, 10),
+    checkIds: policy ? policy.checkIds : [options.checkId!]
+  };
+}
+
+function resolveDockerWorkspaceHostPath(
+  repoFullPath: string,
+  projectChecksPath: string | null
+): string {
+  if (!projectChecksPath) {
+    return repoFullPath;
+  }
+
+  let current = path.resolve(repoFullPath);
+  const resolvedChecksPath = path.resolve(projectChecksPath);
+
+  while (true) {
+    const relative = path.relative(current, resolvedChecksPath);
+    if (!relative || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+      return current;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return repoFullPath;
+    }
+
+    current = parent;
+  }
+}
+
+function resolveDockerWorkspacePath(workspaceHostPath: string, targetHostPath: string): string {
+  const relativePath = path.relative(workspaceHostPath, targetHostPath);
+  return relativePath
+    ? path.posix.join('/workspace/repo', relativePath.split(path.sep).join('/'))
+    : '/workspace/repo';
+}
+
 function resolveEffectiveParallelism(requested: number | 'auto', checkCount: number): number {
   if (checkCount <= 1) {
     return Math.max(1, checkCount);
@@ -707,6 +772,7 @@ async function evaluateCheckWithRecovery(options: {
   agent: string;
   model: string;
   runtimeConfigPath?: string | undefined;
+  projectChecksDir?: string | undefined;
   scopeContext: Awaited<ReturnType<typeof resolveScanScope>>;
   emulateOpencode: boolean;
   runtime: OpenCodeRuntime | null;
@@ -723,6 +789,7 @@ async function evaluateCheckWithRecovery(options: {
     try {
       const result = await evaluateCheck({
         checkId: options.checkId,
+        projectChecksDir: options.projectChecksDir,
         repoPath: options.repoPath,
         agent: options.agent,
         model: options.model,

@@ -47,6 +47,7 @@ export function getCheckEvaluationOriginalOutput(error: unknown): string | null 
 
 export interface EvaluateCheckOptions {
   checkId: string;
+  projectChecksDir?: string | undefined;
   repoPath: string;
   agent: string;
   model: string;
@@ -65,7 +66,9 @@ export async function evaluateCheck(options: EvaluateCheckOptions): Promise<Chec
     throw new Error('OpenCode runtime is not available.');
   }
 
-  const definition = await readCheckDefinition(options.checkId);
+  const definition = await readCheckDefinition(options.checkId, {
+    checksDirectory: options.projectChecksDir
+  });
   const prompt = buildPrompt(options.checkId, definition, options.repoPath, options.scopeContext);
   const responseText = await options.runtime.runPrompt({
     prompt,

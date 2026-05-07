@@ -11,7 +11,7 @@ export type ProjectType =
   | 'go'
   | 'java'
   | 'shared';
-export type ProjectConfigDefaultKind = 'check' | 'policy';
+export type ProjectConfigDefaultKind = 'check' | 'policy' | 'project-checks';
 
 export type ScanScopeKind =
   | 'uncommitted'
@@ -123,6 +123,7 @@ export interface ScanRuntimeEvent {
 export interface ScanCommandOptions {
   checkId?: string | undefined;
   policyId?: string | undefined;
+  projectChecksDir?: string | undefined;
   repoPath: string;
   outputFormat: OutputFormat;
   agent?: string | undefined;
@@ -147,6 +148,7 @@ export interface ShrikeProjectConfig {
     projectType: ProjectType;
     detectedFrom: string[];
     opencodeSetup: 'existing-config' | 'auth-login';
+    seedPolicyId?: string | undefined;
   };
   runtime: {
     configPath: string;

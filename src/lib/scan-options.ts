@@ -1,5 +1,7 @@
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import {z} from 'zod';
+import {getProjectChecksDirectory} from './checks.js';
 import {
   DEFAULT_PARALLELISM,
   DEFAULT_OUTPUT,
@@ -24,6 +26,7 @@ const parallelismSchema = z.union([
 const rawScanOptionsSchema = z.object({
   checkId: z.string().trim().min(1).optional(),
   policyId: z.string().trim().min(1).optional(),
+  projectChecksDir: z.string().trim().min(1).optional(),
   repoPath: z.string().trim().min(1).optional(),
   outputFormat: z.enum(OUTPUT_VALUES).optional(),
   agent: z.string().trim().min(1).optional(),
@@ -45,6 +48,7 @@ const scanOptionsSchema = z
   .object({
     checkId: z.string().trim().min(1).optional(),
     policyId: z.string().trim().min(1).optional(),
+    projectChecksDir: z.string().trim().min(1).optional(),
     repoPath: z.string().trim().min(1).default('.'),
     outputFormat: z.enum(OUTPUT_VALUES).default(DEFAULT_OUTPUT),
     agent: z.string().trim().min(1).optional(),
@@ -62,14 +66,23 @@ const scanOptionsSchema = z
     ui: z.boolean().default(true)
   })
   .superRefine((value, ctx) => {
-    const hasCheck = Boolean(value.checkId);
-    const hasPolicy = Boolean(value.policyId);
+    if (value.projectChecksDir) {
+      if (value.policyId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Project-local checks are configured via `.openshrike/checks`; use plain `shrike scan` or `--check <CHECK_ID>`.'
+        });
+      }
+    } else {
+      const hasCheck = Boolean(value.checkId);
+      const hasPolicy = Boolean(value.policyId);
 
-    if (hasCheck === hasPolicy) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Specify exactly one of: --check <CHECK_ID> or --policy <POLICY_ID>.'
-      });
+      if (hasCheck === hasPolicy) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Specify exactly one of: --check <CHECK_ID> or --policy <POLICY_ID>.'
+        });
+      }
     }
 
     if (value.scanScope === 'commit' && !value.scanTarget) {
@@ -96,7 +109,7 @@ export async function resolveScanOptions(input: unknown): Promise<ScanCommandOpt
   const repoPathForDiscovery = path.resolve(rawOptions.repoPath ?? '.');
   const loadedProjectConfig = await loadProjectConfigForRepo(repoPathForDiscovery);
   const merged = {
-    ...mapProjectConfigToScanOptions(loadedProjectConfig),
+    ...await mapProjectConfigToScanOptions(loadedProjectConfig),
     ...rawOptions
   };
 
@@ -111,16 +124,27 @@ export async function resolveScanOptions(input: unknown): Promise<ScanCommandOpt
 
 function mapProjectConfigToScanOptions(
   loadedProjectConfig: Awaited<ReturnType<typeof loadProjectConfigForRepo>>
-): Partial<ScanCommandOptions> {
+): Promise<Partial<ScanCommandOptions>> {
+  return buildProjectConfigScanOptions(loadedProjectConfig);
+}
+
+async function buildProjectConfigScanOptions(
+  loadedProjectConfig: Awaited<ReturnType<typeof loadProjectConfigForRepo>>
+): Promise<Partial<ScanCommandOptions>> {
   if (!loadedProjectConfig) {
     return {};
   }
 
   const {config} = loadedProjectConfig;
+  const projectChecksDir = await resolveConfiguredProjectChecksDirectory(loadedProjectConfig);
   return {
-    ...(config.scan.defaultKind === 'policy'
-      ? {policyId: config.scan.defaultId}
-      : {checkId: config.scan.defaultId}),
+    ...(projectChecksDir
+      ? {projectChecksDir}
+      : config.scan.defaultKind === 'policy'
+        ? {policyId: config.scan.defaultId}
+        : config.scan.defaultKind === 'check'
+          ? {checkId: config.scan.defaultId}
+          : {}),
     repoPath: resolveProjectConfigRelativePath(loadedProjectConfig, config.scan.repo),
     outputFormat: config.scan.output,
     agent: config.runtime.agent,
@@ -132,4 +156,25 @@ function mapProjectConfigToScanOptions(
     parallelism: config.runtime.parallelism,
     ui: config.scan.ui
   };
+}
+
+async function resolveConfiguredProjectChecksDirectory(
+  loadedProjectConfig: NonNullable<Awaited<ReturnType<typeof loadProjectConfigForRepo>>>
+): Promise<string | undefined> {
+  if (loadedProjectConfig.config.scan.defaultKind === 'project-checks') {
+    return resolveProjectConfigRelativePath(loadedProjectConfig, loadedProjectConfig.config.scan.defaultId);
+  }
+
+  const configuredPath = getProjectChecksDirectory(loadedProjectConfig.repoRoot);
+
+  try {
+    const stats = await fs.stat(configuredPath);
+    return stats.isDirectory() ? configuredPath : undefined;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      return undefined;
+    }
+
+    throw error;
+  }
 }

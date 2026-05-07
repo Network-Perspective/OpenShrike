@@ -32,7 +32,8 @@ const projectConfigSchema = z
         'shared'
       ]),
       detectedFrom: z.array(z.string().trim().min(1)).default([]),
-      opencodeSetup: z.enum(['existing-config', 'auth-login'])
+      opencodeSetup: z.enum(['existing-config', 'auth-login']),
+      seedPolicyId: z.string().trim().min(1).optional()
     }),
     runtime: z.object({
       configPath: z.string().trim().min(1),
@@ -42,7 +43,7 @@ const projectConfigSchema = z
       parallelism: projectParallelismSchema
     }),
     scan: z.object({
-      defaultKind: z.enum(['check', 'policy']),
+      defaultKind: z.enum(['check', 'policy', 'project-checks']),
       defaultId: z.string().trim().min(1),
       repo: z.string().trim().min(1),
       scope: z.enum(SCOPE_VALUES),

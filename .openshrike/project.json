@@ -8,7 +8,8 @@
       "package.json",
       "src/**/*.ts"
     ],
-    "opencodeSetup": "existing-config"
+    "opencodeSetup": "existing-config",
+    "seedPolicyId": "typescript-baseline"
   },
   "runtime": {
     "configPath": ".openshrike/opencode.json",
@@ -18,8 +19,8 @@
     "parallelism": "auto"
   },
   "scan": {
-    "defaultKind": "policy",
-    "defaultId": "typescript-baseline",
+    "defaultKind": "project-checks",
+    "defaultId": ".openshrike/checks",
     "repo": ".",
     "scope": "uncommitted",
     "output": "markdown",

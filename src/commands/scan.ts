@@ -1,6 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {assembleBundleForCheck, assembleBundleForPolicy} from '../lib/bundle.js';
+import {
+  assembleBundleForCheck,
+  assembleBundleForPolicy,
+  assembleBundleForProjectChecks
+} from '../lib/bundle.js';
 import {
   normalizeCliError,
   renderCliError,
@@ -21,9 +25,11 @@ export async function executeScanCommand(rawOptions: Partial<ScanCommandOptions>
 
     report = shouldUseUi ? await runScanWithInk(options) : await runScan(options);
     if (options.emitBundlePath) {
-      const bundle = options.policyId
-        ? await assembleBundleForPolicy(options.policyId)
-        : await assembleBundleForCheck(options.checkId!);
+      const bundle = options.projectChecksDir
+        ? await assembleBundleForProjectChecks(options.projectChecksDir, options.checkId)
+        : options.policyId
+          ? await assembleBundleForPolicy(options.policyId)
+          : await assembleBundleForCheck(options.checkId!);
       const outputPath = path.resolve(options.emitBundlePath);
       await fs.mkdir(path.dirname(outputPath), {recursive: true});
       await fs.writeFile(outputPath, `${bundle}\n`, 'utf8');

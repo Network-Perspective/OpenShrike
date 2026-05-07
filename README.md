@@ -13,12 +13,13 @@ the engineering practices your team already relies on in production:
 architectural boundaries, test discipline, input validation, timeouts, secrets
 handling, observability, API safety, and similar review standards.
 
-Those standards live as versioned Markdown checks and policies in
-[best_practices/](best_practices/). That makes them reviewable, portable, and
-easy to tailor to a specific codebase, language, architecture, and risk
-profile. It lets teams materialize established best practices as enforceable
-tests for their own project. OpenShrike executes them with OpenCode and
-produces findings with evidence, rationale, and remediation.
+Those standards ship as versioned Markdown checks and policies in
+[best_practices/](best_practices/). `shrike init` seeds the selected policy
+into repo-local Markdown files under `.openshrike/checks/`, so the checks that
+actually run live in the project, can be reviewed in code review, and can be
+edited or extended by maintainers. OpenShrike executes those project-local
+checks with OpenCode and produces findings with evidence, rationale, and
+remediation.
 
 ![scan screenshot](docs/scan-screenshot.png)
 
@@ -61,11 +62,13 @@ shrike scan
 
 - `shrike init` is interactive. It detects the project, helps establish
   AI provider access, lets you choose defaults, and writes
-  `.openshrike/project.json` plus `.openshrike/opencode.json`.
-- `shrike scan` uses those saved defaults automatically. By default it scans
-  uncommitted changes in the current repository.
-- Re-run `shrike init` when you want to change the default policy, model, or
-  runtime settings.
+  `.openshrike/project.json`, `.openshrike/opencode.json`, and seeds
+  `.openshrike/checks/`.
+- `shrike scan` uses those saved defaults automatically and reads only the
+  Markdown checks from `.openshrike/checks/`. By default it scans uncommitted
+  changes in the current repository.
+- Re-run `shrike init` when you want to seed checks from a different policy or
+  change model/runtime settings.
 
 ## Install From Source
 
@@ -112,8 +115,9 @@ shrike init [--force]
 ### `shrike scan`
 
 After `shrike init`, a plain `shrike scan` uses saved defaults from
-`.openshrike/project.json`. Without saved defaults, `scan` requires exactly one
-of `--check` or `--policy`.
+`.openshrike/project.json` and executes the Markdown checks in
+`.openshrike/checks/`. Without saved defaults, `scan` requires exactly one of
+`--check` or `--policy`.
 
 ```bash
 shrike scan \
@@ -161,6 +165,8 @@ Use saved defaults:
 ```bash
 shrike scan
 ```
+
+Add or customize checks by editing Markdown files in `.openshrike/checks/`.
 
 Run a specific policy without saved defaults:
 

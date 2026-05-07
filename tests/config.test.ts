@@ -110,12 +110,17 @@ describe('runtime config', () => {
     expect(runtimeConfig.config.$schema).toBe('https://opencode.ai/config.json');
     expect(runtimeConfig.config.provider).toBeUndefined();
     expect(runtimeConfig.config.agent?.['shrike-checker']?.model).toBe('azure/gpt-5.4-mini');
-    expect(projectConfig.config.scan.defaultId).toBe('typescript-baseline');
+    expect(projectConfig.config.scan.defaultKind).toBe('project-checks');
+    expect(projectConfig.config.scan.defaultId).toBe('.openshrike/checks');
     expect(projectConfig.config.scan.output).toBe('markdown');
     expect(projectConfig.config.runtime.configPath).toBe('.openshrike/opencode.json');
     expect(projectConfig.config.init.detectedFrom).toEqual(['package.json', 'tsconfig.json']);
+    expect(projectConfig.config.init.seedPolicyId).toBe('typescript-baseline');
+    expect(result.checksDirectory).toBe(path.join(tempRoot, '.openshrike', 'checks'));
+    expect(result.seededCheckPaths.length).toBeGreaterThan(0);
     expect(readme).toContain('`project.json`');
     expect(readme).toContain('`opencode.json`');
+    expect(readme).toContain('`checks/`');
   });
 
   it('loads project config from a nested repository path', async () => {
@@ -137,6 +142,7 @@ describe('runtime config', () => {
     const loaded = await loadProjectConfigForRepo(nestedPath);
 
     expect(loaded?.repoRoot).toBe(tempRoot);
-    expect(loaded?.config.scan.defaultId).toBe('typescript-baseline');
+    expect(loaded?.config.scan.defaultId).toBe('.openshrike/checks');
+    expect(loaded?.config.init.seedPolicyId).toBe('typescript-baseline');
   });
 });

@@ -1,7 +1,13 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {CONFIG_DIRECTORY_NAME, CONFIG_FILE_NAME, INIT_README_FILE_NAME, PROJECT_CONFIG_FILE_NAME} from '../constants.js';
+import {
+  CONFIG_DIRECTORY_NAME,
+  CONFIG_FILE_NAME,
+  INIT_README_FILE_NAME,
+  PROJECT_CHECKS_DIRECTORY_NAME,
+  PROJECT_CONFIG_FILE_NAME
+} from '../constants.js';
 import {runProcess} from '../process.js';
 import {loadProjectConfigIfPresent} from '../project-config.js';
 import type {LoadedProjectConfig} from '../project-config.js';
@@ -14,6 +20,7 @@ interface DiscoveredOpenCodeConfig {
 
 export interface ExistingInitDiscovery {
   configDirectory: string;
+  checksDirectory: string;
   projectConfigPath: string;
   opencodeConfigPath: string;
   readmePath: string;
@@ -66,11 +73,13 @@ export async function findRepoRoot(cwd: string): Promise<string> {
 
 export async function discoverExistingInit(repoRoot: string): Promise<ExistingInitDiscovery> {
   const configDirectory = path.join(repoRoot, CONFIG_DIRECTORY_NAME);
+  const checksDirectory = path.join(configDirectory, PROJECT_CHECKS_DIRECTORY_NAME);
   const projectConfigPath = path.join(configDirectory, PROJECT_CONFIG_FILE_NAME);
   const opencodeConfigPath = path.join(configDirectory, CONFIG_FILE_NAME);
   const readmePath = path.join(configDirectory, INIT_README_FILE_NAME);
   const existingFiles = (
     await Promise.all([
+      checksDirectory,
       projectConfigPath,
       opencodeConfigPath,
       readmePath
@@ -86,6 +95,7 @@ export async function discoverExistingInit(repoRoot: string): Promise<ExistingIn
 
   return {
     configDirectory,
+    checksDirectory,
     projectConfigPath,
     opencodeConfigPath,
     readmePath,

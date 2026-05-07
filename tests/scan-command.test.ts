@@ -10,7 +10,8 @@ const mockRunScanWithInk = vi.fn();
 
 vi.mock('../src/lib/bundle.js', () => ({
   assembleBundleForCheck: vi.fn(),
-  assembleBundleForPolicy: vi.fn()
+  assembleBundleForPolicy: vi.fn(),
+  assembleBundleForProjectChecks: vi.fn()
 }));
 
 vi.mock('../src/lib/markdown.js', () => ({
