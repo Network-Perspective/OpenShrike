@@ -8,15 +8,19 @@ import {
   createInitialBrowserState,
   createStreamedReportState,
   deriveProgressCounts,
+  findFirstVisibleItemIndex,
   formatCheckListLabel,
   formatCheckIdDisplay,
   formatStatusMarker,
+  getScrollPageDelta,
   moveBrowserSelection,
   parseEvidenceLocation,
   reduceStreamedReportState,
   resolveEscapeKeyAction,
   resolveVerticalArrowAction,
   resolveEvidenceWindow,
+  resolvePagedListNavigation,
+  resolveVisibleItemScrollOffset,
   syncBrowserState,
   toggleBrowserViewMode
 } from '../src/ui/scan-app.js';
@@ -166,10 +170,11 @@ describe('formatCheckListLabel', () => {
 });
 
 describe('formatStatusMarker', () => {
-  it('uses the updated pass marker and blinks running checks', () => {
+  it('uses the updated pass marker and the running spinner frames', () => {
     expect(formatStatusMarker('pass')).toBe('[v]');
-    expect(formatStatusMarker('running', true)).toBe('[.]');
-    expect(formatStatusMarker('running', false)).toBe('[ ]');
+    expect(formatStatusMarker('running', '⠋')).toBe('[⠋]');
+    expect(formatStatusMarker('running', '⠏')).toBe('[⠏]');
+    expect(formatStatusMarker('pending')).toBe('[ ]');
   });
 });
 
@@ -182,11 +187,11 @@ describe('buildCheckListEntryDisplay', () => {
     }, {
       'bp-sec-004-sensitive-data-not-logged': 'Sensitive data is not logged'
     }, {
-      blinkOn: true
+      runningIndicatorFrame: '⠋'
     });
 
     expect(display).toEqual({
-      marker: '[.]',
+      marker: '[⠋]',
       statusColor: 'whiteBright',
       title: 'Sensitive data is not logged',
       idLabel: 'BP-SEC-004',
@@ -278,6 +283,52 @@ describe('deriveProgressCounts', () => {
     })).toEqual({
       inProgressCount: 0,
       pendingCount: 0
+    });
+  });
+});
+
+describe('list scroll helpers', () => {
+  it('scrolls the selected row into view above or below the viewport', () => {
+    expect(resolveVisibleItemScrollOffset(
+      makeScrollMetrics([1, 1, 2, 1], 0, 3),
+      2
+    )).toBe(1);
+
+    expect(resolveVisibleItemScrollOffset(
+      makeScrollMetrics([1, 1, 1, 1], 2, 3),
+      0
+    )).toBe(0);
+  });
+
+  it('finds the first visible row at a target offset', () => {
+    expect(findFirstVisibleItemIndex(
+      makeScrollMetrics([1, 2, 1, 2, 1], 0, 5),
+      5,
+      3
+    )).toBe(2);
+  });
+
+  it('pages the list by the measured viewport height', () => {
+    expect(getScrollPageDelta(8)).toBe(5);
+
+    expect(resolvePagedListNavigation({
+      metrics: makeScrollMetrics([1, 2, 1, 2, 1, 2], 0, 5),
+      itemCount: 6,
+      currentIndex: 0,
+      direction: 1
+    })).toEqual({
+      selectedIndex: 2,
+      scrollOffset: 3
+    });
+
+    expect(resolvePagedListNavigation({
+      metrics: makeScrollMetrics([1, 2, 1, 2, 1, 2, 1], 5, 5),
+      itemCount: 7,
+      currentIndex: 6,
+      direction: -1
+    })).toEqual({
+      selectedIndex: 1,
+      scrollOffset: 2
     });
   });
 });
@@ -400,5 +451,31 @@ function makeProgressEvent(overrides: Partial<{
     totalChecks: 1,
     runningCheckIds: [],
     ...overrides
+  };
+}
+
+function makeScrollMetrics(heights: number[], scrollOffset: number, viewportHeight: number) {
+  const tops: number[] = [];
+  let totalHeight = 0;
+
+  for (const height of heights) {
+    tops.push(totalHeight);
+    totalHeight += height;
+  }
+
+  return {
+    getItemPosition: (index: number) => {
+      if (index < 0 || index >= heights.length) {
+        return null;
+      }
+
+      return {
+        top: tops[index] ?? 0,
+        height: heights[index] ?? 0
+      };
+    },
+    getScrollOffset: () => scrollOffset,
+    getViewportHeight: () => viewportHeight,
+    getBottomOffset: () => Math.max(0, totalHeight - viewportHeight)
   };
 }

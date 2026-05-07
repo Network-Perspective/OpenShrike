@@ -86,7 +86,8 @@ interface CheckListModuleProps {
   browser: BrowserState;
   isScanComplete: boolean;
   checkTitles: Record<string, string>;
-  blinkOn: boolean;
+  runningIndicatorFrame: string;
+  scrollRef: React.RefObject<ScrollViewRef | null>;
 }
 
 const SECTION_ORDER: readonly CheckStatus[] = ['fail', 'unknown', 'pass'];
@@ -105,9 +106,12 @@ const STATUS_BADGES: Record<CheckDisplayStatus, string> = {
   pass: 'PASS'
 };
 
+const RUNNING_SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
+const RUNNING_SPINNER_INTERVAL_MS = 160;
+
 const STATUS_MARKERS: Record<CheckDisplayStatus, string> = {
   pending: '[ ]',
-  running: '[.]',
+  running: `[${RUNNING_SPINNER_FRAMES[0]}]`,
   fail: '[x]',
   unknown: '[~]',
   pass: '[v]'
@@ -122,6 +126,9 @@ const STATUS_COLORS: Record<CheckDisplayStatus, string> = {
 };
 
 const HELP_INPUTS = new Set(['\u001bop', '\u001b[[a', '\u001b[11~', '?']);
+
+type ScrollVisibilityMetrics = Pick<ScrollViewRef, 'getItemPosition' | 'getScrollOffset' | 'getViewportHeight'>;
+type ScrollPageMetrics = ScrollVisibilityMetrics & Pick<ScrollViewRef, 'getBottomOffset'>;
 
 export class ScanUiCancelledError extends Error {
   constructor() {
@@ -183,7 +190,8 @@ function ScanApp(props: {
 }) {
   const {exit} = useApp();
   const {stdout} = useStdout();
-  const scrollRef = useRef<ScrollViewRef>(null);
+  const detailScrollRef = useRef<ScrollViewRef>(null);
+  const listScrollRef = useRef<ScrollViewRef>(null);
   const startedAtRef = useRef(Date.now());
   const finishedAtRef = useRef<number | null>(null);
   const [progress, setProgress] = useState<ProgressViewState>(createProgressViewState());
@@ -198,7 +206,6 @@ function ScanApp(props: {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [exitConfirmChoice, setExitConfirmChoice] = useState<ExitConfirmationChoice>('no');
   const [exitAfterDismiss, setExitAfterDismiss] = useState(false);
-  const [viewportHeight, setViewportHeight] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
 
   const terminalWidth = stdout.columns || 80;
@@ -212,13 +219,14 @@ function ScanApp(props: {
   const displayChecksKey = displayChecks
     .map(check => `${check.id}:${check.status}:${check.result?.version ?? ''}`)
     .join('\u0000');
+  const loadedTitleCount = Object.keys(checkTitles).length;
   const selectedCheck = getSelectedCheck(displayChecks, browser);
   const reportReady = displayChecks.length > 0;
   const isScanComplete = report !== null;
   const durationMs = finishedAtRef.current === null
     ? elapsedMs
     : finishedAtRef.current - startedAtRef.current;
-  const blinkOn = !isScanComplete && Math.floor(elapsedMs / 500) % 2 === 0;
+  const runningIndicatorFrame = getRunningIndicatorFrame(elapsedMs);
   const totalChecks = report?.summary.total_checks ?? progress.totalChecks;
   const {inProgressCount, pendingCount} = deriveProgressCounts({
     isScanComplete,
@@ -266,6 +274,10 @@ function ScanApp(props: {
   };
 
   useInput((input, key) => {
+    const activeScrollRef = showHelp || browser.viewMode === 'detail'
+      ? detailScrollRef.current
+      : listScrollRef.current;
+
     if (showExitConfirm) {
       const normalizedInput = input.toLowerCase();
 
@@ -302,7 +314,7 @@ function ScanApp(props: {
 
     if (isHelpInput(input)) {
       setShowHelp(previous => !previous);
-      scrollRef.current?.scrollToTop();
+      detailScrollRef.current?.scrollToTop();
       return;
     }
 
@@ -342,7 +354,7 @@ function ScanApp(props: {
         showHelp,
         viewMode: browser.viewMode
       }) === 'scroll') {
-        scrollRef.current?.scrollBy(-1);
+        activeScrollRef?.scrollBy(-1);
       } else {
         setBrowser(previous => moveBrowserSelection(previous, displayChecks, -1));
       }
@@ -356,7 +368,7 @@ function ScanApp(props: {
         showHelp,
         viewMode: browser.viewMode
       }) === 'scroll') {
-        scrollRef.current?.scrollBy(1);
+        activeScrollRef?.scrollBy(1);
       } else {
         setBrowser(previous => moveBrowserSelection(previous, displayChecks, 1));
       }
@@ -365,22 +377,76 @@ function ScanApp(props: {
     }
 
     if (key.pageUp) {
-      scrollRef.current?.scrollBy(-Math.max(3, viewportHeight - 3));
+      if (!showHelp && browser.viewMode === 'list' && reportReady) {
+        const target = resolvePagedListNavigation({
+          metrics: listScrollRef.current,
+          itemCount: displayChecks.length,
+          currentIndex: browser.selectedCheckIndex,
+          direction: -1
+        });
+
+        if (target) {
+          listScrollRef.current?.scrollTo(target.scrollOffset);
+          setBrowser(previous => ({
+            ...previous,
+            selectedCheckIndex: target.selectedIndex
+          }));
+        }
+      } else {
+        activeScrollRef?.scrollBy(-getScrollPageDelta(activeScrollRef?.getViewportHeight() ?? 0));
+      }
+
       return;
     }
 
     if (key.pageDown) {
-      scrollRef.current?.scrollBy(Math.max(3, viewportHeight - 3));
+      if (!showHelp && browser.viewMode === 'list' && reportReady) {
+        const target = resolvePagedListNavigation({
+          metrics: listScrollRef.current,
+          itemCount: displayChecks.length,
+          currentIndex: browser.selectedCheckIndex,
+          direction: 1
+        });
+
+        if (target) {
+          listScrollRef.current?.scrollTo(target.scrollOffset);
+          setBrowser(previous => ({
+            ...previous,
+            selectedCheckIndex: target.selectedIndex
+          }));
+        }
+      } else {
+        activeScrollRef?.scrollBy(getScrollPageDelta(activeScrollRef?.getViewportHeight() ?? 0));
+      }
+
       return;
     }
 
     if (key.home) {
-      scrollRef.current?.scrollToTop();
+      if (!showHelp && browser.viewMode === 'list' && reportReady) {
+        listScrollRef.current?.scrollToTop();
+        setBrowser(previous => ({
+          ...previous,
+          selectedCheckIndex: 0
+        }));
+      } else {
+        activeScrollRef?.scrollToTop();
+      }
+
       return;
     }
 
     if (key.end) {
-      scrollRef.current?.scrollToBottom();
+      if (!showHelp && browser.viewMode === 'list' && reportReady) {
+        listScrollRef.current?.scrollToBottom();
+        setBrowser(previous => ({
+          ...previous,
+          selectedCheckIndex: Math.max(0, displayChecks.length - 1)
+        }));
+      } else {
+        activeScrollRef?.scrollToBottom();
+      }
+
       return;
     }
 
@@ -422,7 +488,7 @@ function ScanApp(props: {
 
     const timer = setInterval(() => {
       setElapsedMs(Date.now() - startedAtRef.current);
-    }, 250);
+    }, RUNNING_SPINNER_INTERVAL_MS);
 
     return () => {
       clearInterval(timer);
@@ -549,7 +615,21 @@ function ScanApp(props: {
 
   useEffect(() => {
     const handleResize = () => {
-      scrollRef.current?.remeasure();
+      detailScrollRef.current?.remeasure();
+      listScrollRef.current?.remeasure();
+
+      if (showHelp || browser.viewMode !== 'list' || !reportReady) {
+        return;
+      }
+
+      const targetOffset = resolveVisibleItemScrollOffset(
+        listScrollRef.current,
+        clampSelectedIndex(browser.selectedCheckIndex, displayChecks.length)
+      );
+
+      if (targetOffset !== null) {
+        listScrollRef.current?.scrollTo(targetOffset);
+      }
     };
 
     stdout.on('resize', handleResize);
@@ -557,18 +637,33 @@ function ScanApp(props: {
     return () => {
       stdout.off('resize', handleResize);
     };
-  }, [stdout]);
+  }, [browser.selectedCheckIndex, browser.viewMode, displayChecks.length, reportReady, showHelp, stdout]);
 
   useEffect(() => {
     if (showHelp) {
-      scrollRef.current?.scrollToTop();
+      detailScrollRef.current?.scrollToTop();
       return;
     }
 
     if (browser.viewMode === 'detail') {
-      scrollRef.current?.scrollToTop();
+      detailScrollRef.current?.scrollToTop();
+      return;
     }
-  }, [browser.selectedCheckIndex, browser.viewMode, showHelp]);
+
+    if (!reportReady) {
+      return;
+    }
+
+    listScrollRef.current?.remeasure();
+    const targetOffset = resolveVisibleItemScrollOffset(
+      listScrollRef.current,
+      clampSelectedIndex(browser.selectedCheckIndex, displayChecks.length)
+    );
+
+    if (targetOffset !== null) {
+      listScrollRef.current?.scrollTo(targetOffset);
+    }
+  }, [browser.selectedCheckIndex, browser.viewMode, displayChecks.length, displayChecksKey, loadedTitleCount, reportReady, showHelp]);
 
   return (
     <Box width={terminalWidth} height={terminalHeight}>
@@ -581,56 +676,53 @@ function ScanApp(props: {
         <Text color="cyanBright" bold>
           OpenShrike Scan
         </Text>
-        <Box flexGrow={1} overflow="hidden" marginTop={1}>
-          <ScrollView
-            ref={scrollRef}
-            flexDirection="column"
-            width="100%"
-            height="100%"
-            onViewportSizeChange={size => {
-              setViewportHeight(size.height);
-            }}
-          >
-            {showHelp ? (
+        <Box flexGrow={1} overflow="hidden" marginTop={1} minHeight={0}>
+          {showHelp ? (
+            <ScrollView
+              ref={detailScrollRef}
+              flexDirection="column"
+              width="100%"
+              height="100%"
+            >
               <HelpModule key="help" />
-            ) : browser.viewMode === 'detail' ? (
-              <DetailModule
-                key="detail"
-                check={selectedCheck}
-                selectedIndex={browser.selectedCheckIndex}
-                totalChecks={displayChecks.length}
-                checkTitles={checkTitles}
-                repoPath={report?.repo.path ?? path.resolve(props.options.repoPath)}
+            </ScrollView>
+          ) : browser.viewMode === 'detail' ? (
+            <DetailModule
+              key="detail"
+              check={selectedCheck}
+              selectedIndex={browser.selectedCheckIndex}
+              totalChecks={displayChecks.length}
+              checkTitles={checkTitles}
+              repoPath={report?.repo.path ?? path.resolve(props.options.repoPath)}
+              scrollRef={detailScrollRef}
+            />
+          ) : (
+            <Box width="100%" height="100%" flexDirection="column" minHeight={0}>
+              <SummaryModule
+                metricWidth={metricWidth}
+                progressBarWidth={progressBarWidth}
+                targetLabel={targetLabel}
+                durationLabel={formatDuration(durationMs)}
+                tokenLabel={tokenLabel}
+                parallelismLabel={parallelismLabel}
+                scopeLabel={scopeLabel}
+                totalChecks={totalChecks}
+                failedCount={report?.summary.failed ?? progress.failedCount}
+                unknownCount={report?.summary.unknown ?? progress.unknownCount}
+                passedCount={report?.summary.passed ?? progress.passedCount}
+                inProgressCount={inProgressCount}
+                pendingCount={pendingCount}
               />
-            ) : (
-              <>
-                <SummaryModule
-                  key="summary"
-                  metricWidth={metricWidth}
-                  progressBarWidth={progressBarWidth}
-                  targetLabel={targetLabel}
-                  durationLabel={formatDuration(durationMs)}
-                  tokenLabel={tokenLabel}
-                  parallelismLabel={parallelismLabel}
-                  scopeLabel={scopeLabel}
-                  totalChecks={totalChecks}
-                  failedCount={report?.summary.failed ?? progress.failedCount}
-                  unknownCount={report?.summary.unknown ?? progress.unknownCount}
-                  passedCount={report?.summary.passed ?? progress.passedCount}
-                  inProgressCount={inProgressCount}
-                  pendingCount={pendingCount}
-                />
-                <CheckListModule
-                  key="checks"
-                  checks={displayChecks}
-                  browser={browser}
-                  isScanComplete={isScanComplete}
-                  checkTitles={checkTitles}
-                  blinkOn={blinkOn}
-                />
-              </>
-            )}
-          </ScrollView>
+              <CheckListModule
+                checks={displayChecks}
+                browser={browser}
+                isScanComplete={isScanComplete}
+                checkTitles={checkTitles}
+                runningIndicatorFrame={runningIndicatorFrame}
+                scrollRef={listScrollRef}
+              />
+            </Box>
+          )}
         </Box>
         <Box marginTop={1}>
           <Text color="gray">{footerText}</Text>
@@ -731,24 +823,28 @@ function CheckListModule(props: CheckListModuleProps) {
   const title = buildChecksPaneTitle(props.checks, props.browser);
 
   return (
-    <Module borderColor="cyan" marginBottom={1}>
+    <Module flexGrow={1} minHeight={0}>
       <Box justifyContent="space-between" gap={1}>
         <Text color="cyanBright" bold>
           {title}
-        </Text>
-        {props.checks.length > 0 ? (
-          <Text color="gray">{'<- / -> / Up / Down | [ENTER] Details'}</Text>
-        ) : null}
+        </Text>        
       </Box>
 
-      <Box marginTop={1} flexDirection="column">
-        <ListView
-          checks={props.checks}
-          browser={props.browser}
-          isScanComplete={props.isScanComplete}
-          checkTitles={props.checkTitles}
-          blinkOn={props.blinkOn}
-        />
+      <Box marginTop={1} flexDirection="column" flexGrow={1} minHeight={0} overflow="hidden">
+        <ScrollView
+          ref={props.scrollRef}
+          flexDirection="column"
+          width="100%"
+          height="100%"
+        >
+          {renderCheckListRows({
+            checks: props.checks,
+            browser: props.browser,
+            isScanComplete: props.isScanComplete,
+            checkTitles: props.checkTitles,
+            runningIndicatorFrame: props.runningIndicatorFrame
+          })}
+        </ScrollView>
       </Box>
     </Module>
   );
@@ -812,6 +908,7 @@ function DetailModule(props: {
   totalChecks: number;
   checkTitles: Record<string, string>;
   repoPath: string;
+  scrollRef: React.RefObject<ScrollViewRef | null>;
 }) {
   const shortId = props.check ? formatCheckIdDisplay(props.check.id) : 'No Check';
   const title = props.check ? formatCheckTitle(props.check, props.checkTitles) : 'No check selected';
@@ -819,7 +916,7 @@ function DetailModule(props: {
   const indexLabel = props.totalChecks > 0 ? `${props.selectedIndex + 1} of ${props.totalChecks}` : '0';
 
   return (
-    <Module borderColor="cyan" marginBottom={1}>
+    <Module flexGrow={1} minHeight={0}>
       <Box justifyContent="space-between" gap={1}>
         <Text color={STATUS_COLORS[status]} bold>
           {`> ${shortId} (${indexLabel})`}
@@ -829,16 +926,23 @@ function DetailModule(props: {
         ) : null}
       </Box>
 
-      <Box marginTop={1} flexDirection="column">
-        {props.check ? (
-          <DetailView
-            check={props.check}
-            checkTitles={props.checkTitles}
-            repoPath={props.repoPath}
-          />
-        ) : (
-          <Text color="gray">No check selected.</Text>
-        )}
+      <Box marginTop={1} flexDirection="column" flexGrow={1} minHeight={0} overflow="hidden">
+        <ScrollView
+          ref={props.scrollRef}
+          flexDirection="column"
+          width="100%"
+          height="100%"
+        >
+          {props.check ? (
+            <DetailView
+              check={props.check}
+              checkTitles={props.checkTitles}
+              repoPath={props.repoPath}
+            />
+          ) : (
+            <Text key="empty-detail-view" color="gray">No check selected.</Text>
+          )}
+        </ScrollView>
       </Box>
     </Module>
   );
@@ -929,16 +1033,16 @@ function CodeBlock(props: {lines: Array<{number: number; text: string}>}) {
   );
 }
 
-function ListView(props: {
+function renderCheckListRows(props: {
   checks: DisplayCheck[];
   browser: BrowserState;
   isScanComplete: boolean;
   checkTitles: Record<string, string>;
-  blinkOn: boolean;
-}) {
+  runningIndicatorFrame: string;
+}): React.ReactNode {
   if (props.checks.length === 0) {
     return (
-      <Text color="gray">
+      <Text key="empty-check-list" color="gray">
         {props.isScanComplete ? 'No checks in this report.' : 'Checks will appear when scope resolves.'}
       </Text>
     );
@@ -946,26 +1050,22 @@ function ListView(props: {
 
   const selectedIndex = clampSelectedIndex(props.browser.selectedCheckIndex, props.checks.length);
 
-  return (
-    <Box flexDirection="column">
-      {props.checks.map((check, index) => {
-        const isActiveRow = selectedIndex === index;
-        const prefix = isActiveRow ? '>' : ' ';
-        const display = buildCheckListEntryDisplay(check, props.checkTitles, {
-          blinkOn: props.blinkOn
-        });
+  return props.checks.map((check, index) => {
+    const isActiveRow = selectedIndex === index;
+    const prefix = isActiveRow ? '>' : ' ';
+    const display = buildCheckListEntryDisplay(check, props.checkTitles, {
+      runningIndicatorFrame: props.runningIndicatorFrame
+    });
 
-        return (
-          <Box key={check.id} flexDirection="row" flexWrap="wrap">
-            <Text color={isActiveRow ? 'cyanBright' : 'gray'}>{`${prefix} `}</Text>
-            <Text color={display.statusColor}>{`${display.marker} `}</Text>
-            <Text color={display.statusColor} bold={isActiveRow}>{display.title}</Text>
-            <Text color="gray">{` (${display.idLabel})`}</Text>
-          </Box>
-        );
-      })}
-    </Box>
-  );
+    return (
+      <Box key={check.id} flexDirection="row" flexWrap="wrap">
+        <Text color={isActiveRow ? 'cyanBright' : 'gray'}>{`${prefix} `}</Text>
+        <Text color={display.statusColor}>{`${display.marker} `}</Text>
+        <Text color={display.statusColor} bold={isActiveRow}>{display.title}</Text>
+        <Text color="gray">{` (${display.idLabel})`}</Text>
+      </Box>
+    );
+  });
 }
 
 function EvidenceBlock(props: {
@@ -1027,9 +1127,9 @@ function HelpModule() {
         Help
       </Text>
       <Box marginTop={1} flexDirection="column">
-        <Text>List view: Left / Right / Up / Down move to the previous or next check.</Text>
+        <Text>List view: Left / Right / Up / Down move to the previous or next check and auto-scroll the checks pane.</Text>
         <Text>Detail view and Help: Up / Down scroll the report one line at a time.</Text>
-        <Text>Page Up / Page Down: scroll the report by a page.</Text>
+        <Text>Page Up / Page Down: page through the checks pane or the current report.</Text>
         <Text>D: open detail view for the current check.</Text>
         <Text>L: switch detail view back to list view.</Text>
         <Text>Enter: toggle between detail and list for the current section.</Text>
@@ -1041,18 +1141,22 @@ function HelpModule() {
 }
 
 function Module(props: {
-  borderColor: string;
+  borderColor?: string;
   marginBottom?: number | undefined;
+  flexGrow?: number | undefined;
+  minHeight?: number | string | undefined;
   children: React.ReactNode;
 }) {
   return (
     <Box
-      borderStyle="round"
+      borderStyle={props.borderColor ? "round" : undefined}
       borderColor={props.borderColor}
       paddingX={1}
       paddingY={0}
       marginBottom={props.marginBottom}
       flexDirection="column"
+      flexGrow={props.flexGrow}
+      minHeight={props.minHeight}
     >
       {props.children}
     </Box>
@@ -1379,9 +1483,12 @@ export function formatCheckListLabel(
   return `${formatCheckTitle(check, checkTitles)} (${formatCheckIdDisplay(check.id)})`;
 }
 
-export function formatStatusMarker(status: CheckDisplayStatus, blinkOn = true): string {
-  if (status === 'running' && !blinkOn) {
-    return '[ ]';
+export function formatStatusMarker(
+  status: CheckDisplayStatus,
+  runningIndicatorFrame: string = RUNNING_SPINNER_FRAMES[0]
+): string {
+  if (status === 'running') {
+    return `[${runningIndicatorFrame}]`;
   }
 
   return STATUS_MARKERS[status];
@@ -1390,7 +1497,7 @@ export function formatStatusMarker(status: CheckDisplayStatus, blinkOn = true): 
 export function buildCheckListEntryDisplay(
   check: DisplayCheck,
   checkTitles: Record<string, string>,
-  options: {blinkOn: boolean}
+  options: {runningIndicatorFrame: string}
 ): {
   marker: string;
   statusColor: string;
@@ -1402,12 +1509,17 @@ export function buildCheckListEntryDisplay(
   const idLabel = formatCheckIdDisplay(check.id);
 
   return {
-    marker: formatStatusMarker(check.status, options.blinkOn),
+    marker: formatStatusMarker(check.status, options.runningIndicatorFrame),
     statusColor: STATUS_COLORS[check.status],
     title,
     idLabel,
     label: `${title} (${idLabel})`
   };
+}
+
+function getRunningIndicatorFrame(elapsedMs: number): string {
+  const frameIndex = Math.floor(elapsedMs / RUNNING_SPINNER_INTERVAL_MS) % RUNNING_SPINNER_FRAMES.length;
+  return RUNNING_SPINNER_FRAMES[frameIndex] ?? RUNNING_SPINNER_FRAMES[0];
 }
 
 export function formatCheckIdDisplay(checkId: string): string {
@@ -1663,30 +1775,99 @@ export function deriveProgressCounts(options: {
   };
 }
 
-function ensureActiveSectionVisible(
-  ref: ScrollViewRef | null,
-  activeStatus: CheckStatus
-): void {
-  if (!ref) {
-    return;
+export function getScrollPageDelta(viewportHeight: number): number {
+  return Math.max(3, viewportHeight - 3);
+}
+
+export function resolveVisibleItemScrollOffset(
+  metrics: ScrollVisibilityMetrics | null,
+  itemIndex: number
+): number | null {
+  if (!metrics) {
+    return null;
   }
 
-  const targetIndex = 1 + SECTION_ORDER.indexOf(activeStatus);
-  const position = ref.getItemPosition(targetIndex);
+  const position = metrics.getItemPosition(itemIndex);
   if (!position) {
-    return;
+    return null;
   }
 
-  const viewportTop = ref.getScrollOffset();
-  const viewportBottom = viewportTop + ref.getViewportHeight();
+  const viewportHeight = metrics.getViewportHeight();
+  if (viewportHeight <= 0 || position.height <= 0) {
+    return null;
+  }
+
+  const viewportTop = metrics.getScrollOffset();
+  const viewportBottom = viewportTop + viewportHeight;
+  const itemBottom = position.top + position.height;
+
+  if (position.height >= viewportHeight) {
+    return position.top;
+  }
+
   if (position.top < viewportTop) {
-    ref.scrollTo(position.top);
-    return;
+    return position.top;
   }
 
-  if (position.top + position.height > viewportBottom) {
-    ref.scrollTo(Math.max(0, position.top + position.height - ref.getViewportHeight()));
+  if (itemBottom > viewportBottom) {
+    return Math.max(0, itemBottom - viewportHeight);
   }
+
+  return null;
+}
+
+export function findFirstVisibleItemIndex(
+  metrics: Pick<ScrollVisibilityMetrics, 'getItemPosition'> | null,
+  itemCount: number,
+  scrollOffset: number
+): number | null {
+  if (!metrics || itemCount <= 0) {
+    return null;
+  }
+
+  let lastMeasuredIndex: number | null = null;
+
+  for (let index = 0; index < itemCount; index += 1) {
+    const position = metrics.getItemPosition(index);
+    if (!position || position.height <= 0) {
+      continue;
+    }
+
+    lastMeasuredIndex = index;
+    if (position.top + position.height > scrollOffset) {
+      return index;
+    }
+  }
+
+  return lastMeasuredIndex;
+}
+
+export function resolvePagedListNavigation(options: {
+  metrics: ScrollPageMetrics | null;
+  itemCount: number;
+  currentIndex: number;
+  direction: -1 | 1;
+}): {selectedIndex: number; scrollOffset: number} | null {
+  if (!options.metrics || options.itemCount <= 0) {
+    return null;
+  }
+
+  const viewportHeight = options.metrics.getViewportHeight();
+  if (viewportHeight <= 0) {
+    return null;
+  }
+
+  const pageDelta = getScrollPageDelta(viewportHeight);
+  const targetOffset = clampOffset(
+    options.metrics.getScrollOffset() + (options.direction * pageDelta),
+    options.metrics.getBottomOffset()
+  );
+  const visibleIndex = findFirstVisibleItemIndex(options.metrics, options.itemCount, targetOffset);
+
+  return {
+    selectedIndex: visibleIndex ?? clampSelectedIndex(options.currentIndex, options.itemCount),
+    scrollOffset: targetOffset
+  };
 }
 
 function clampSelectedIndex(index: number, itemCount: number): number {
@@ -1695,6 +1876,10 @@ function clampSelectedIndex(index: number, itemCount: number): number {
   }
 
   return Math.max(0, Math.min(itemCount - 1, index));
+}
+
+function clampOffset(offset: number, bottomOffset: number): number {
+  return Math.max(0, Math.min(bottomOffset, offset));
 }
 
 function isHelpInput(input: string): boolean {
@@ -1740,14 +1925,14 @@ function buildFooterText(options: {
   }
 
   if (options.showHelp) {
-    return '[ESC] Exit | [F1] Help';
+    return '[ESC] Exit ';
   }
 
   if (options.viewMode === 'detail') {
-    return '[ESC] List | [F1] Help | [UP/DOWN] Scroll | [<- / ->] Check | [ENTER] List';
+    return '[ESC] List | [UP/DOWN] Scroll | [<- / ->] Check | [ENTER] List';
   }
 
-  return '[ESC] Exit | [F1] Help | [ARROWS] Navigate | [ENTER] Details';
+  return '[ESC] Exit | [ARROWS] Navigate | [PGUP/PGDN] Page | [ENTER] Details';
 }
 
 function formatDuration(durationMs: number): string {
