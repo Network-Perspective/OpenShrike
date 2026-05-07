@@ -97,7 +97,7 @@ describe('runInitCommand', () => {
         expect(spec.noteLines).toEqual([
           '',
           'Other defaults are written automatically:',
-          'native • uncommitted • auto • json'
+          'native • uncommitted • auto • markdown'
         ]);
         return {type: 'submit', value: 'typescript-baseline'};
       },
@@ -157,7 +157,7 @@ describe('runInitCommand', () => {
       defaultId: 'typescript-baseline',
       repo: '.',
       scope: 'uncommitted',
-      output: 'json',
+      output: 'markdown',
       ui: true,
       artifactsDir: null
     });

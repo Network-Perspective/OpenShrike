@@ -111,6 +111,7 @@ describe('runtime config', () => {
     expect(runtimeConfig.config.provider).toBeUndefined();
     expect(runtimeConfig.config.agent?.['shrike-checker']?.model).toBe('azure/gpt-5.4-mini');
     expect(projectConfig.config.scan.defaultId).toBe('typescript-baseline');
+    expect(projectConfig.config.scan.output).toBe('markdown');
     expect(projectConfig.config.runtime.configPath).toBe('.openshrike/opencode.json');
     expect(projectConfig.config.init.detectedFrom).toEqual(['package.json', 'tsconfig.json']);
     expect(readme).toContain('`project.json`');

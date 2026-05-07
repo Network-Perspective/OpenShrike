@@ -106,7 +106,7 @@ describe('validateScanOptions', () => {
     expect(result.configPath).toBe(path.join(repoRoot, '.openshrike', 'opencode.json'));
     expect(result.runtimeMode).toBe('native');
     expect(result.parallelism).toBe('auto');
-    expect(result.outputFormat).toBe('json');
+    expect(result.outputFormat).toBe('markdown');
   });
 
   it('discovers repo-local defaults from the current nested working directory', async () => {

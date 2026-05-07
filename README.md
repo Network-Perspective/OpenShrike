@@ -137,7 +137,7 @@ shrike scan \
 
 Common behavior:
 
-- `--repo .`, `--output json`, `--scan-scope uncommitted`, `--runtime native`,
+- `--repo .`, `--output markdown`, `--scan-scope uncommitted`, `--runtime native`,
   and `--parallelism auto` are the default values when not overridden by saved
   project settings.
 - `commit` requires `--scan-target <COMMIT_OR_RANGE>`.
@@ -191,8 +191,8 @@ shrike scan \
 
 ## Output And Exit Codes
 
-- `--output json` emits machine-readable report data.
-- `--output markdown` emits a human-readable report.
+- `--output markdown` is the default and emits human-readable reports and error messages.
+- `--output json` emits machine-readable reports and error envelopes.
 - Exit code `0`: no failing checks.
 - Exit code `2`: one or more failing checks.
 - Exit code `1`: command or runtime error.

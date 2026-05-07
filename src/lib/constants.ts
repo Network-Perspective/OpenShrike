@@ -1,7 +1,7 @@
 export const DEFAULT_AGENT_NAME = 'shrike-checker';
 export const DEFAULT_MODEL = 'azure/gpt-5.4-mini';
 export const DEFAULT_PROVIDER = 'azure';
-export const DEFAULT_OUTPUT = 'json';
+export const DEFAULT_OUTPUT = 'markdown';
 export const DEFAULT_SCAN_SCOPE = 'uncommitted';
 export const DEFAULT_RUNTIME_MODE = 'native';
 export const DEFAULT_PARALLELISM = 'auto';

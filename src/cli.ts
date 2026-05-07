@@ -1,15 +1,29 @@
 #!/usr/bin/env node
 
-import {Command} from 'commander';
+import {Command, CommanderError} from 'commander';
 import {executeInitCommand} from './commands/init.js';
 import {executeInternalScanWorkerCommand} from './commands/scan-worker.js';
 import {executeScanCommand} from './commands/scan.js';
-import {normalizeCliError, renderCliErrorJson} from './lib/cli-error.js';
+import {
+  normalizeCliError,
+  renderCliError,
+  resolveCliOutputFormatFromArgv
+} from './lib/cli-error.js';
 import type {ScanCommandOptions} from './lib/types.js';
 
 const program = new Command();
 
-program.name('shrike').description('OpenShrike TypeScript CLI');
+program
+  .name('shrike')
+  .description('OpenShrike TypeScript CLI')
+  .exitOverride()
+  .configureOutput({
+    writeOut: str => {
+      process.stdout.write(str);
+    },
+    writeErr: () => {},
+    outputError: () => {}
+  });
 
 program
   .command('scan')
@@ -17,7 +31,7 @@ program
   .option('--check <CHECK_ID>', 'Check identifier, e.g. csharp-rel-001-cancellation-tokens')
   .option('--policy <POLICY_ID>', 'Policy identifier, e.g. csharp-baseline')
   .option('--repo <PATH>', 'Repository path to scan')
-  .option('--output <FORMAT>', 'Output format: json or markdown')
+  .option('--output <FORMAT>', 'Output format: markdown or json')
   .option('--agent <NAME>', 'Optional OpenCode agent name')
   .option('--model <MODEL>', 'Optional model name in provider/model form')
   .option('--emit-bundle <PATH>', 'Optional path to write assembled bundle instructions')
@@ -95,9 +109,14 @@ internal
 try {
   await program.parseAsync(process.argv);
 } catch (error) {
-  const cliError = normalizeCliError(error);
-  process.stdout.write(`${renderCliErrorJson(cliError)}\n`);
-  process.exitCode = 1;
+  if (error instanceof CommanderError && error.code === 'commander.helpDisplayed') {
+    process.exitCode = 0;
+  } else {
+    const cliError = normalizeCliError(error);
+    const outputFormat = await resolveCliOutputFormatFromArgv(process.argv);
+    process.stdout.write(`${renderCliError(cliError, outputFormat)}\n`);
+    process.exitCode = error instanceof CommanderError ? error.exitCode : 1;
+  }
 }
 
 function asOptionalString(value: unknown): string | undefined {

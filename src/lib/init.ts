@@ -1,6 +1,6 @@
 import {spawn} from 'node:child_process';
 import path from 'node:path';
-import {DEFAULT_RUNTIME_MODE} from './constants.js';
+import {DEFAULT_OUTPUT, DEFAULT_RUNTIME_MODE} from './constants.js';
 import {listPolicyCatalog} from './policies.js';
 import {findToolRoot} from './project-root.js';
 import {
@@ -311,7 +311,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             noteLines: [
               '',
               'Other defaults are written automatically:',
-              `${context.selections.runtimeMode} • uncommitted • auto • json`
+              `${context.selections.runtimeMode} • uncommitted • auto • ${DEFAULT_OUTPUT}`
             ],
             allowBack: true,
             allowCancel: true
