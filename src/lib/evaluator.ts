@@ -1,7 +1,11 @@
 import type {Event} from '@opencode-ai/sdk';
 import {z} from 'zod';
 import {readCheckDefinition} from './checks.js';
-import {MAX_CHECK_EVIDENCE_ITEMS, MAX_CHECK_REMEDIATION_ITEMS} from './constants.js';
+import {
+  MAX_CHECK_EVIDENCE_ITEMS,
+  MAX_CHECK_REMEDIATION_ITEMS,
+  MAX_SCOPE_EVIDENCE_OUTPUT_LINES
+} from './constants.js';
 import {OpenCodeRuntime} from './runtime.js';
 import type {
   CheckResult,
@@ -132,39 +136,37 @@ export function buildPrompt(
   repoPath: string,
   scopeContext: ScanScopeContext
 ): string {
-  return [
-    `You are executing a single OpenShrike best-practice check against repository path: ${repoPath}`,
-    '',
-    `Check id: ${checkId}`,
-    buildScopeSection(scopeContext),
-    '',
-    'Check definition markdown:',
-    '---',
-    checkDefinition,
-    '---',
-    '',
-    'Follow the check definition exactly. Inspect only the allowed review scope and collect direct evidence.',
-    'Return ONLY one JSON object with this schema:',
-    '{',
-    `  "id": "${checkId}",`,
-    '  "version": "0.1.0",',
-    '  "status": "pass|fail|unknown",',
-    '  "confidence": "HIGH|MEDIUM|LOW",',
-    '  "evidence": ["relative/path:line"],',
-    '  "rationale": "short explanation grounded in evidence",',
-    '  "remediation": ["action 1", "action 2"]',
-    '}',
-    '',
-    'Rules:',
-    '- Output raw JSON only. No markdown fences.',
-    '- Use repo-relative evidence paths.',
-    `- Keep evidence to at most ${MAX_CHECK_EVIDENCE_ITEMS} items.`,
-    `- Keep remediation to at most ${MAX_CHECK_REMEDIATION_ITEMS} items.`,
-    '- If scope is not full repository, evidence paths MUST come from listed scoped files.',
-    '- If the relevant evidence is outside the scoped files, return status="unknown".',
-    '- Do not cite or mention out-of-scope file paths in evidence, rationale, or remediation.',
-    '- status=unknown only when the check is not applicable or evidence is insufficient.'
-  ].join('\n');
+  const sections = [
+    [
+      `You are executing a best-practice check against repository path: ${repoPath}`,
+      '',
+      `Check id: ${checkId}`,
+      buildScopeSection(scopeContext)
+    ].join('\n'),
+    ['Best-practive check definition markdown:', '---', checkDefinition, '---'].join('\n'),
+    [
+      'Follow the check definition exactly. Inspect only the allowed review scope and collect direct evidence.',
+      'Return ONLY one JSON object with this schema:',
+      '{',
+      `  "id": "${checkId}",`,
+      '  "version": "0.1.0",',
+      '  "status": "pass|fail|unknown",',
+      '  "confidence": "HIGH|MEDIUM|LOW",',
+      '  "evidence": ["relative/path:line"],',
+      '  "rationale": "short explanation grounded in evidence",',
+      '  "remediation": ["action 1", "action 2"]',
+      '}',
+      '',
+      'Rules:',
+      ...buildPromptRules(scopeContext)
+    ].join('\n')
+  ];
+  const scopeEvidenceSection = buildScopeEvidenceSection(scopeContext);
+  if (scopeEvidenceSection) {
+    sections.push(scopeEvidenceSection);
+  }
+
+  return sections.join('\n\n');
 }
 
 function buildScopeSection(scopeContext: ScanScopeContext): string {
@@ -172,12 +174,81 @@ function buildScopeSection(scopeContext: ScanScopeContext): string {
     return 'Review scope: full repository.';
   }
 
-  const listedFiles = scopeContext.files.slice(0, 200).map(filePath => `- ${filePath}`);
-  if (scopeContext.files.length > listedFiles.length) {
-    listedFiles.push(`- ... (${scopeContext.files.length - listedFiles.length} more files)`);
+  const listedFiles = scopeContext.files.map(filePath => `- ${filePath}`);
+  return [
+    `Review scope: ${scopeContext.label}.`,
+    '',
+    `Scoped file allowlist (${scopeContext.files.length}):`,
+    ...listedFiles
+  ].join('\n');
+}
+
+function buildPromptRules(scopeContext: ScanScopeContext): string[] {
+  const baseRules = [
+    '- Output raw JSON only. No markdown fences.',
+    '- Use repo-relative evidence paths.',
+    `- Keep evidence to at most ${MAX_CHECK_EVIDENCE_ITEMS} items.`,
+    `- Keep remediation to at most ${MAX_CHECK_REMEDIATION_ITEMS} items.`
+  ];
+  const statusRule = '- status=unknown only when the check is not applicable or evidence is insufficient.';
+
+  if (scopeContext.isFullRepository) {
+    return [...baseRules, statusRule];
   }
 
-  return [`Review scope: ${scopeContext.label}.`, 'Scoped files:', ...listedFiles].join('\n');
+  return [
+    ...baseRules,
+    '- If scope is not full repository, evidence paths MUST come from the scoped file allowlist above.',
+    '- If the relevant evidence is outside the scoped file allowlist, return status="unknown".',
+    '- Do not cite or mention out-of-scope file paths in evidence, rationale, or remediation.',
+    ...(scopeContext.scopeEvidence?.mode === 'complete'
+      ? [
+          '- Treat the captured scope evidence at the end of this prompt as authoritative for scope discovery.',
+          '- Do not rerun `git status`, `git diff`, `git show`, or `git log` to redefine scope. Use the scoped file allowlist and attached scope capture instead.'
+        ]
+      : scopeContext.scopeEvidence?.mode === 'omitted'
+        ? [
+            `- The diff for this scope was omitted because it exceeded the inline limit of ${MAX_SCOPE_EVIDENCE_OUTPUT_LINES} lines.`,
+            '- Inspect scoped files directly to gather evidence instead of relying on a partial diff.'
+          ]
+      : []),
+    statusRule
+  ];
+}
+
+function buildScopeEvidenceSection(scopeContext: ScanScopeContext): string {
+  if (scopeContext.isFullRepository || !scopeContext.scopeEvidence) {
+    return '';
+  }
+
+  if (scopeContext.scopeEvidence.mode === 'omitted') {
+    return '';
+  }
+
+  const lines = [
+    'Authoritative scope evidence:',
+    'The commands below were already executed by OpenShrike to define this review scope.',
+    'If you need exact current line numbers, you may open files from the scoped file allowlist only.'
+  ];
+
+  if (scopeContext.scopeEvidence.mode === 'complete') {
+    lines.splice(
+      2,
+      0,
+      'Reuse this captured output instead of rerunning git scope-discovery commands.'
+    );
+  }
+
+  if (scopeContext.scopeEvidence.commands.length === 0) {
+    lines.push('', 'No captured diff output was recorded for this scope.');
+    return lines.join('\n');
+  }
+
+  scopeContext.scopeEvidence.commands.forEach((capture, index) => {
+    lines.push('', `Scope capture ${index + 1}: ${capture.description}`, 'Command:', capture.command, 'Output:', capture.output || '(no output)');
+  });
+
+  return lines.join('\n');
 }
 
 export function extractJsonObject(input: string): string {

@@ -26,7 +26,17 @@ describe('evaluator', () => {
     kind: 'uncommitted',
     label: 'uncommitted changes',
     files: ['src/example.ts'],
-    isFullRepository: false
+    isFullRepository: false,
+    scopeEvidence: {
+      mode: 'complete',
+      commands: [
+        {
+          description: 'Tracked changes relative to HEAD',
+          command: 'git -C /workspace/repo --no-pager diff --no-color --no-ext-diff --find-renames --submodule=short --relative HEAD',
+          output: 'diff --git a/src/example.ts b/src/example.ts\n+const value = 1;'
+        }
+      ]
+    }
   };
 
   beforeEach(() => {
@@ -44,7 +54,67 @@ describe('evaluator', () => {
 
     expect(prompt).toContain(`Keep evidence to at most ${MAX_CHECK_EVIDENCE_ITEMS} items.`);
     expect(prompt).toContain(`Keep remediation to at most ${MAX_CHECK_REMEDIATION_ITEMS} items.`);
-    expect(prompt).toContain('If scope is not full repository, evidence paths MUST come from listed scoped files.');
+    expect(prompt).toContain(
+      'If scope is not full repository, evidence paths MUST come from the scoped file allowlist above.'
+    );
+    expect(prompt).toContain(
+      'Treat the captured scope evidence at the end of this prompt as authoritative for scope discovery.'
+    );
+  });
+
+  it('renders the full scoped file allowlist without truncating after 200 entries', () => {
+    const prompt = buildPrompt(
+      'check-a',
+      '# check definition',
+      '/workspace/repo',
+      {
+        ...scopeContext,
+        files: Array.from({length: 205}, (_, index) => `src/file-${index + 1}.ts`)
+      }
+    );
+
+    expect(prompt).toContain('Scoped file allowlist (205):');
+    expect(prompt).toContain('- src/file-205.ts');
+    expect(prompt).not.toContain('more files');
+  });
+
+  it('appends captured scope evidence as the final prompt section', () => {
+    const prompt = buildPrompt(
+      'check-a',
+      '# check definition',
+      '/workspace/repo',
+      scopeContext
+    );
+
+    expect(prompt.indexOf('Authoritative scope evidence:')).toBeGreaterThan(prompt.indexOf('Rules:'));
+    expect(prompt.trimEnd().endsWith('+const value = 1;')).toBe(true);
+  });
+
+  it('omits oversized scope evidence from the prompt and points the agent at scoped files', () => {
+    const prompt = buildPrompt(
+      'check-a',
+      '# check definition',
+      '/workspace/repo',
+      {
+        ...scopeContext,
+        scopeEvidence: {
+          mode: 'omitted',
+          commands: [
+            {
+              description: 'Tracked changes relative to HEAD',
+              command: 'git -C /workspace/repo --no-pager diff --no-color --no-ext-diff --find-renames --submodule=short --relative HEAD',
+              output: ''
+            }
+          ]
+        }
+      }
+    );
+
+    expect(prompt).toContain('Inspect scoped files directly to gather evidence instead of relying on a partial diff.');
+    expect(prompt).not.toContain('diff --git a/src/example.ts b/src/example.ts');
+    expect(prompt).not.toContain('Authoritative scope evidence:');
+    expect(prompt).not.toContain('Scope capture 1:');
+    expect(prompt).not.toContain('git -C /workspace/repo --no-pager diff');
   });
 
   it('rejects oversized evidence arrays from agent output', async () => {

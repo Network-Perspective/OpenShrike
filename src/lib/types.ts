@@ -64,11 +64,23 @@ export interface PolicyDefinition {
   checkIds: string[];
 }
 
+export interface ScanScopeCommandCapture {
+  description: string;
+  command: string;
+  output: string;
+}
+
+export interface ScanScopeEvidence {
+  mode: 'complete' | 'omitted';
+  commands: ScanScopeCommandCapture[];
+}
+
 export interface ScanScopeContext {
   kind: ScanScopeKind;
   label: string;
   files: string[];
   isFullRepository: boolean;
+  scopeEvidence?: ScanScopeEvidence | undefined;
 }
 
 export type ScanProgressEventType =

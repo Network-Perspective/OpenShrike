@@ -1,7 +1,19 @@
 import path from 'node:path';
-import {SCOPE_VALUES} from './constants.js';
+import {
+  MAX_SCOPE_EVIDENCE_OUTPUT_LINES,
+  SCOPE_VALUES
+} from './constants.js';
 import {runProcess} from './process.js';
-import type {ScanScopeContext, ScanScopeKind} from './types.js';
+import type {
+  ScanScopeContext,
+  ScanScopeKind
+} from './types.js';
+
+interface PromptCommandCapture {
+  description: string;
+  command: string;
+  output: string;
+}
 
 export function parseScanScopeKind(value: string): ScanScopeKind | null {
   const normalized = value.trim().toLowerCase();
@@ -37,21 +49,33 @@ export async function resolveScanScope(
 }
 
 async function resolveUncommitted(repoPath: string): Promise<ScanScopeContext> {
-  const {stdout} = await runGit(repoPath, ['status', '--porcelain']);
-  const files = stdout
-    .split('\n')
-    .map(line => line.trimEnd())
-    .filter(Boolean)
-    .map(parseStatusLinePath)
-    .filter(Boolean)
-    .map(normalizeRelativePath)
-    .filter(uniqueIgnoreCase);
+  const [trackedFiles, trackedDiffCapture, untrackedFiles] = await Promise.all([
+    resolveFilesFromDiff(repoPath, 'HEAD'),
+    captureGitCommand(
+      repoPath,
+      'Tracked changes relative to HEAD',
+      buildDiffArgs('HEAD')
+    ),
+    resolveUntrackedFiles(repoPath)
+  ]);
+  const untrackedCaptures = await Promise.all(
+    untrackedFiles.map(async filePath => {
+      return await captureGitCommand(
+        repoPath,
+        `Untracked file patch: ${filePath}`,
+        buildUntrackedDiffArgs(filePath),
+        {allowedExitCodes: [0, 1]}
+      );
+    })
+  );
+  const files = [...trackedFiles, ...untrackedFiles].filter(uniqueIgnoreCase);
 
   return {
     kind: 'uncommitted',
     label: 'uncommitted changes',
     files,
-    isFullRepository: false
+    isFullRepository: false,
+    scopeEvidence: finalizeScopeEvidence([trackedDiffCapture, ...untrackedCaptures])
   };
 }
 
@@ -60,15 +84,20 @@ async function resolveCommit(repoPath: string, target?: string): Promise<ScanSco
     throw new Error("Scan scope 'commit' requires '--scan-target <COMMIT_OR_RANGE>'.");
   }
 
-  const files = target.includes('..')
-    ? await resolveFilesFromDiff(repoPath, target)
-    : await resolveFilesFromShow(repoPath, target);
+  const diffSpec = target.includes('..') ? target : `${target}^!`;
+  const files = await resolveFilesFromDiff(repoPath, diffSpec);
+  const diffCapture = await captureGitCommand(
+    repoPath,
+    `Commit diff for ${target}`,
+    buildDiffArgs(diffSpec)
+  );
 
   return {
     kind: 'commit',
     label: `commit ${target}`,
     files,
-    isFullRepository: false
+    isFullRepository: false,
+    scopeEvidence: finalizeScopeEvidence([diffCapture])
   };
 }
 
@@ -78,21 +107,37 @@ async function resolveBranch(repoPath: string, target?: string): Promise<ScanSco
   }
 
   const diffSpec = `${target}...HEAD`;
+  const files = await resolveFilesFromDiff(repoPath, diffSpec);
+  const diffCapture = await captureGitCommand(
+    repoPath,
+    `Branch diff for ${diffSpec}`,
+    buildDiffArgs(diffSpec)
+  );
+
   return {
     kind: 'branch',
     label: `branch diff ${diffSpec}`,
-    files: await resolveFilesFromDiff(repoPath, diffSpec),
-    isFullRepository: false
+    files,
+    isFullRepository: false,
+    scopeEvidence: finalizeScopeEvidence([diffCapture])
   };
 }
 
 async function resolvePullRequest(repoPath: string, target?: string): Promise<ScanScopeContext> {
   const diffSpec = target?.trim() || 'origin/main...HEAD';
+  const files = await resolveFilesFromDiff(repoPath, diffSpec);
+  const diffCapture = await captureGitCommand(
+    repoPath,
+    `Pull request diff for ${diffSpec}`,
+    buildDiffArgs(diffSpec)
+  );
+
   return {
     kind: 'pr',
     label: `pull request diff ${diffSpec}`,
-    files: await resolveFilesFromDiff(repoPath, diffSpec),
-    isFullRepository: false
+    files,
+    isFullRepository: false,
+    scopeEvidence: finalizeScopeEvidence([diffCapture])
   };
 }
 
@@ -101,8 +146,8 @@ async function resolveFilesFromDiff(repoPath: string, diffSpec: string): Promise
   return parseNameOnlyOutput(stdout);
 }
 
-async function resolveFilesFromShow(repoPath: string, commitRef: string): Promise<string[]> {
-  const {stdout} = await runGit(repoPath, ['show', '--pretty=format:', '--name-only', commitRef]);
+async function resolveUntrackedFiles(repoPath: string): Promise<string[]> {
+  const {stdout} = await runGit(repoPath, ['--no-pager', 'ls-files', '--others', '--exclude-standard']);
   return parseNameOnlyOutput(stdout);
 }
 
@@ -113,25 +158,6 @@ function parseNameOnlyOutput(output: string): string[] {
     .filter(Boolean)
     .map(normalizeRelativePath)
     .filter(uniqueIgnoreCase);
-}
-
-function parseStatusLinePath(line: string): string {
-  if (line.length < 4) {
-    return '';
-  }
-
-  const pathPart = line.slice(3);
-  const renameSeparator = pathPart.indexOf(' -> ');
-  const resolvedPath = renameSeparator >= 0 ? pathPart.slice(renameSeparator + 4).trim() : pathPart.trim();
-  return unquotePath(resolvedPath);
-}
-
-function unquotePath(value: string): string {
-  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
-    return value.slice(1, -1).replaceAll('\\"', '"');
-  }
-
-  return value;
 }
 
 function normalizeRelativePath(value: string): string {
@@ -152,6 +178,95 @@ async function ensureGitRepository(repoPath: string): Promise<void> {
   }
 }
 
-async function runGit(repoPath: string, args: string[]) {
-  return await runProcess('git', ['-C', repoPath, ...args], {cwd: repoPath});
+function buildDiffArgs(diffSpec: string): string[] {
+  return [
+    '--no-pager',
+    'diff',
+    '--no-color',
+    '--no-ext-diff',
+    '--find-renames',
+    '--submodule=short',
+    '--relative',
+    diffSpec
+  ];
+}
+
+function buildUntrackedDiffArgs(filePath: string): string[] {
+  return ['--no-pager', 'diff', '--no-color', '--no-index', '--', '/dev/null', filePath];
+}
+
+function finalizeScopeEvidence(captures: PromptCommandCapture[]): ScanScopeContext['scopeEvidence'] {
+  const nonEmptyCaptures = captures.filter(capture => capture.output.trim().length > 0);
+  if (totalOutputLines(nonEmptyCaptures) <= MAX_SCOPE_EVIDENCE_OUTPUT_LINES) {
+    return {
+      mode: 'complete',
+      commands: nonEmptyCaptures
+    };
+  }
+
+  return {
+    mode: 'omitted',
+    commands: nonEmptyCaptures.map(capture => ({
+      description: capture.description,
+      command: capture.command,
+      output: ''
+    }))
+  };
+}
+
+function totalOutputLines(captures: PromptCommandCapture[]): number {
+  return captures.reduce((sum, capture) => sum + countOutputLines(capture.output), 0);
+}
+
+function countOutputLines(output: string): number {
+  const normalized = output.trimEnd();
+  if (normalized.length === 0) {
+    return 0;
+  }
+
+  return normalized.split('\n').length;
+}
+
+async function captureGitCommand(
+  repoPath: string,
+  description: string,
+  args: string[],
+  options: {
+    allowedExitCodes?: number[];
+  } = {}
+): Promise<PromptCommandCapture> {
+  const commandArgs = ['-C', repoPath, ...args];
+  const {stdout} = await runProcess('git', commandArgs, {
+    cwd: repoPath,
+    ...(options.allowedExitCodes ? {allowedExitCodes: options.allowedExitCodes} : {})
+  });
+
+  return {
+    description,
+    command: formatShellCommand('git', commandArgs),
+    output: stdout.trimEnd()
+  };
+}
+
+function formatShellCommand(command: string, args: string[]): string {
+  return [command, ...args].map(quoteShellArg).join(' ');
+}
+
+function quoteShellArg(value: string): string {
+  return /^[A-Za-z0-9_./:=+-]+$/.test(value)
+    ? value
+    : `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+async function runGit(
+  repoPath: string,
+  args: string[],
+  options: {
+    allowedExitCodes?: number[];
+  } = {}
+) {
+  return await runProcess('git', ['-C', repoPath, ...args], {
+    cwd: repoPath,
+    ...(options.allowedExitCodes ? {allowedExitCodes: options.allowedExitCodes} : {})
+  });
 }

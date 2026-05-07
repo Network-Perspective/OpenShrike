@@ -11,6 +11,7 @@ export async function runProcess(
   options: {
     cwd: string;
     env?: NodeJS.ProcessEnv;
+    allowedExitCodes?: number[];
   }
 ): Promise<ProcessResult> {
   return await new Promise<ProcessResult>((resolve, reject) => {
@@ -33,7 +34,8 @@ export async function runProcess(
 
     child.on('error', reject);
     child.on('close', code => {
-      if (code !== 0) {
+      const allowedExitCodes = options.allowedExitCodes ?? [0];
+      if (!allowedExitCodes.includes(code ?? -1)) {
         reject(
           new Error(
             `Command failed (${command} ${args.join(' ')}): ${stderr.trim() || `exit code ${code}`}`
