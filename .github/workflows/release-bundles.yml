@@ -1,0 +1,76 @@
+name: release-bundles
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-x64
+            asset: openshrike-linux-x64.tar.gz
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+            asset: openshrike-linux-arm64.tar.gz
+          - runner: macos-15-intel
+            target: darwin-x64
+            asset: openshrike-darwin-x64.tar.gz
+          - runner: macos-14
+            target: darwin-arm64
+            asset: openshrike-darwin-arm64.tar.gz
+          - runner: windows-2025
+            target: windows-x64
+            asset: openshrike-windows-x64.zip
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build release bundle
+        shell: bash
+        run: scripts/publish.sh --output-root ".artifacts/publish/${{ matrix.target }}" --target "${{ matrix.target }}"
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openshrike-${{ matrix.target }}
+          path: .artifacts/publish/${{ matrix.target }}/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: .artifacts/release
+          pattern: openshrike-*
+          merge-multiple: true
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            .artifacts/release/*.tar.gz
+            .artifacts/release/*.zip
+          fail_on_unmatched_files: true
+          generate_release_notes: true

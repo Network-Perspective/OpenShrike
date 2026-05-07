@@ -32,6 +32,23 @@ produces findings with evidence, rationale, and remediation.
 - Run the same review locally and in CI.
 - Keep execution self-hosted with `native` and `docker` runtimes.
 
+## Install
+
+Prerequisite: Node.js 22+.
+
+Install the latest GitHub release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Network-Perspective/OpenShrike/main/install | bash
+```
+
+On Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Network-Perspective/OpenShrike/main/install.ps1 | iex
+```
+
+
 ## Simple workflow
 
 Assume `shrike` is on your `PATH`. If you are running directly from this
@@ -194,7 +211,7 @@ The `./shrike` launcher uses `tsx src/cli.ts` when available and falls back to
 
 ## Publish And Install
 
-Create a framework bundle:
+Create a local framework bundle:
 
 ```bash
 scripts/publish.sh
@@ -205,6 +222,21 @@ Install from the published framework bundle:
 ```bash
 scripts/install-local.sh --source .artifacts/publish/framework
 ```
+
+Tagging a release with `v*` also triggers `.github/workflows/release-bundles.yml`
+to build GitHub release archives for the supported Linux, macOS, and Windows
+targets.
+
+Prepare a release locally so only `git push` remains:
+
+```bash
+scripts/create-release.sh
+```
+
+That script bumps the patch version, stages all current changes, creates a
+commit named `chore(release): vX.Y.Z`, and creates an annotated `vX.Y.Z` tag.
+Use `scripts/create-release.sh minor`, `major`, or an explicit version to
+override the default patch bump.
 
 ## Documentation Map
 
@@ -218,3 +250,4 @@ scripts/install-local.sh --source .artifacts/publish/framework
 - [MVP implementation notes](docs/implementation/01-mvp-csharp-rel-001-implementation.md)
 - [Fixture and branch workflow](docs/implementation/02-testscsharp-fixture-and-branches.md)
 - [Phase 2 runtime and parallel plan](docs/implementation/03-phase-2-docker-runtime-and-multi-agent-plan.md)
+- [Install and release distribution](docs/implementation/05-install-and-release-distribution.md)

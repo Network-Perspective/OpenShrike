@@ -1,0 +1,408 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP="openshrike"
+REPO="${OPENSHRIKE_REPO:-Network-Perspective/OpenShrike}"
+DEFAULT_BRANCH="${OPENSHRIKE_DEFAULT_BRANCH:-main}"
+
+MUTED='\033[0;2m'
+RED='\033[0;31m'
+ORANGE='\033[38;5;214m'
+NC='\033[0m'
+
+usage() {
+  cat <<EOF
+OpenShrike Installer
+
+Usage: install [options]
+
+Options:
+  -h, --help              Show this help message
+  -v, --version <version> Install a specific released version, for example 0.2.0
+      --source-only       Skip release bundles and build from source on this machine
+      --bin-dir <path>    Install the shrike launcher here (default: ~/.local/bin)
+      --install-dir <path>
+                          Store OpenShrike releases here
+                          (default: \${XDG_DATA_HOME:-~/.local/share}/openshrike)
+      --no-modify-path    Do not update shell startup files
+
+Examples:
+  curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install | bash
+  curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install | bash -s -- --version 0.2.0
+  curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install | bash -s -- --source-only
+EOF
+}
+
+requested_version=""
+source_only="false"
+no_modify_path="false"
+bin_dir="${HOME}/.local/bin"
+install_base="${XDG_DATA_HOME:-${HOME}/.local/share}/openshrike"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -v|--version)
+      requested_version="${2:-}"
+      if [[ -z "$requested_version" ]]; then
+        echo -e "${RED}Error: --version requires a value.${NC}" >&2
+        exit 1
+      fi
+      shift 2
+      ;;
+    --source-only)
+      source_only="true"
+      shift
+      ;;
+    --bin-dir)
+      bin_dir="${2:-}"
+      if [[ -z "$bin_dir" ]]; then
+        echo -e "${RED}Error: --bin-dir requires a value.${NC}" >&2
+        exit 1
+      fi
+      shift 2
+      ;;
+    --install-dir)
+      install_base="${2:-}"
+      if [[ -z "$install_base" ]]; then
+        echo -e "${RED}Error: --install-dir requires a value.${NC}" >&2
+        exit 1
+      fi
+      shift 2
+      ;;
+    --no-modify-path)
+      no_modify_path="true"
+      shift
+      ;;
+    *)
+      echo -e "${ORANGE}Warning: ignoring unknown option '$1'.${NC}" >&2
+      shift
+      ;;
+  esac
+done
+
+releases_dir="${install_base}/releases"
+current_link="${install_base}/current"
+
+print_message() {
+  local level="$1"
+  local message="$2"
+  local color="${NC}"
+
+  case "$level" in
+    warning)
+      color="${ORANGE}"
+      ;;
+    error)
+      color="${RED}"
+      ;;
+  esac
+
+  printf '%b%s%b\n' "$color" "$message" "$NC"
+}
+
+fail() {
+  print_message error "$1"
+  exit 1
+}
+
+has_command() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+download_to_file() {
+  local url="$1"
+  local output="$2"
+
+  if has_command curl; then
+    curl -fsSL "$url" -o "$output"
+    return 0
+  fi
+
+  if has_command wget; then
+    wget -qO "$output" "$url"
+    return 0
+  fi
+
+  fail "OpenShrike installer requires curl or wget."
+}
+
+fetch_text() {
+  local url="$1"
+
+  if has_command curl; then
+    curl -fsSL "$url"
+    return 0
+  fi
+
+  if has_command wget; then
+    wget -qO- "$url"
+    return 0
+  fi
+
+  fail "OpenShrike installer requires curl or wget."
+}
+
+ensure_node_runtime() {
+  if ! has_command node; then
+    fail "OpenShrike requires Node.js 22 or newer."
+  fi
+
+  local node_major
+  node_major="$(node -p "process.versions.node.split('.')[0]")"
+  if [[ "$node_major" -lt 22 ]]; then
+    fail "OpenShrike requires Node.js 22 or newer. Found $(node -v)."
+  fi
+}
+
+detect_target() {
+  local raw_os
+  local raw_arch
+  local os
+  local arch
+
+  raw_os="$(uname -s)"
+  raw_arch="$(uname -m)"
+
+  case "$raw_os" in
+    Linux)
+      os="linux"
+      ;;
+    Darwin)
+      os="darwin"
+      ;;
+    *)
+      fail "Unsupported operating system: ${raw_os}. OpenShrike currently supports Linux and macOS."
+      ;;
+  esac
+
+  case "$raw_arch" in
+    x86_64|amd64)
+      arch="x64"
+      ;;
+    arm64|aarch64)
+      arch="arm64"
+      ;;
+    *)
+      fail "Unsupported architecture: ${raw_arch}. OpenShrike currently supports x64 and arm64."
+      ;;
+  esac
+
+  printf '%s-%s\n' "$os" "$arch"
+}
+
+resolve_latest_release_version() {
+  local response
+  local parsed
+
+  if ! response="$(fetch_text "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null)"; then
+    return 1
+  fi
+
+  parsed="$(
+    printf '%s' "$response" \
+      | tr -d '\n' \
+      | sed -n 's/.*"tag_name":[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p'
+  )"
+
+  if [[ -z "$parsed" ]]; then
+    return 1
+  fi
+
+  printf '%s\n' "$parsed"
+}
+
+source_archive_url() {
+  local ref="$1"
+
+  if [[ "$ref" == v* ]]; then
+    printf 'https://github.com/%s/archive/refs/tags/%s.tar.gz\n' "$REPO" "$ref"
+    return 0
+  fi
+
+  printf 'https://github.com/%s/archive/refs/heads/%s.tar.gz\n' "$REPO" "$ref"
+}
+
+install_bundle_dir() {
+  local bundle_dir="$1"
+  local version_key="$2"
+  local target_dir="${releases_dir}/${version_key}"
+
+  [[ -d "$bundle_dir" ]] || fail "Bundle directory not found: ${bundle_dir}"
+
+  mkdir -p "$releases_dir" "$bin_dir"
+  rm -rf "$target_dir"
+  mkdir -p "$target_dir"
+  cp -a "$bundle_dir"/. "$target_dir"/
+
+  ln -sfn "$target_dir" "$current_link"
+  ln -sfn "${current_link}/shrike" "${bin_dir}/shrike"
+}
+
+install_prebuilt_bundle() {
+  local version="$1"
+  local target="$2"
+  local tmp_dir
+  local archive_path
+  local asset_url
+  local bundle_dir
+
+  tmp_dir="$(mktemp -d)"
+  archive_path="${tmp_dir}/${APP}-${target}.tar.gz"
+  asset_url="https://github.com/${REPO}/releases/download/v${version}/${APP}-${target}.tar.gz"
+
+  print_message info "${MUTED}Downloading release bundle${NC} ${asset_url}"
+  if ! download_to_file "$asset_url" "$archive_path"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  tar -xzf "$archive_path" -C "$tmp_dir"
+  bundle_dir="${tmp_dir}/${APP}"
+  [[ -d "$bundle_dir" ]] || fail "Release archive did not contain '${APP}/'."
+
+  install_bundle_dir "$bundle_dir" "v${version}"
+  rm -rf "$tmp_dir"
+}
+
+install_from_source() {
+  local ref="$1"
+  local version_key="$2"
+  local target="$3"
+  local tmp_dir
+  local archive_path
+  local archive_url
+  local source_dir
+
+  ensure_node_runtime
+  has_command npm || fail "OpenShrike source installs require npm."
+
+  tmp_dir="$(mktemp -d)"
+  archive_path="${tmp_dir}/source.tar.gz"
+  archive_url="$(source_archive_url "$ref")"
+
+  print_message info "${MUTED}Building from source${NC} ${archive_url}"
+  if ! download_to_file "$archive_url" "$archive_path"; then
+    rm -rf "$tmp_dir"
+    fail "Could not download source archive for ${ref}."
+  fi
+
+  tar -xzf "$archive_path" -C "$tmp_dir"
+  source_dir="$(
+    find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1
+  )"
+  [[ -n "$source_dir" ]] || fail "Could not locate extracted source directory."
+
+  (
+    cd "$source_dir"
+    scripts/publish.sh --output-root "${tmp_dir}/publish" --target "$target"
+  )
+
+  install_bundle_dir "${tmp_dir}/publish/framework" "$version_key"
+  rm -rf "$tmp_dir"
+}
+
+add_to_path_if_needed() {
+  local shell_name
+  local config_file
+  local path_line
+
+  if [[ "${no_modify_path}" == "true" ]]; then
+    return 0
+  fi
+
+  if [[ ":${PATH}:" == *":${bin_dir}:"* ]]; then
+    return 0
+  fi
+
+  shell_name="$(basename "${SHELL:-sh}")"
+  config_file=""
+  path_line=""
+
+  case "$shell_name" in
+    fish)
+      config_file="${XDG_CONFIG_HOME:-${HOME}/.config}/fish/config.fish"
+      path_line="fish_add_path -m \"${bin_dir}\""
+      ;;
+    zsh)
+      config_file="${ZDOTDIR:-${HOME}}/.zshrc"
+      path_line="export PATH=\"${bin_dir}:\$PATH\""
+      ;;
+    bash|sh)
+      config_file="${HOME}/.bashrc"
+      path_line="export PATH=\"${bin_dir}:\$PATH\""
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  mkdir -p "$(dirname "$config_file")"
+  touch "$config_file"
+
+  if grep -Fqx "$path_line" "$config_file"; then
+    return 0
+  fi
+
+  {
+    printf '\n# OpenShrike\n'
+    printf '%s\n' "$path_line"
+  } >> "$config_file"
+
+  print_message info "${MUTED}Added ${bin_dir} to PATH in${NC} ${config_file}"
+}
+
+target="$(detect_target)"
+release_version=""
+source_ref="$DEFAULT_BRANCH"
+version_key="$DEFAULT_BRANCH"
+
+if [[ -n "$requested_version" ]]; then
+  requested_version="${requested_version#v}"
+  release_version="$requested_version"
+  source_ref="v${requested_version}"
+  version_key="v${requested_version}"
+else
+  if latest_release="$(resolve_latest_release_version)"; then
+    release_version="$latest_release"
+    source_ref="v${latest_release}"
+    version_key="v${latest_release}"
+  else
+    source_only="true"
+    print_message warning "No GitHub release found for ${REPO}; falling back to '${DEFAULT_BRANCH}'."
+  fi
+fi
+
+ensure_node_runtime
+
+has_command tar || fail "OpenShrike installer requires tar."
+
+used_prebuilt="false"
+if [[ "$source_only" != "true" ]]; then
+  if install_prebuilt_bundle "$release_version" "$target"; then
+    used_prebuilt="true"
+  else
+    print_message warning "No prebuilt bundle available for ${target} at ${version_key}; building from source instead."
+  fi
+fi
+
+if [[ "$used_prebuilt" != "true" ]]; then
+  install_from_source "$source_ref" "$version_key" "$target"
+fi
+
+add_to_path_if_needed
+
+print_message info ""
+print_message info "${MUTED}Installed OpenShrike into${NC} ${current_link}"
+print_message info "${MUTED}Launcher:${NC} ${bin_dir}/shrike"
+print_message info "${MUTED}Version:${NC} ${version_key}"
+
+if [[ ":${PATH}:" != *":${bin_dir}:"* ]]; then
+  print_message info ""
+  print_message info "Add '${bin_dir}' to your PATH or start a new shell before running 'shrike'."
+fi
+
+print_message info "${MUTED}Next step:${NC} shrike init"
