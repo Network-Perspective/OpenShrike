@@ -27,17 +27,17 @@ jobs:
           - runner: macos-14
             target: darwin-arm64
             asset: openshrike-darwin-arm64.tar.gz
-          - runner: windows-2025
+          - runner: windows-2025-vs2026
             target: windows-x64
             asset: openshrike-windows-x64.zip
     runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -47,7 +47,7 @@ jobs:
         run: scripts/publish.sh --output-root ".artifacts/publish/${{ matrix.target }}" --target "${{ matrix.target }}"
 
       - name: Upload bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openshrike-${{ matrix.target }}
           path: .artifacts/publish/${{ matrix.target }}/${{ matrix.asset }}
@@ -60,14 +60,14 @@ jobs:
 
     steps:
       - name: Download bundle artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: .artifacts/release
           pattern: openshrike-*
           merge-multiple: true
 
       - name: Publish GitHub release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             .artifacts/release/*.tar.gz
