@@ -22,7 +22,7 @@
     "defaultId": "typescript-baseline",
     "repo": ".",
     "scope": "uncommitted",
-    "output": "json",
+    "output": "markdown",
     "ui": true,
     "artifactsDir": null
   }
