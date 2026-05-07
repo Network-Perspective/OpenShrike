@@ -62,6 +62,13 @@ export interface InitUiSession {
   close(): void;
 }
 
+interface OptionNavigationState {
+  selectedIndex: number;
+  visibleStart: number;
+}
+
+const MAX_VISIBLE_OPTIONS = 10;
+
 class InkInitUiSession implements InitUiSession {
   private instance: ReturnType<typeof render> | null = null;
   private screenVersion = 0;
@@ -138,16 +145,15 @@ function InitScreenView<T extends string>(props: {
   onCancel: () => void;
 }) {
   const [query, setQuery] = useState('');
-  const [selectedIndex, setSelectedIndex] = useState(() =>
-    resolveInitialIndex(props.spec.options, props.spec.initialValue)
+  const [navigation, setNavigation] = useState<OptionNavigationState>(() =>
+    createInitialOptionNavigation(props.spec.options, props.spec.initialValue)
   );
   const [showHelp, setShowHelp] = useState(false);
   const [isSettled, setIsSettled] = useState(false);
 
   const filteredOptions = getFilteredOptions(props.spec.options, query, Boolean(props.spec.searchable));
-  const effectiveIndex = filteredOptions.length === 0
-    ? 0
-    : Math.min(selectedIndex, filteredOptions.length - 1);
+  const effectiveNavigation = resolveOptionNavigation(navigation, filteredOptions.length);
+  const effectiveIndex = effectiveNavigation.selectedIndex;
 
   useInput((input, key) => {
     if (isSettled) {
@@ -188,24 +194,12 @@ function InitScreenView<T extends string>(props: {
     }
 
     if (key.upArrow) {
-      setSelectedIndex(previous => {
-        if (filteredOptions.length === 0) {
-          return 0;
-        }
-
-        return previous <= 0 ? filteredOptions.length - 1 : previous - 1;
-      });
+      setNavigation(previous => moveOptionNavigation(previous, filteredOptions.length, -1));
       return;
     }
 
     if (key.downArrow) {
-      setSelectedIndex(previous => {
-        if (filteredOptions.length === 0) {
-          return 0;
-        }
-
-        return previous >= filteredOptions.length - 1 ? 0 : previous + 1;
-      });
+      setNavigation(previous => moveOptionNavigation(previous, filteredOptions.length, 1));
       return;
     }
 
@@ -226,6 +220,7 @@ function InitScreenView<T extends string>(props: {
       showHelp={showHelp}
       filteredOptions={filteredOptions}
       effectiveIndex={effectiveIndex}
+      visibleStart={effectiveNavigation.visibleStart}
     />
   );
 }
@@ -237,10 +232,16 @@ export function InitScreenLayout<T extends string>(props: {
   showHelp: boolean;
   filteredOptions: InitScreenOption<T>[];
   effectiveIndex: number;
+  visibleStart: number;
 }) {
   const hints = buildHintBar(props.spec);
   const headerRailTone: DialogRailTone = 'muted';
   const choiceRailTone: DialogRailTone = 'active';
+  const visibleWindow = getVisibleOptionWindow(
+    props.filteredOptions,
+    props.effectiveIndex,
+    props.visibleStart
+  );
 
   return (
     <DialogFrame
@@ -273,14 +274,23 @@ export function InitScreenLayout<T extends string>(props: {
         </DialogLine>
       ) : null}
       {props.filteredOptions.length > 0 ? (
-        <SelectList
-          items={props.filteredOptions.map((option, index) => ({
-            label: option.label,
-            detail: option.detail,
-            selected: index === props.effectiveIndex
-          }))}
-          railTone={choiceRailTone}
-        />
+        <>
+          <SelectList
+            items={visibleWindow.options.map((option, index) => ({
+              label: option.label,
+              detail: option.detail,
+              selected: visibleWindow.start + index === props.effectiveIndex
+            }))}
+            railTone={choiceRailTone}
+          />
+          {props.filteredOptions.length > MAX_VISIBLE_OPTIONS ? (
+            <DialogLine railTone={choiceRailTone}>
+              <Text color={initTheme.secondary}>
+                {`Showing ${visibleWindow.start + 1}-${visibleWindow.end} of ${props.filteredOptions.length}`}
+              </Text>
+            </DialogLine>
+          ) : null}
+        </>
       ) : (
         <DialogLine railTone={choiceRailTone}>
           <Text color={initTheme.secondary}>No matching options.</Text>
@@ -367,6 +377,118 @@ function resolveInitialIndex<T extends string>(
 
   const foundIndex = options.findIndex(option => option.value === initialValue);
   return foundIndex >= 0 ? foundIndex : 0;
+}
+
+function createInitialOptionNavigation<T extends string>(
+  options: InitScreenOption<T>[],
+  initialValue: T | undefined
+): OptionNavigationState {
+  const selectedIndex = resolveInitialIndex(options, initialValue);
+  return {
+    selectedIndex,
+    visibleStart: resolveInitialVisibleStart(selectedIndex, options.length)
+  };
+}
+
+export function moveOptionNavigation(
+  navigation: OptionNavigationState,
+  itemCount: number,
+  direction: -1 | 1
+): OptionNavigationState {
+  if (itemCount <= 0) {
+    return {
+      selectedIndex: 0,
+      visibleStart: 0
+    };
+  }
+
+  const current = resolveOptionNavigation(navigation, itemCount);
+  const nextIndex = direction < 0
+    ? (current.selectedIndex <= 0 ? itemCount - 1 : current.selectedIndex - 1)
+    : (current.selectedIndex >= itemCount - 1 ? 0 : current.selectedIndex + 1);
+  const windowEnd = Math.min(itemCount, current.visibleStart + MAX_VISIBLE_OPTIONS) - 1;
+  let visibleStart = current.visibleStart;
+
+  if (nextIndex < current.visibleStart) {
+    visibleStart = nextIndex;
+  } else if (nextIndex > windowEnd) {
+    visibleStart = nextIndex - MAX_VISIBLE_OPTIONS + 1;
+  }
+
+  return {
+    selectedIndex: nextIndex,
+    visibleStart: clampVisibleStart(visibleStart, itemCount)
+  };
+}
+
+function resolveOptionNavigation(
+  navigation: OptionNavigationState,
+  itemCount: number
+): OptionNavigationState {
+  if (itemCount <= 0) {
+    return {
+      selectedIndex: 0,
+      visibleStart: 0
+    };
+  }
+
+  const selectedIndex = clampIndex(navigation.selectedIndex, itemCount);
+  let visibleStart = clampVisibleStart(navigation.visibleStart, itemCount);
+  const visibleEndExclusive = Math.min(itemCount, visibleStart + MAX_VISIBLE_OPTIONS);
+
+  if (selectedIndex < visibleStart) {
+    visibleStart = selectedIndex;
+  } else if (selectedIndex >= visibleEndExclusive) {
+    visibleStart = selectedIndex - MAX_VISIBLE_OPTIONS + 1;
+  }
+
+  return {
+    selectedIndex,
+    visibleStart: clampVisibleStart(visibleStart, itemCount)
+  };
+}
+
+function resolveInitialVisibleStart(selectedIndex: number, itemCount: number): number {
+  if (itemCount <= MAX_VISIBLE_OPTIONS) {
+    return 0;
+  }
+
+  return clampVisibleStart(Math.max(0, selectedIndex - MAX_VISIBLE_OPTIONS + 1), itemCount);
+}
+
+function getVisibleOptionWindow<T extends string>(
+  options: InitScreenOption<T>[],
+  selectedIndex: number,
+  visibleStart: number
+): {
+  start: number;
+  end: number;
+  options: InitScreenOption<T>[];
+} {
+  const {visibleStart: start} = resolveOptionNavigation(
+    {selectedIndex, visibleStart},
+    options.length
+  );
+  const end = Math.min(options.length, start + MAX_VISIBLE_OPTIONS);
+
+  return {
+    start,
+    end,
+    options: options.slice(start, end)
+  };
+}
+
+function clampIndex(index: number, itemCount: number): number {
+  if (itemCount <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(index, itemCount - 1));
+}
+
+function clampVisibleStart(visibleStart: number, itemCount: number): number {
+  const maxVisibleStart = Math.max(0, itemCount - MAX_VISIBLE_OPTIONS);
+  return Math.max(0, Math.min(visibleStart, maxVisibleStart));
 }
 
 function isPrintableInput(input: string, key: {ctrl: boolean; meta: boolean; shift: boolean}): boolean {

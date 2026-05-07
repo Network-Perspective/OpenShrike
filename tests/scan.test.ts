@@ -238,6 +238,87 @@ describe('runScan', () => {
     });
   });
 
+  it('fails fast with actionable details when required environment variables are missing', async () => {
+    const repoRoot = await makeRepoRoot();
+
+    mockResolveScanScope.mockResolvedValue(makeScope({}));
+    mockLoadRuntimeConfig.mockResolvedValue({
+      configPath: '/tmp/opencode.json',
+      config: {},
+      requiredEnvVars: ['AZURE_OPENAI_API_KEY'],
+      missingEnvVars: ['AZURE_OPENAI_API_KEY']
+    });
+
+    await expect(runScan(makeOptions(repoRoot, {
+      checkId: 'check-a',
+      model: 'azure/gpt-5.4-mini'
+    }))).rejects.toMatchObject({
+      code: 'MISSING_ENVIRONMENT',
+      message: 'OpenCode provider setup is incomplete, so checks could not start.',
+      details: {
+        configPath: '/tmp/opencode.json',
+        model: 'azure/gpt-5.4-mini',
+        missingEnvVars: ['AZURE_OPENAI_API_KEY'],
+        actions: expect.arrayContaining([
+          expect.stringContaining('OpenCode as its agent execution layer'),
+          expect.stringContaining('/tmp/opencode.json'),
+          expect.stringContaining('https://opencode.ai/docs/providers/'),
+          expect.stringContaining('AZURE_OPENAI_API_KEY'),
+          expect.stringContaining('shrike scan')
+        ])
+      }
+    });
+
+    expect(mockEvaluateCheck).not.toHaveBeenCalled();
+    expect(mockRuntimeCreate).not.toHaveBeenCalled();
+  });
+
+  it('fails the scan on provider setup errors instead of repeating inconclusive results for every check', async () => {
+    const repoRoot = await makeRepoRoot();
+
+    mockResolvePolicyDefinition.mockResolvedValue({
+      id: 'typescript-baseline',
+      version: '2026-03-23',
+      checkIds: ['check-a', 'check-b']
+    });
+    mockResolveScanScope.mockResolvedValue(makeScope({}));
+    mockLoadRuntimeConfig.mockResolvedValue({
+      configPath: '/tmp/opencode.json',
+      config: {},
+      requiredEnvVars: [],
+      missingEnvVars: []
+    });
+    mockRuntimeCreate.mockResolvedValue({
+      close: vi.fn().mockResolvedValue(undefined)
+    });
+    mockRepoGuardCapture.mockResolvedValue({
+      throwIfMutated: vi.fn().mockResolvedValue(undefined)
+    });
+    mockEvaluateCheck.mockRejectedValue(new Error('Was there a typo in the url or port?'));
+
+    await expect(runScan(makeOptions(repoRoot, {
+      policyId: 'typescript-baseline',
+      model: 'azure/gpt-5.4-mini'
+    }))).rejects.toMatchObject({
+      code: 'OPENCODE_PROVIDER_SETUP_FAILED',
+      message: 'OpenCode provider setup failed before checks could run.',
+      details: {
+        configPath: '/tmp/opencode.json',
+        model: 'azure/gpt-5.4-mini',
+        cause: 'Was there a typo in the url or port?',
+        actions: expect.arrayContaining([
+          expect.stringContaining('OpenCode as its agent execution layer'),
+          expect.stringContaining('/tmp/opencode.json'),
+          expect.stringContaining('https://opencode.ai/docs/providers/'),
+          expect.stringContaining('Was there a typo in the url or port?'),
+          expect.stringContaining('shrike scan')
+        ])
+      }
+    });
+
+    expect(mockEvaluateCheck).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps read-only guardrail violations fatal', async () => {
     const repoRoot = await makeRepoRoot();
 

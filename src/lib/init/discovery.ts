@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {CONFIG_DIRECTORY_NAME, CONFIG_FILE_NAME, INIT_README_FILE_NAME, PROJECT_CONFIG_FILE_NAME} from '../constants.js';
+import {runProcess} from '../process.js';
 import {loadProjectConfigIfPresent} from '../project-config.js';
 import type {LoadedProjectConfig} from '../project-config.js';
 
@@ -30,6 +31,11 @@ export interface DiscoveredOpenCodeSetup {
   defaultModel: string | null;
   authPresent: boolean;
   errorMessage?: string | undefined;
+}
+
+interface DiscoveredOpenCodeModels {
+  providers: string[];
+  models: string[];
 }
 
 export interface OpenCodeInstallOption {
@@ -88,68 +94,129 @@ export async function discoverExistingInit(repoRoot: string): Promise<ExistingIn
   };
 }
 
-export async function discoverOpenCodeSetup(toolRoot: string): Promise<DiscoveredOpenCodeSetup> {
+export async function discoverOpenCodeSetup(toolRoot: string, cwd: string): Promise<DiscoveredOpenCodeSetup> {
   const configPath = path.join(os.homedir(), '.config', 'opencode', 'opencode.json');
   const authPath = path.join(os.homedir(), '.local', 'share', 'opencode', 'auth.json');
   const authPresent = await pathExists(authPath);
   const binaryPath = await resolveOpencodeBinary(toolRoot);
+  const configPresent = await pathExists(configPath);
 
-  if (!await pathExists(configPath)) {
-    if (binaryPath) {
+  let parsedConfig: DiscoveredOpenCodeConfig | null = null;
+  if (configPresent) {
+    try {
+      parsedConfig = extractDiscoveredOpenCodeConfig(
+        JSON.parse(await fs.readFile(configPath, 'utf8'))
+      );
+    } catch (error) {
       return {
-        status: 'needs-auth',
-        configPath: null,
+        status: 'invalid-config',
+        configPath,
         authPath: authPresent ? authPath : null,
         binaryPath,
         providers: [],
         models: [],
         defaultModel: null,
+        authPresent,
+        errorMessage: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+
+  let providers = [...(parsedConfig?.providers ?? [])];
+  let models = [...(parsedConfig?.models ?? [])];
+  const defaultModel = parsedConfig?.defaultModel ?? null;
+  let modelDiscoveryError: string | undefined;
+
+  if (authPresent && binaryPath && models.length === 0) {
+    try {
+      const discoveredModels = await discoverModelsFromBinary(binaryPath, cwd);
+      providers = mergeStringLists(providers, discoveredModels.providers);
+      models = discoveredModels.models;
+    } catch (error) {
+      modelDiscoveryError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  if (!configPresent) {
+    if (!binaryPath) {
+      return {
+        status: 'not-installed',
+        configPath: null,
+        authPath: authPresent ? authPath : null,
+        binaryPath: null,
+        providers,
+        models,
+        defaultModel,
+        authPresent,
+        ...(modelDiscoveryError ? {errorMessage: modelDiscoveryError} : {})
+      };
+    }
+
+    if (!authPresent) {
+      return {
+        status: 'needs-auth',
+        configPath: null,
+        authPath: null,
+        binaryPath,
+        providers,
+        models,
+        defaultModel,
+        authPresent
+      };
+    }
+
+    if (models.length === 0) {
+      return {
+        status: 'no-models',
+        configPath: null,
+        authPath,
+        binaryPath,
+        providers,
+        models,
+        defaultModel,
+        authPresent,
+        errorMessage: modelDiscoveryError
+          ?? 'OpenCode credentials are present, but `opencode models` did not return any usable models.'
+      };
+    }
+
+    return {
+      status: 'ready',
+      configPath: null,
+      authPath,
+      binaryPath,
+      providers,
+      models,
+      defaultModel,
+      authPresent
+    };
+  }
+
+  if (models.length === 0) {
+    if (!authPresent) {
+      return {
+        status: binaryPath ? 'needs-auth' : 'not-installed',
+        configPath,
+        authPath: null,
+        binaryPath,
+        providers,
+        models,
+        defaultModel,
         authPresent
       };
     }
 
     return {
-      status: 'not-installed',
-      configPath: null,
-      authPath: authPresent ? authPath : null,
-      binaryPath: null,
-      providers: [],
-      models: [],
-      defaultModel: null,
-      authPresent
-    };
-  }
-
-  let parsedConfig: DiscoveredOpenCodeConfig;
-  try {
-    parsedConfig = extractDiscoveredOpenCodeConfig(
-      JSON.parse(await fs.readFile(configPath, 'utf8'))
-    );
-  } catch (error) {
-    return {
-      status: 'invalid-config',
-      configPath,
-      authPath: authPresent ? authPath : null,
-      binaryPath,
-      providers: [],
-      models: [],
-      defaultModel: null,
-      authPresent,
-      errorMessage: error instanceof Error ? error.message : String(error)
-    };
-  }
-
-  if (parsedConfig.models.length === 0) {
-    return {
       status: 'no-models',
       configPath,
-      authPath: authPresent ? authPath : null,
+      authPath,
       binaryPath,
-      providers: parsedConfig.providers,
-      models: [],
-      defaultModel: parsedConfig.defaultModel,
+      providers,
+      models,
+      defaultModel,
       authPresent,
-      errorMessage: 'No usable provider/model defaults were found in the discovered OpenCode config.'
+      errorMessage: modelDiscoveryError
+        ?? 'No usable provider/model defaults were found in the discovered OpenCode setup.'
     };
   }
 
@@ -159,9 +226,9 @@ export async function discoverOpenCodeSetup(toolRoot: string): Promise<Discovere
       configPath,
       authPath: null,
       binaryPath,
-      providers: parsedConfig.providers,
-      models: parsedConfig.models,
-      defaultModel: parsedConfig.defaultModel,
+      providers,
+      models,
+      defaultModel,
       authPresent
     };
   }
@@ -171,9 +238,9 @@ export async function discoverOpenCodeSetup(toolRoot: string): Promise<Discovere
     configPath,
     authPath,
     binaryPath,
-    providers: parsedConfig.providers,
-    models: parsedConfig.models,
-    defaultModel: parsedConfig.defaultModel,
+    providers,
+    models,
+    defaultModel,
     authPresent
   };
 }
@@ -287,7 +354,7 @@ function extractDiscoveredOpenCodeConfig(value: unknown): DiscoveredOpenCodeConf
   }
 
   return {
-    providers,
+    providers: mergeStringLists(providers, collectProvidersFromModelIds(models)),
     models: [...models].sort((left, right) => left.localeCompare(right)),
     defaultModel
   };
@@ -318,4 +385,49 @@ async function pathExists(targetPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function discoverModelsFromBinary(binaryPath: string, cwd: string): Promise<DiscoveredOpenCodeModels> {
+  const result = await runProcess(binaryPath, ['models'], {
+    cwd,
+    env: process.env
+  });
+
+  return extractDiscoveredOpenCodeModels(result.stdout);
+}
+
+function extractDiscoveredOpenCodeModels(output: string): DiscoveredOpenCodeModels {
+  const models = new Set<string>();
+
+  for (const line of output.split(/\r?\n/)) {
+    for (const token of line.matchAll(/([A-Za-z0-9._-]+\/[A-Za-z0-9._:@+-]+(?:\/[A-Za-z0-9._:@+-]+)*)/g)) {
+      const candidate = token[1]?.replace(/[),.:;]+$/, '');
+      if (candidate) {
+        models.add(candidate);
+      }
+    }
+  }
+
+  const modelList = [...models].sort((left, right) => left.localeCompare(right));
+  return {
+    providers: collectProvidersFromModelIds(modelList),
+    models: modelList
+  };
+}
+
+function collectProvidersFromModelIds(modelIds: Iterable<string>): string[] {
+  const providers = new Set<string>();
+
+  for (const modelId of modelIds) {
+    const providerId = modelId.split('/')[0]?.trim();
+    if (providerId) {
+      providers.add(providerId);
+    }
+  }
+
+  return [...providers].sort((left, right) => left.localeCompare(right));
+}
+
+function mergeStringLists(...lists: string[][]): string[] {
+  return [...new Set(lists.flat().filter(Boolean))].sort((left, right) => left.localeCompare(right));
 }

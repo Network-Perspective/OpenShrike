@@ -16,13 +16,13 @@ import {
   INCONCLUSIVE_OUTPUT_MAX_LENGTH,
   MAX_POLICY_CHECKS
 } from './constants.js';
-import {loadRuntimeConfig, type LoadedRuntimeConfig} from './config.js';
+import {getDefaultConfigPath, loadRuntimeConfig, type LoadedRuntimeConfig} from './config.js';
 import {
   parseScanReport,
   type DockerScanRequest,
   tryDecodeDockerWireMessage
 } from './docker-protocol.js';
-import {evaluateCheck, getCheckEvaluationOriginalOutput} from './evaluator.js';
+import {CheckEvaluationError, evaluateCheck, getCheckEvaluationOriginalOutput} from './evaluator.js';
 import {resolvePolicyDefinition} from './policies.js';
 import {runProcess} from './process.js';
 import {findToolRoot} from './project-root.js';
@@ -51,6 +51,9 @@ interface ProgressState {
   runningCheckIds: Set<string>;
   completedCount: number;
 }
+
+const OPENCODE_PROVIDERS_DOCS_URL = 'https://opencode.ai/docs/providers/';
+const OPENCODE_EXECUTION_LAYER_NOTE = 'OpenShrike uses OpenCode as its agent execution layer, so scans cannot run until OpenCode is configured correctly.';
 
 export interface ScanHooks {
   onProgress?: (event: ScanProgressEvent) => void;
@@ -163,6 +166,12 @@ export async function runNativeScan(
       : executionOptions.runtimeConfigOverride ?? await loadRuntimeConfig(options.configPath, {
           agent: agentName,
           model
+        }).catch(error => {
+          throw createRuntimeConfigCliError(error, {
+            configPath: options.configPath,
+            repoPath: repoFullPath,
+            model
+          });
         });
 
     logger?.write('runtime.config', runtimeConfig
@@ -175,9 +184,7 @@ export async function runNativeScan(
         });
 
     if (runtimeConfig && runtimeConfig.missingEnvVars.length > 0) {
-      throw new Error(
-        `Missing required environment variable(s) for ${runtimeConfig.configPath}: ${runtimeConfig.missingEnvVars.join(', ')}`
-      );
+      throw createMissingEnvironmentCliError(runtimeConfig, model);
     }
 
     const handleRuntimeEvent = (runtimeEvent: RuntimeEventEnvelope) => {
@@ -201,6 +208,12 @@ export async function runNativeScan(
           config: runtimeConfig.config,
           onEvent: handleRuntimeEvent,
           logger
+        }).catch(error => {
+          throw createOpenCodeRuntimeCliError(error, {
+            stage: 'start',
+            model,
+            configPath: runtimeConfig.configPath
+          });
         })
       : null;
 
@@ -231,6 +244,7 @@ export async function runNativeScan(
             repoPath: repoFullPath,
             agent: agentName,
             model,
+            runtimeConfigPath: runtimeConfig?.configPath,
             scopeContext,
             emulateOpencode: options.mockOpencode,
             runtime,
@@ -310,12 +324,16 @@ async function runDockerScan(
     : await loadRuntimeConfig(options.configPath, {
         agent: agentName,
         model
+      }).catch(error => {
+        throw createRuntimeConfigCliError(error, {
+          configPath: options.configPath,
+          repoPath: repoFullPath,
+          model
+        });
       });
 
   if (runtimeConfig && runtimeConfig.missingEnvVars.length > 0) {
-    throw new Error(
-      `Missing required environment variable(s) for ${runtimeConfig.configPath}: ${runtimeConfig.missingEnvVars.join(', ')}`
-    );
+    throw createMissingEnvironmentCliError(runtimeConfig, model);
   }
 
   const imageRef = options.image?.trim() || DEFAULT_DOCKER_IMAGE;
@@ -688,6 +706,7 @@ async function evaluateCheckWithRecovery(options: {
   repoPath: string;
   agent: string;
   model: string;
+  runtimeConfigPath?: string | undefined;
   scopeContext: Awaited<ReturnType<typeof resolveScanScope>>;
   emulateOpencode: boolean;
   runtime: OpenCodeRuntime | null;
@@ -732,6 +751,14 @@ async function evaluateCheckWithRecovery(options: {
         message
       });
 
+      const fatalSetupError = classifyFatalCheckError(error, {
+        model: options.model,
+        configPath: options.runtimeConfigPath
+      });
+      if (fatalSetupError) {
+        throw fatalSetupError;
+      }
+
       if (!isRecoverableCheckError(error)) {
         throw error;
       }
@@ -761,8 +788,7 @@ async function evaluateCheckWithRecovery(options: {
 }
 
 function isRecoverableCheckError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return !message.includes('Read-only guardrail violation');
+  return error instanceof CheckEvaluationError;
 }
 
 function createInconclusiveResult(
@@ -815,6 +841,202 @@ function extractOriginalCheckOutput(error: unknown): string | null {
   }
 
   return `${normalized.slice(0, INCONCLUSIVE_OUTPUT_MAX_LENGTH).trimEnd()}\n... [truncated]`;
+}
+
+function classifyFatalCheckError(
+  error: unknown,
+  context: {
+    model: string;
+    configPath?: string | undefined;
+  }
+): CliError | null {
+  if (error instanceof CliError) {
+    return error;
+  }
+
+  if (error instanceof CheckEvaluationError) {
+    return null;
+  }
+
+  const message = normalizeCheckErrorMessage(error);
+  if (message.includes('Read-only guardrail violation')) {
+    return null;
+  }
+
+  if (isProviderSetupFailureMessage(message)) {
+    return createProviderSetupCliError(message, {
+      model: context.model,
+      configPath: context.configPath
+    });
+  }
+
+  return createOpenCodeRuntimeCliError(message, {
+    stage: 'run',
+    model: context.model,
+    configPath: context.configPath
+  });
+}
+
+function createRuntimeConfigCliError(
+  error: unknown,
+  context: {
+    configPath?: string | undefined;
+    repoPath: string;
+    model: string;
+  }
+): CliError {
+  const resolvedConfigPath = path.resolve(context.configPath ?? getDefaultConfigPath(context.repoPath));
+  const cause = normalizeCheckErrorMessage(error);
+
+  return new CliError(
+    'INVALID_RUNTIME_CONFIG',
+    `OpenCode runtime config could not be loaded from ${resolvedConfigPath}.`,
+    {
+      configPath: resolvedConfigPath,
+      model: context.model,
+      cause,
+      actions: buildOpenCodeSetupActions({
+        configPath: resolvedConfigPath,
+        model: context.model,
+        cause
+      })
+    }
+  );
+}
+
+function createMissingEnvironmentCliError(
+  runtimeConfig: LoadedRuntimeConfig,
+  model: string
+): CliError {
+  return new CliError(
+    'MISSING_ENVIRONMENT',
+    'OpenCode provider setup is incomplete, so checks could not start.',
+    {
+      configPath: runtimeConfig.configPath,
+      model,
+      missingEnvVars: runtimeConfig.missingEnvVars,
+      actions: buildOpenCodeSetupActions({
+        configPath: runtimeConfig.configPath,
+        model,
+        missingEnvVars: runtimeConfig.missingEnvVars
+      })
+    }
+  );
+}
+
+function createProviderSetupCliError(
+  causeMessage: string,
+  context: {
+    model: string;
+    configPath?: string | undefined;
+  }
+): CliError {
+  return new CliError(
+    'OPENCODE_PROVIDER_SETUP_FAILED',
+    'OpenCode provider setup failed before checks could run.',
+    {
+      ...(context.configPath ? {configPath: context.configPath} : {}),
+      model: context.model,
+      cause: causeMessage,
+      actions: buildOpenCodeSetupActions({
+        configPath: context.configPath,
+        model: context.model,
+        cause: causeMessage
+      })
+    }
+  );
+}
+
+function createOpenCodeRuntimeCliError(
+  error: unknown,
+  context: {
+    stage: 'start' | 'run';
+    model: string;
+    configPath?: string | undefined;
+  }
+): CliError {
+  const cause = normalizeCheckErrorMessage(error);
+
+  if (isProviderSetupFailureMessage(cause)) {
+    return createProviderSetupCliError(cause, {
+      model: context.model,
+      configPath: context.configPath
+    });
+  }
+
+  return new CliError(
+    context.stage === 'start' ? 'OPENCODE_RUNTIME_START_FAILED' : 'OPENCODE_RUNTIME_FAILED',
+    context.stage === 'start'
+      ? 'OpenCode runtime failed to start.'
+      : 'OpenCode failed while running checks.',
+    {
+      ...(context.configPath ? {configPath: context.configPath} : {}),
+      model: context.model,
+      cause,
+      actions: buildOpenCodeSetupActions({
+        configPath: context.configPath,
+        model: context.model,
+        cause
+      })
+    }
+  );
+}
+
+function buildOpenCodeSetupActions(options: {
+  configPath?: string | undefined;
+  model: string;
+  cause?: string | undefined;
+  missingEnvVars?: string[] | undefined;
+}): string[] {
+  const configPath = path.resolve(options.configPath ?? getDefaultConfigPath());
+  const actions = [
+    OPENCODE_EXECUTION_LAYER_NOTE,
+    `Review and edit ${configPath} to configure the selected OpenCode model manually.`,
+    `See the OpenCode provider setup docs: ${OPENCODE_PROVIDERS_DOCS_URL}`,
+    "After updating the setup rerun `shrike scan`."
+  ];
+
+  if (options.missingEnvVars && options.missingEnvVars.length > 0) {
+    actions.splice(
+      2,
+      0,
+      `Set the environment variable(s) referenced by ${configPath}: ${options.missingEnvVars.join(', ')}.`
+    );
+  }
+
+  if (options.cause) {
+    actions.splice(
+      2,
+      0,
+      `OpenCode reported: ${options.cause}`
+    );
+  }
+
+  return actions;
+}
+
+function isProviderSetupFailureMessage(message: string): boolean {
+  return [
+    /typo in the url or port/i,
+    /\bapi key\b/i,
+    /\bauth(?:entication|orization)?\b/i,
+    /\bunauthorized\b/i,
+    /\bforbidden\b/i,
+    /\bresource name\b/i,
+    /\bbase ?url\b/i,
+    /\bendpoint\b/i,
+    /\bdeployment\b/i,
+    /\bcredentials?\b/i,
+    /\btoken\b/i,
+    /\bunknown provider\b/i,
+    /\bunknown model\b/i,
+    /\bprovider .+ not found\b/i,
+    /\bmodel .+ not found\b/i,
+    /\bECONNREFUSED\b/i,
+    /\bENOTFOUND\b/i,
+    /\bEAI_AGAIN\b/i,
+    /\bgetaddrinfo\b/i
+  ].some(pattern => pattern.test(message));
 }
 
 function resolveIgnoredRepoPaths(repoPath: string, logPath?: string): string[] {

@@ -146,7 +146,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             : 'OpenCode authentication required';
           const optionsForScreen: InitScreenOption<OpenCodeDiscoveryAction>[] = context.opencode.status === 'ready'
             ? [
-                {value: 'use-discovered', label: 'Use discovered OpenCode config'},
+                {value: 'use-discovered', label: 'Continue with discovered OpenCode setup'},
                 {value: 'auth-login', label: 'Re-authenticate with `opencode auth login`'},
                 {value: 'exit', label: 'Exit without changes'}
               ]
@@ -267,10 +267,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
           }));
           const selection = await ui.showScreen<string>({
             prompt,
-            bodyLines: [
-              'Multiple models were found in your OpenCode config.',
-              'Smaller models are fine for local scans, e.g. `gpt-5.4-mini` or a Haiku-class model.'
-            ],
+            bodyLines: buildModelSelectionLines(context),
             options: modelOptions,
             initialValue: context.selections.model,
             searchable: true,
@@ -519,7 +516,7 @@ async function buildWizardContext(
   const repoRoot = await findRepoRoot(options.cwd);
   const existingInit = await discoverExistingInit(repoRoot);
   const existingProjectConfig = existingInit.projectConfig;
-  const opencode = await discoverOpenCodeSetup(toolRoot);
+  const opencode = await discoverOpenCodeSetup(toolRoot, repoRoot);
   const projectDetection = await detectProjectType(repoRoot);
   const policyCatalog = await listPolicyCatalog();
   const defaultPolicyOrder = rankPoliciesForProject(
@@ -549,7 +546,7 @@ async function buildWizardContext(
         ? existingProjectConfig.config.init.detectedFrom
         : projectDetection.recommended.evidence,
       opencodeSetup: existingProjectConfig?.config.init.opencodeSetup
-        ?? (opencode.status === 'ready' ? 'existing-config' : 'auth-login')
+        ?? resolveDiscoveredOpenCodeSetup(opencode)
     },
     forceReplace: options.force,
     writeResult: null,
@@ -581,14 +578,28 @@ function resetSelections(context: InitWizardContext, includeExistingDefaults: bo
     runtimeMode: DEFAULT_RUNTIME_MODE,
     projectType: context.projectDetection.recommended.projectType,
     detectedFrom: context.projectDetection.recommended.evidence,
-    opencodeSetup: context.opencode.status === 'ready' ? 'existing-config' : 'auth-login'
+    opencodeSetup: resolveDiscoveredOpenCodeSetup(context.opencode)
   };
 }
 
 function buildOpenCodeDiscoveryLines(context: InitWizardContext): string[] {
   if (context.opencode.status === 'ready') {
+    if (!context.opencode.configPath) {
+      return [
+        'OpenCode credentials are ready. No user-global OpenCode config was found.',
+        'Choose a model here and Shrike will save it in `.openshrike/opencode.json` for native scans.'
+      ];
+    }
+
     return [
       `Found existing OpenCode config:`
+    ];
+  }
+
+  if (!context.opencode.configPath) {
+    return [
+      'OpenCode is installed, but credentials are not ready yet.',
+      'Launch `opencode auth login`; Shrike will list models afterward and save the selected one in `.openshrike/opencode.json`.'
     ];
   }
 
@@ -766,11 +777,11 @@ async function runOpencodeAuthLogin(context: InitWizardContext): Promise<void> {
 }
 
 async function refreshOpenCodeDiscovery(context: InitWizardContext, toolRoot: string): Promise<void> {
-  context.opencode = await discoverOpenCodeSetup(toolRoot);
+  context.opencode = await discoverOpenCodeSetup(toolRoot, context.repoRoot);
   if (!context.selections.model || !context.opencode.models.includes(context.selections.model)) {
     context.selections.model = context.opencode.defaultModel ?? context.opencode.models[0];
   }
-  context.selections.opencodeSetup = context.opencode.status === 'ready' ? 'existing-config' : 'auth-login';
+  context.selections.opencodeSetup = resolveDiscoveredOpenCodeSetup(context.opencode);
 }
 
 async function runExternalCommand(
@@ -840,6 +851,26 @@ function resolveProviderLabel(model: string | undefined, providers: string[]): s
   }
 
   return providers[0] ?? 'unknown';
+}
+
+function buildModelSelectionLines(context: InitWizardContext): string[] {
+  if (!context.opencode.configPath) {
+    return [
+      'No global OpenCode config was found. Shrike will save the selected model in `.openshrike/opencode.json`.',
+      'Smaller models are fine for local scans, e.g. `gpt-5.4-mini` or a Haiku-class model.'
+    ];
+  }
+
+  return [
+    'Choose the model Shrike should use for scans.',
+    'Smaller models are fine for local scans, e.g. `gpt-5.4-mini` or a Haiku-class model.'
+  ];
+}
+
+function resolveDiscoveredOpenCodeSetup(
+  opencode: InitWizardContext['opencode']
+): 'existing-config' | 'auth-login' {
+  return opencode.status === 'ready' && opencode.configPath ? 'existing-config' : 'auth-login';
 }
 
 function formatHomeRelativePath(targetPath: string): string {

@@ -165,6 +165,97 @@ describe('runInitCommand', () => {
     expect(runtimeConfig.config.agent?.['shrike-checker']?.model).toBe('azure/gpt-5.4');
   });
 
+  it('continues from auth-only OpenCode setup and writes the selected model to the repo-local config', async () => {
+    const repoRoot = await makeTypescriptRepo();
+    const {binaryPath, homeRoot} = await makeDiscoveredOpenCodeHome({
+      models: ['azure/gpt-5.4-mini', 'azure/gpt-5.4', 'openai/gpt-5.1-mini'],
+      defaultModel: 'azure/gpt-5.4-mini',
+      authPresent: true,
+      includeBinary: true,
+      configPresent: false
+    });
+    useHome(homeRoot, path.dirname(binaryPath));
+
+    mockSpawn.mockImplementation((command: string, args: string[]) => {
+      expect(command).toBe(binaryPath);
+
+      if (args[0] === 'models') {
+        return createSuccessfulProcessChild([
+          'azure/gpt-5.4-mini',
+          'azure/gpt-5.4',
+          'openai/gpt-5.1-mini'
+        ].join('\n'));
+      }
+
+      throw new Error(`Unexpected external command: ${command} ${args.join(' ')}`);
+    });
+
+    const session = createScriptedSession([
+      spec => {
+        expect(spec.prompt).toBe('OpenCode discovery');
+        expect(spec.bodyLines).toEqual([
+          'OpenCode credentials are ready. No user-global OpenCode config was found.',
+          'Choose a model here and Shrike will save it in `.openshrike/opencode.json` for native scans.'
+        ]);
+        expect(spec.summaryItems).toEqual([
+          {label: 'default model', value: 'not set'},
+          {label: 'providers', value: 'azure, openai'},
+          {label: 'config file', value: 'missing'},
+          {label: 'auth store', value: 'present (~/.local/share/opencode/auth.json)'}
+        ]);
+        expect(spec.options.map(option => option.value)).toEqual([
+          'use-discovered',
+          'auth-login',
+          'exit'
+        ]);
+        return {type: 'submit', value: 'use-discovered'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Select default model');
+        expect(spec.bodyLines).toEqual([
+          'No global OpenCode config was found. Shrike will save the selected model in `.openshrike/opencode.json`.',
+          'Smaller models are fine for local scans, e.g. `gpt-5.4-mini` or a Haiku-class model.'
+        ]);
+        return {type: 'submit', value: 'openai/gpt-5.1-mini'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Select default policy');
+        return {type: 'submit', value: 'typescript-baseline'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Setup complete');
+        expect(spec.summaryItems).toEqual([
+          {label: 'Provider', value: 'openai'},
+          {label: 'Model', value: 'openai/gpt-5.1-mini'},
+          {label: 'Default policy', value: 'typescript-baseline'},
+          {label: 'Runtime mode', value: 'native'}
+        ]);
+        return {type: 'submit', value: 'exit'};
+      }
+    ]);
+    mockCreateInitUiSession.mockReturnValue(session);
+
+    const result = await runInitCommand({
+      cwd: repoRoot,
+      force: false
+    });
+
+    session.assertFinished();
+    expect(mockSpawn).toHaveBeenCalledOnce();
+    expect(result.wroteFiles).toBe(true);
+
+    const projectConfig = await loadProjectConfig(path.join(repoRoot, '.openshrike', 'project.json'));
+    const runtimeConfig = await loadRuntimeConfig(path.join(repoRoot, '.openshrike', 'opencode.json'), {
+      agent: 'shrike-checker',
+      model: 'openai/gpt-5.1-mini'
+    });
+
+    expect(projectConfig.config.init.opencodeSetup).toBe('auth-login');
+    expect(projectConfig.config.runtime.model).toBe('openai/gpt-5.1-mini');
+    expect(runtimeConfig.config.model).toBe('openai/gpt-5.1-mini');
+    expect(runtimeConfig.config.provider).toBeUndefined();
+  });
+
   it('re-enters an existing init, updates runtime defaults, and preserves the saved model and policy', async () => {
     const repoRoot = await makeTypescriptRepo();
     const {homeRoot} = await makeDiscoveredOpenCodeHome({
@@ -242,31 +333,44 @@ describe('runInitCommand', () => {
     expect(projectConfig.config.init.detectedFrom).toEqual(['package.json', 'tsconfig.json']);
   });
 
-  it('runs auth login, refreshes OpenCode discovery, and continues once credentials are present', async () => {
+  it('runs auth login, refreshes OpenCode discovery, and continues even when OpenCode did not create a global config file', async () => {
     const repoRoot = await makeTypescriptRepo();
     const {authPath, binaryPath, homeRoot} = await makeDiscoveredOpenCodeHome({
-      models: ['azure/gpt-5.4-mini'],
+      models: ['azure/gpt-5.4-mini', 'azure/gpt-5.4'],
       defaultModel: 'azure/gpt-5.4-mini',
       authPresent: false,
-      includeBinary: true
+      includeBinary: true,
+      configPresent: false
     });
     useHome(homeRoot, path.dirname(binaryPath));
 
     mockSpawn.mockImplementation((command: string, args: string[], options: Record<string, unknown>) => {
       expect(command).toBe(binaryPath);
-      expect(args).toEqual(['auth', 'login']);
-      expect(options.cwd).toBe(repoRoot);
-      expect(options.shell).toBe(false);
-      expect(options.stdio).toBe('inherit');
-      const child = new EventEmitter();
-      void fs.mkdir(path.dirname(authPath), {recursive: true})
-        .then(() => fs.writeFile(authPath, '{"token":"test"}\n', 'utf8'))
-        .then(() => {
-          queueMicrotask(() => {
-            child.emit('close', 0, null);
+
+      if (args[0] === 'auth' && args[1] === 'login') {
+        expect(options.cwd).toBe(repoRoot);
+        expect(options.shell).toBe(false);
+        expect(options.stdio).toBe('inherit');
+        const child = createMockChild();
+        void fs.mkdir(path.dirname(authPath), {recursive: true})
+          .then(() => fs.writeFile(authPath, '{"token":"test"}\n', 'utf8'))
+          .then(() => {
+            queueMicrotask(() => {
+              child.emit('close', 0, null);
+            });
           });
-        });
-      return child;
+        return child;
+      }
+
+      if (args[0] === 'models') {
+        expect(options.cwd).toBe(repoRoot);
+        return createSuccessfulProcessChild([
+          'azure/gpt-5.4-mini',
+          'azure/gpt-5.4'
+        ].join('\n'));
+      }
+
+      throw new Error(`Unexpected external command: ${command} ${args.join(' ')}`);
     });
 
     const session = createScriptedSession([
@@ -280,12 +384,22 @@ describe('runInitCommand', () => {
       },
       spec => {
         expect(spec.prompt).toBe('OpenCode discovery');
+        expect(spec.summaryItems).toEqual([
+          {label: 'default model', value: 'not set'},
+          {label: 'providers', value: 'azure'},
+          {label: 'config file', value: 'missing'},
+          {label: 'auth store', value: 'present (~/.local/share/opencode/auth.json)'}
+        ]);
         expect(spec.options.map(option => option.value)).toEqual([
           'use-discovered',
           'auth-login',
           'exit'
         ]);
         return {type: 'submit', value: 'use-discovered'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Select default model');
+        return {type: 'submit', value: 'azure/gpt-5.4-mini'};
       },
       spec => {
         expect(spec.prompt).toBe('Select default policy');
@@ -305,12 +419,12 @@ describe('runInitCommand', () => {
 
     session.assertFinished();
     expect(session.suspend).toHaveBeenCalledOnce();
-    expect(mockSpawn).toHaveBeenCalledOnce();
+    expect(mockSpawn).toHaveBeenCalledTimes(2);
     expect(await fs.readFile(authPath, 'utf8')).toContain('token');
     expect(result.wroteFiles).toBe(true);
 
     const projectConfig = await loadProjectConfig(path.join(repoRoot, '.openshrike', 'project.json'));
-    expect(projectConfig.config.init.opencodeSetup).toBe('existing-config');
+    expect(projectConfig.config.init.opencodeSetup).toBe('auth-login');
     expect(projectConfig.config.runtime.model).toBe('azure/gpt-5.4-mini');
   });
 });
@@ -360,6 +474,7 @@ async function makeDiscoveredOpenCodeHome(options: {
   defaultModel: string;
   authPresent: boolean;
   includeBinary?: boolean | undefined;
+  configPresent?: boolean | undefined;
 }): Promise<{
   homeRoot: string;
   configPath: string;
@@ -373,21 +488,23 @@ async function makeDiscoveredOpenCodeHome(options: {
     ? options.defaultModel.split('/')[0]!
     : 'azure';
 
-  await fs.mkdir(path.dirname(configPath), {recursive: true});
-  await fs.writeFile(
-    configPath,
-    `${serializeConfig({
-      model: options.defaultModel,
-      provider: {
-        [providerId]: {
-          models: Object.fromEntries(
-            options.models.map(modelId => [stripProviderPrefix(modelId), {}])
-          )
+  if (options.configPresent ?? true) {
+    await fs.mkdir(path.dirname(configPath), {recursive: true});
+    await fs.writeFile(
+      configPath,
+      `${serializeConfig({
+        model: options.defaultModel,
+        provider: {
+          [providerId]: {
+            models: Object.fromEntries(
+              options.models.map(modelId => [stripProviderPrefix(modelId), {}])
+            )
+          }
         }
-      }
-    })}\n`,
-    'utf8'
-  );
+      })}\n`,
+      'utf8'
+    );
+  }
 
   if (options.authPresent) {
     await fs.mkdir(path.dirname(authPath), {recursive: true});
@@ -428,6 +545,27 @@ function useHome(homeRoot: string, extraPath?: string): void {
   process.env.USERPROFILE = homeRoot;
   const pathSegments = [extraPath, originalPath].filter((segment): segment is string => Boolean(segment));
   process.env.PATH = pathSegments.join(path.delimiter);
+}
+
+function createSuccessfulProcessChild(stdout: string) {
+  const child = createMockChild();
+  queueMicrotask(() => {
+    if (stdout) {
+      child.stdout.emit('data', Buffer.from(stdout));
+    }
+    child.emit('close', 0, null);
+  });
+  return child;
+}
+
+function createMockChild() {
+  const child = new EventEmitter() as EventEmitter & {
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+  };
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  return child;
 }
 
 function stripProviderPrefix(modelId: string): string {
