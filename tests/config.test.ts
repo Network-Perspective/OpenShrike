@@ -183,6 +183,170 @@ describe('runtime config', () => {
     expect(gitignore).toContain('artifacts/');
   });
 
+  it('preserves existing config on project-only updates', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-init-preserve-'));
+    tempDirectories.push(tempRoot);
+
+    const result = await writeShrikeInitFiles({
+      repoRoot: tempRoot,
+      policyId: 'typescript-baseline',
+      model: 'azure/gpt-5.4-mini',
+      runtimeMode: 'native',
+      projectType: 'typescript',
+      detectedFrom: ['package.json', 'tsconfig.json'],
+      opencodeSetup: 'existing-config'
+    });
+    const originalOpencodeConfig = `${serializeConfig({
+      model: 'azure/gpt-5.4-mini',
+      provider: {
+        azure: {
+          options: {
+            resourceName: 'custom-resource'
+          }
+        }
+      },
+      agent: {
+        'shrike-checker': {
+          description: 'Custom Shrike agent',
+          model: 'azure/gpt-5.4-mini'
+        }
+      }
+    })}\n`;
+
+    await fs.writeFile(
+      result.projectConfigPath,
+      `${JSON.stringify({
+        $schema: 'https://openshrike.dev/schema/project.json',
+        version: 1,
+        init: {
+          projectType: 'typescript',
+          detectedFrom: ['package.json'],
+          opencodeSetup: 'existing-config',
+          customEvidence: true
+        },
+        runtime: {
+          configPath: '.openshrike/opencode.json',
+          agent: 'shrike-checker',
+          model: 'azure/gpt-5.4-mini',
+          mode: 'native',
+          parallelism: 'auto',
+          dockerImage: 'custom-image'
+        },
+        scan: {
+          defaultKind: 'policy',
+          defaultId: 'typescript-baseline',
+          repo: '.',
+          scope: 'uncommitted',
+          output: 'markdown',
+          ui: true,
+          artifactsDir: null,
+          labels: ['keep-me']
+        },
+        customTopLevel: {
+          owner: 'user'
+        }
+      }, null, 2)}\n`,
+      'utf8'
+    );
+    await fs.writeFile(result.opencodeConfigPath, originalOpencodeConfig, 'utf8');
+
+    await writeShrikeInitFiles({
+      repoRoot: tempRoot,
+      policyId: 'typescript-baseline',
+      model: 'azure/gpt-5.4-mini',
+      runtimeMode: 'docker',
+      parallelism: 4,
+      projectType: 'typescript',
+      detectedFrom: ['package.json', 'tsconfig.json'],
+      opencodeSetup: 'existing-config',
+      scope: 'project',
+      preserveExisting: true
+    });
+
+    const rawProjectConfig = JSON.parse(await fs.readFile(result.projectConfigPath, 'utf8')) as Record<string, any>;
+
+    expect(rawProjectConfig.runtime.mode).toBe('docker');
+    expect(rawProjectConfig.runtime.parallelism).toBe(4);
+    expect(rawProjectConfig.runtime.dockerImage).toBe('custom-image');
+    expect(rawProjectConfig.scan.labels).toEqual(['keep-me']);
+    expect(rawProjectConfig.init.customEvidence).toBe(true);
+    expect(rawProjectConfig.customTopLevel).toEqual({owner: 'user'});
+    expect(await fs.readFile(result.opencodeConfigPath, 'utf8')).toBe(originalOpencodeConfig);
+  });
+
+  it('merges existing opencode config when updating the saved model', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-init-merge-opencode-'));
+    tempDirectories.push(tempRoot);
+
+    const result = await writeShrikeInitFiles({
+      repoRoot: tempRoot,
+      policyId: 'typescript-baseline',
+      model: 'azure/gpt-5.4-mini',
+      runtimeMode: 'native',
+      projectType: 'typescript',
+      detectedFrom: ['package.json', 'tsconfig.json'],
+      opencodeSetup: 'existing-config'
+    });
+
+    await fs.writeFile(
+      result.opencodeConfigPath,
+      `${serializeConfig({
+        model: 'azure/gpt-5.4-mini',
+        permission: {
+          bash: 'ask',
+          edit: 'deny'
+        },
+        provider: {
+          azure: {
+            env: ['AZURE_OPENAI_API_KEY'],
+            options: {
+              resourceName: 'custom-resource'
+            }
+          }
+        },
+        agent: {
+          'shrike-checker': {
+            description: 'Custom Shrike agent',
+            model: 'azure/gpt-5.4-mini',
+            permission: {
+              bash: 'ask'
+            },
+            extraSetting: true
+          },
+          reviewer: {
+            model: 'azure/gpt-5.4'
+          }
+        }
+      })}\n`,
+      'utf8'
+    );
+
+    await writeShrikeInitFiles({
+      repoRoot: tempRoot,
+      policyId: 'typescript-baseline',
+      model: 'azure/gpt-5.4',
+      runtimeMode: 'native',
+      projectType: 'typescript',
+      detectedFrom: ['package.json', 'tsconfig.json'],
+      opencodeSetup: 'existing-config',
+      scope: 'project-and-opencode',
+      preserveExisting: true
+    });
+
+    const rawRuntimeConfig = JSON.parse(await fs.readFile(result.opencodeConfigPath, 'utf8')) as Record<string, any>;
+    const projectConfig = await loadProjectConfig(result.projectConfigPath);
+
+    expect(rawRuntimeConfig.model).toBe('azure/gpt-5.4');
+    expect(rawRuntimeConfig.provider.azure.options.resourceName).toBe('custom-resource');
+    expect(rawRuntimeConfig.permission.bash).toBe('ask');
+    expect(rawRuntimeConfig.agent.reviewer.model).toBe('azure/gpt-5.4');
+    expect(rawRuntimeConfig.agent['shrike-checker'].description).toBe('Custom Shrike agent');
+    expect(rawRuntimeConfig.agent['shrike-checker'].permission.bash).toBe('ask');
+    expect(rawRuntimeConfig.agent['shrike-checker'].extraSetting).toBe(true);
+    expect(rawRuntimeConfig.agent['shrike-checker'].model).toBe('azure/gpt-5.4');
+    expect(projectConfig.config.runtime.model).toBe('azure/gpt-5.4');
+  });
+
   it('loads project config from a nested repository path', async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-project-config-'));
     tempDirectories.push(tempRoot);

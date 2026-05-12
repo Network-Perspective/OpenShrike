@@ -64,11 +64,11 @@ shrike scan
   AI provider access, lets you choose defaults, and writes
   `.openshrike/project.json`, `.openshrike/opencode.json`, and seeds
   `.openshrike/checks/`.
-- `shrike scan` uses those saved defaults automatically and reads only the
-  Markdown checks from `.openshrike/checks/`. By default it scans uncommitted
-  changes in the current repository.
-- Re-run `shrike init` when you want to seed checks from a different policy or
-  change model/runtime settings.
+- `shrike scan` uses those saved defaults automatically and reads the
+  Markdown checks from `.openshrike/checks/`. By default it scans
+  uncommitted changes in the current repository.
+- Re-run `shrike init` when you want to seed checks from a different policy
+  or change saved model, runtime mode, or parallelism defaults.
 
 ## Install From Source
 

@@ -323,6 +323,7 @@ Options:
 - `Policy: <current>`
 - `Model: <current>` only when more than one discovered model exists
 - `Runtime: <current>`
+- `Parallelism: <current>`
 - `Done`
 
 Behavior:
@@ -331,6 +332,7 @@ Behavior:
 - `policy` reuses `policy-selection`
 - `model` reuses `model-selection`
 - `runtime` enters `runtime-selection`
+- `parallelism` enters `parallelism-selection`
 - `done` returns to `success`
 
 ### `runtime-selection`
@@ -344,7 +346,26 @@ Options:
 
 Behavior:
 
-- confirmation rewrites the generated files immediately
+- confirmation updates `project.json` immediately
+- success returns to `change-defaults`
+- back returns to `change-defaults`
+
+### `parallelism-selection`
+
+Prompt: `Select default parallelism`
+
+Options:
+
+- `auto`
+- `1`
+- `2`
+- `4`
+- `8`
+- current saved value when it is outside the default list
+
+Behavior:
+
+- confirmation updates `project.json` immediately
 - success returns to `change-defaults`
 - back returns to `change-defaults`
 
@@ -420,7 +441,7 @@ current implementation deliberately does **not** do the following:
 - write env-helper files alongside `.openshrike/opencode.json`
 - embed or drive the OpenCode `/connect` TUI
 - provide a Shrike-owned provider picker
-- expose scan scope, output format, or parallelism as separate init screens
+- expose scan scope or output format as separate init screens
 - treat `--force` as a non-interactive overwrite flag
 - provide a dedicated write-conflict workflow beyond existing-init detection and
   generic write errors
