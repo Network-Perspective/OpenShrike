@@ -172,10 +172,27 @@ async function ensureGitRepository(repoPath: string): Promise<void> {
   try {
     await runGit(repoPath, ['rev-parse', '--is-inside-work-tree']);
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isGitOwnershipProtectionError(message)) {
+      throw new Error(
+        [
+          `Repository path is blocked by Git safe.directory ownership protection: ${path.resolve(repoPath)}`,
+          'This usually means the repository owner does not match the current process user inside the selected runtime.'
+        ].join('\n'),
+        {cause: error}
+      );
+    }
+
     throw new Error(`Repository path is not a valid git repository: ${path.resolve(repoPath)}`, {
       cause: error
     });
   }
+}
+
+function isGitOwnershipProtectionError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes('detected dubious ownership')
+    || normalized.includes('safe.directory');
 }
 
 function buildDiffArgs(diffSpec: string): string[] {

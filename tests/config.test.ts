@@ -106,6 +106,7 @@ describe('runtime config', () => {
     });
     const projectConfig = await loadProjectConfig(result.projectConfigPath);
     const readme = await fs.readFile(result.readmePath, 'utf8');
+    const gitignore = await fs.readFile(path.join(tempRoot, '.openshrike', '.gitignore'), 'utf8');
 
     expect(runtimeConfig.config.$schema).toBe('https://opencode.ai/config.json');
     expect(runtimeConfig.config.provider).toBeUndefined();
@@ -121,6 +122,30 @@ describe('runtime config', () => {
     expect(readme).toContain('`project.json`');
     expect(readme).toContain('`opencode.json`');
     expect(readme).toContain('`checks/`');
+    expect(gitignore).toContain('artifacts/');
+  });
+
+  it('preserves existing .openshrike/.gitignore entries and adds the artifacts rule', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-init-'));
+    tempDirectories.push(tempRoot);
+
+    const configDirectory = path.join(tempRoot, '.openshrike');
+    await fs.mkdir(configDirectory, {recursive: true});
+    await fs.writeFile(path.join(configDirectory, '.gitignore'), 'custom-cache/\n', 'utf8');
+
+    await writeShrikeInitFiles({
+      repoRoot: tempRoot,
+      policyId: 'typescript-baseline',
+      model: 'azure/gpt-5.4-mini',
+      runtimeMode: 'native',
+      projectType: 'typescript',
+      detectedFrom: ['package.json', 'tsconfig.json'],
+      opencodeSetup: 'existing-config'
+    });
+
+    const gitignore = await fs.readFile(path.join(configDirectory, '.gitignore'), 'utf8');
+    expect(gitignore).toContain('custom-cache/');
+    expect(gitignore).toContain('artifacts/');
   });
 
   it('loads project config from a nested repository path', async () => {

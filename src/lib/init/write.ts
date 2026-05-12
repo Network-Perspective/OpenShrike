@@ -3,6 +3,7 @@ import path from 'node:path';
 import {resolveCheckDefinitionPath} from '../checks.js';
 import {buildDefaultOpencodeConfig, serializeConfig} from '../config.js';
 import {
+  ARTIFACTS_DIRECTORY_NAME,
   CONFIG_DIRECTORY_NAME,
   CONFIG_FILE_NAME,
   DEFAULT_AGENT_NAME,
@@ -10,6 +11,7 @@ import {
   DEFAULT_PARALLELISM,
   DEFAULT_RUNTIME_MODE,
   DEFAULT_SCAN_SCOPE,
+  GITIGNORE_FILE_NAME,
   INIT_README_FILE_NAME,
   PROJECT_CHECKS_DIRECTORY_NAME,
   PROJECT_CONFIG_FILE_NAME
@@ -34,6 +36,7 @@ export interface InitWriteResult {
   opencodeConfigPath: string;
   projectConfigPath: string;
   readmePath: string;
+  gitignorePath: string;
   seededCheckPaths: string[];
   projectConfig: ShrikeProjectConfig;
 }
@@ -44,6 +47,7 @@ export async function writeShrikeInitFiles(options: InitWriteOptions): Promise<I
   const opencodeConfigPath = path.join(configDirectory, CONFIG_FILE_NAME);
   const projectConfigPath = path.join(configDirectory, PROJECT_CONFIG_FILE_NAME);
   const readmePath = path.join(configDirectory, INIT_README_FILE_NAME);
+  const gitignorePath = path.join(configDirectory, GITIGNORE_FILE_NAME);
   const projectConfig = buildShrikeProjectConfig({
     policyId: options.policyId,
     model: options.model,
@@ -65,6 +69,7 @@ export async function writeShrikeInitFiles(options: InitWriteOptions): Promise<I
     checksDirectory,
     policyId: options.policyId
   });
+  await ensureConfigGitignore(gitignorePath);
   await fs.writeFile(
     readmePath,
     buildInitReadme({
@@ -81,6 +86,7 @@ export async function writeShrikeInitFiles(options: InitWriteOptions): Promise<I
     opencodeConfigPath,
     projectConfigPath,
     readmePath,
+    gitignorePath,
     seededCheckPaths,
     projectConfig
   };
@@ -139,6 +145,7 @@ export function buildInitReadme(options?: {
     `- \`${checksLabel}/\` stores the project-local Markdown checks that Shrike executes.`,
     `- \`${projectConfigLabel}\` stores repo-local Shrike defaults such as the selected policy and scan settings.`,
     `- \`${opencodeConfigLabel}\` is a Shrike-owned OpenCode overlay for read-only scans.`,
+    `- \`.gitignore\` keeps generated \`${ARTIFACTS_DIRECTORY_NAME}/\` files out of version control.`,
     '- User-global OpenCode config and credentials remain outside this repository.',
     '',
     'Re-run `shrike init` to seed additional checks from a different policy or choose a different model/runtime.',
@@ -179,6 +186,37 @@ async function seedProjectChecksDirectory(options: {
 
 function ensureTrailingNewline(value: string): string {
   return value.endsWith('\n') ? value : `${value}\n`;
+}
+
+async function ensureConfigGitignore(gitignorePath: string): Promise<void> {
+  const existing = await fs.readFile(gitignorePath, 'utf8').catch(() => null);
+  const entry = `${ARTIFACTS_DIRECTORY_NAME}/`;
+
+  if (existing !== null) {
+    const hasEntry = existing
+      .split('\n')
+      .map(line => line.trim())
+      .some(line => line === entry || line === `/${entry}` || line === ARTIFACTS_DIRECTORY_NAME || line === `/${ARTIFACTS_DIRECTORY_NAME}`);
+    if (hasEntry) {
+      return;
+    }
+
+    const next = existing.trimEnd().length > 0
+      ? `${existing.trimEnd()}\n${entry}\n`
+      : `${entry}\n`;
+    await fs.writeFile(gitignorePath, next, 'utf8');
+    return;
+  }
+
+  await fs.writeFile(
+    gitignorePath,
+    [
+      '# OpenShrike generated artifacts',
+      entry,
+      ''
+    ].join('\n'),
+    'utf8'
+  );
 }
 
 function isNotFoundError(error: unknown): boolean {

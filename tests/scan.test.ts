@@ -54,7 +54,7 @@ vi.mock('../src/lib/repo-guard.js', () => ({
   }
 }));
 
-const {runScan} = await import('../src/lib/scan.js');
+const {runNativeScan, runScan} = await import('../src/lib/scan.js');
 
 const tempRoots: string[] = [];
 
@@ -436,6 +436,38 @@ describe('runScan', () => {
       runtimeMode: 'native'
     });
     expect(runtimeEvents[0]?.event.type).toBe('session.status');
+  });
+
+  it('passes internal ignored repo paths to the mutation guard', async () => {
+    const repoRoot = await makeRepoRoot();
+
+    mockResolveScanScope.mockResolvedValue(makeScope({}));
+    mockLoadRuntimeConfig.mockResolvedValue({
+      configPath: '/tmp/opencode.json',
+      config: {},
+      requiredEnvVars: [],
+      missingEnvVars: []
+    });
+    mockRuntimeCreate.mockResolvedValue({
+      close: vi.fn().mockResolvedValue(undefined)
+    });
+    mockRepoGuardCapture.mockResolvedValue({
+      throwIfMutated: vi.fn().mockResolvedValue(undefined)
+    });
+    mockEvaluateCheck.mockResolvedValue(makeCheckResult('check-a', 'pass'));
+
+    await runNativeScan(
+      makeOptions(repoRoot, {checkId: 'check-a'}),
+      {},
+      {
+        runtimeMode: 'docker',
+        ignoredRepoPaths: ['.openshrike/artifacts/docker-123']
+      }
+    );
+
+    expect(mockRepoGuardCapture).toHaveBeenCalledWith(repoRoot, {
+      ignoredPaths: ['.openshrike/artifacts/docker-123']
+    });
   });
 });
 
