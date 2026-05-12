@@ -77,6 +77,7 @@ const OPENCODE_EXECUTION_LAYER_NOTE = 'OpenShrike uses OpenCode as its agent exe
 const MAX_PROGRESS_DETAIL_LINES = 8;
 const DOCKER_RUNTIME_CONTEXT_LABEL = 'io.openshrike.runtime-context-hash';
 const DOCKER_RUNTIME_CONFIG_PATH_LABEL = 'docker-env';
+const DOCKER_OPENCODE_HOME_DIRECTORY_NAME = 'opencode-home';
 
 export interface ScanHooks {
   onProgress?: (event: ScanProgressEvent) => void;
@@ -381,7 +382,10 @@ async function runDockerScan(
     workspaceHostPath: mountPlan.workspaceHostPath,
     hostPaths: [artifactsDir]
   });
-  const opencodeHostAccess = await resolveDockerOpenCodeHostAccess();
+  const opencodeHostAccess = await resolveDockerOpenCodeHostAccess({
+    artifactsDir,
+    runtimeConfig
+  });
   const request: DockerScanRequest = {
     options: {
       ...options,
@@ -418,9 +422,10 @@ async function runDockerScan(
   const dockerEnv: NodeJS.ProcessEnv = {
     ...process.env
   };
-  const containerEnvVars = [
-    ...applyDockerHostEnvironment(dockerEnv, opencodeHostAccess.env)
-  ];
+  const containerEnvVars = dedupeEnvVarNames([
+    ...applyDockerHostEnvironment(dockerEnv, opencodeHostAccess.env),
+    ...opencodeHostAccess.passThroughEnvVarNames
+  ]);
   containerEnvVars.push(...applyGitSafeDirectoryEnv(dockerEnv, mountPlan.safeDirectories));
   if (runtimeConfig) {
     dockerEnv[DOCKER_RUNTIME_CONFIG_ENV] = Buffer.from(
@@ -1011,11 +1016,28 @@ export function resolveDockerRepoVisibleIgnoredPaths(options: {
   );
 }
 
-async function resolveDockerOpenCodeHostAccess(): Promise<{
+export async function resolveDockerOpenCodeHostAccess(options: {
+  artifactsDir: string;
+  runtimeConfig: LoadedRuntimeConfig | null;
+  homePath?: string;
+}): Promise<{
   env: Record<string, string>;
   mounts: DockerBindMount[];
+  passThroughEnvVarNames: string[];
 }> {
-  const homePath = path.resolve(os.homedir());
+  const runtimeHomeHostPath = path.join(
+    path.resolve(options.artifactsDir),
+    DOCKER_OPENCODE_HOME_DIRECTORY_NAME
+  );
+  const runtimeHomeContainerPath = path.posix.join('/io', DOCKER_OPENCODE_HOME_DIRECTORY_NAME);
+  await Promise.all([
+    fs.mkdir(path.join(runtimeHomeHostPath, '.config', 'opencode'), {recursive: true}),
+    fs.mkdir(path.join(runtimeHomeHostPath, '.local', 'share', 'opencode'), {recursive: true}),
+    fs.mkdir(path.join(runtimeHomeHostPath, '.local', 'state'), {recursive: true}),
+    fs.mkdir(path.join(runtimeHomeHostPath, '.cache'), {recursive: true})
+  ]);
+
+  const homePath = path.resolve(options.homePath ?? os.homedir());
   const configDirPath = path.join(homePath, '.config', 'opencode');
   const dataDirPath = path.join(homePath, '.local', 'share', 'opencode');
   const [hasConfigDir, hasDataDir] = await Promise.all([
@@ -1023,31 +1045,27 @@ async function resolveDockerOpenCodeHostAccess(): Promise<{
     pathIsDirectory(dataDirPath)
   ]);
 
-  if (!hasConfigDir && !hasDataDir) {
-    return {
-      env: {},
-      mounts: []
-    };
-  }
-
   return {
     env: {
-      HOME: homePath,
-      XDG_CONFIG_HOME: path.join(homePath, '.config'),
-      XDG_DATA_HOME: path.join(homePath, '.local', 'share')
+      HOME: runtimeHomeContainerPath,
+      XDG_CONFIG_HOME: path.posix.join(runtimeHomeContainerPath, '.config'),
+      XDG_DATA_HOME: path.posix.join(runtimeHomeContainerPath, '.local', 'share'),
+      XDG_STATE_HOME: path.posix.join(runtimeHomeContainerPath, '.local', 'state'),
+      XDG_CACHE_HOME: path.posix.join(runtimeHomeContainerPath, '.cache')
     },
     mounts: dedupeDockerMounts([
       ...(hasConfigDir ? [{
         source: configDirPath,
-        target: configDirPath,
+        target: path.posix.join(runtimeHomeContainerPath, '.config', 'opencode'),
         readonly: true
       } satisfies DockerBindMount] : []),
       ...(hasDataDir ? [{
         source: dataDirPath,
-        target: dataDirPath,
+        target: path.posix.join(runtimeHomeContainerPath, '.local', 'share', 'opencode'),
         readonly: false
       } satisfies DockerBindMount] : [])
-    ])
+    ]),
+    passThroughEnvVarNames: collectDockerPassThroughEnvVarNames(options.runtimeConfig)
   };
 }
 
@@ -1226,8 +1244,23 @@ function dedupeDockerMounts(mounts: DockerBindMount[]): DockerBindMount[] {
   return result;
 }
 
+function dedupeEnvVarNames(names: string[]): string[] {
+  return [...new Set(names)];
+}
+
 function formatDockerBindMount(mount: DockerBindMount): string {
   return `type=bind,src=${mount.source},dst=${mount.target}${mount.readonly ? ',readonly' : ''}`;
+}
+
+function collectDockerPassThroughEnvVarNames(
+  runtimeConfig: LoadedRuntimeConfig | null
+): string[] {
+  return [...new Set(runtimeConfig?.requiredEnvVars ?? [])]
+    .filter(name => {
+      const value = process.env[name];
+      return typeof value === 'string' && value.length > 0;
+    })
+    .sort((left, right) => left.localeCompare(right));
 }
 
 function normalizeLineBreaks(value: string): string {

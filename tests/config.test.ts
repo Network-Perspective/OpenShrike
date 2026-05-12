@@ -51,6 +51,41 @@ describe('runtime config', () => {
     expect(loaded.config.provider?.azure?.options?.apiKey).toBe('secret');
   });
 
+  it('resolves OpenCode env placeholders and tracks required env vars', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-config-'));
+    tempDirectories.push(tempRoot);
+
+    const configPath = path.join(tempRoot, 'opencode.json');
+    process.env.TEST_OPENSHRIKE_KEY = 'secret';
+    process.env.TEST_OPENSHRIKE_RESOURCE = 'example-resource';
+
+    await fs.writeFile(
+      configPath,
+      `${serializeConfig({
+        model: 'azure/gpt-5.4-mini',
+        provider: {
+          azure: {
+            options: {
+              apiKey: '{env:TEST_OPENSHRIKE_KEY}',
+              resourceName: '{env:TEST_OPENSHRIKE_RESOURCE}'
+            }
+          }
+        }
+      })}\n`,
+      'utf8'
+    );
+
+    const loaded = await loadRuntimeConfig(configPath, {
+      agent: 'shrike-checker',
+      model: 'azure/gpt-5.4-mini'
+    });
+
+    expect(loaded.requiredEnvVars).toEqual(['TEST_OPENSHRIKE_KEY', 'TEST_OPENSHRIKE_RESOURCE']);
+    expect(loaded.missingEnvVars).toHaveLength(0);
+    expect(loaded.config.provider?.azure?.options?.apiKey).toBe('secret');
+    expect(loaded.config.provider?.azure?.options?.resourceName).toBe('example-resource');
+  });
+
   it('normalizes Azure v1 baseURL and apiVersion options', async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-config-'));
     tempDirectories.push(tempRoot);
