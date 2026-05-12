@@ -1,6 +1,27 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "azure/gpt-5.4-mini",
+  "provider": {
+    "azure": {
+      "npm": "@ai-sdk/azure",
+      "name": "Azure OpenAI",
+      "models": {
+        "azure/gpt-5.3-codex": {
+          "name": "gpt-5.3-codex"
+        },
+        "azure/gpt-5.4-pro": {
+          "name": "gpt-5.4-pro"
+        },
+        "azure/gpt-5.4-mini": {
+          "name": "gpt-5.4-mini"
+        }
+      },      
+      "options": {
+        "apiKey": "{env:AZURE_OPENAI_API_KEY}",
+        "resourceName": "{env:AZURE_RESOURCE_PREFIX}"
+      }
+    }    
+  },
   "permission": {
     "bash": "allow",
     "edit": "deny",

@@ -11,6 +11,7 @@ import {
 import {findToolRoot} from './project-root.js';
 
 const ENV_PATTERN = /\$\{([A-Z0-9_]+)\}/g;
+const OPENCODE_ENV_PATTERN = /\{env:([A-Z0-9_]+)\}/g;
 const runtimeConfigSchema = z
   .object({
     $schema: z.string().optional(),
@@ -176,11 +177,8 @@ function collectEnvPlaceholders(value: unknown): string[] {
       return;
     }
 
-    for (const match of node.matchAll(ENV_PATTERN)) {
-      if (match[1]) {
-        found.add(match[1]);
-      }
-    }
+    collectPlaceholderMatches(node, ENV_PATTERN, found);
+    collectPlaceholderMatches(node, OPENCODE_ENV_PATTERN, found);
   });
 
   return [...found];
@@ -307,10 +305,24 @@ function resolveEnvPlaceholders<T>(value: T): T {
   }
 
   if (typeof value === 'string') {
-    return value.replaceAll(ENV_PATTERN, (_, envVar: string) => process.env[envVar] ?? `\${${envVar}}`) as T;
+    return value
+      .replaceAll(ENV_PATTERN, (_, envVar: string) => process.env[envVar] ?? `\${${envVar}}`)
+      .replaceAll(OPENCODE_ENV_PATTERN, (_, envVar: string) => process.env[envVar] ?? `{env:${envVar}}`) as T;
   }
 
   return value;
+}
+
+function collectPlaceholderMatches(
+  value: string,
+  pattern: RegExp,
+  found: Set<string>
+): void {
+  for (const match of value.matchAll(pattern)) {
+    if (match[1]) {
+      found.add(match[1]);
+    }
+  }
 }
 
 function visit(value: unknown, callback: (value: unknown) => void): void {

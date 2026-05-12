@@ -84,6 +84,7 @@ export interface ScanScopeContext {
 }
 
 export type ScanProgressEventType =
+  | 'runtime-status'
   | 'scope-resolved'
   | 'no-changes-in-scope'
   | 'check-started'
@@ -106,6 +107,8 @@ export interface ScanProgressEvent {
   completedCount: number;
   totalChecks: number;
   runningCheckIds: string[];
+  statusLabel: string;
+  detailLines: string[];
 }
 
 export interface SerializedRuntimeEvent {

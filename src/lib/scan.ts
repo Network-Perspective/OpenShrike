@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -5,7 +6,9 @@ import path from 'node:path';
 import type {Event} from '@opencode-ai/sdk';
 import {CliError} from './cli-error.js';
 import {
+  ARTIFACTS_DIRECTORY_NAME,
   CHECK_EVALUATION_MAX_ATTEMPTS,
+  CONFIG_DIRECTORY_NAME,
   DEFAULT_AGENT_NAME,
   DEFAULT_DOCKER_IMAGE,
   DEFAULT_MODEL,
@@ -45,6 +48,7 @@ import type {
 interface NativeScanExecutionOptions {
   runtimeMode: RuntimeMode;
   runtimeConfigOverride?: LoadedRuntimeConfig | null | undefined;
+  ignoredRepoPaths?: string[] | undefined;
 }
 
 interface ProgressState {
@@ -53,8 +57,27 @@ interface ProgressState {
   completedCount: number;
 }
 
+interface DockerBindMount {
+  source: string;
+  target: string;
+  readonly: boolean;
+}
+
+interface GitRepositoryContext {
+  worktreeRootHostPath: string;
+  gitDirHostPath: string;
+  gitCommonDirHostPath: string;
+  gitDirReference: string | null;
+  commonDirReference: string | null;
+  usesLinkedGitDir: boolean;
+}
+
 const OPENCODE_PROVIDERS_DOCS_URL = 'https://opencode.ai/docs/providers/';
 const OPENCODE_EXECUTION_LAYER_NOTE = 'OpenShrike uses OpenCode as its agent execution layer, so scans cannot run until OpenCode is configured correctly.';
+const MAX_PROGRESS_DETAIL_LINES = 8;
+const DOCKER_RUNTIME_CONTEXT_LABEL = 'io.openshrike.runtime-context-hash';
+const DOCKER_RUNTIME_CONFIG_PATH_LABEL = 'docker-env';
+const DOCKER_OPENCODE_HOME_DIRECTORY_NAME = 'opencode-home';
 
 export interface ScanHooks {
   onProgress?: (event: ScanProgressEvent) => void;
@@ -219,7 +242,10 @@ export async function runNativeScan(
         })
       : null;
 
-    const ignoredRepoPaths = resolveIgnoredRepoPaths(repoFullPath, logger?.path);
+    const ignoredRepoPaths = dedupeIgnoredRepoPaths([
+      ...resolveIgnoredRepoPaths(repoFullPath, logger?.path, options.artifactsDir),
+      ...(executionOptions.ignoredRepoPaths ?? [])
+    ]);
 
     try {
       await runChecks({
@@ -339,9 +365,10 @@ async function runDockerScan(
     throw createMissingEnvironmentCliError(runtimeConfig, model);
   }
 
+  const progressTracker = createRuntimePreparationTracker(hooks);
   const imageRef = options.image?.trim() || DEFAULT_DOCKER_IMAGE;
   if (!options.image) {
-    await ensureDockerRuntimeImage(imageRef);
+    await ensureDockerRuntimeImage(imageRef, progressTracker);
   }
 
   const artifactsDir = await resolveDockerArtifactsDirectory(options);
@@ -349,22 +376,30 @@ async function runDockerScan(
   const reportHostPath = path.join(artifactsDir, DOCKER_SCAN_REPORT_FILE);
   const logHostPath = path.join(artifactsDir, path.basename(options.logPath ?? DOCKER_SCAN_LOG_FILE));
   const projectChecksHostPath = options.projectChecksDir ? path.resolve(options.projectChecksDir) : null;
-  const workspaceHostPath = resolveDockerWorkspaceHostPath(repoFullPath, projectChecksHostPath);
-  const repoContainerPath = resolveDockerWorkspacePath(workspaceHostPath, repoFullPath);
-  const projectChecksContainerPath = projectChecksHostPath
-    ? resolveDockerWorkspacePath(workspaceHostPath, projectChecksHostPath)
-    : undefined;
+  const mountPlan = await resolveDockerRuntimeMountPlan(repoFullPath, projectChecksHostPath);
+  const ignoredRepoPaths = resolveDockerRepoVisibleIgnoredPaths({
+    repoContainerPath: mountPlan.repoContainerPath,
+    workspaceHostPath: mountPlan.workspaceHostPath,
+    hostPaths: [artifactsDir]
+  });
+  const opencodeHostAccess = await resolveDockerOpenCodeHostAccess({
+    artifactsDir,
+    runtimeConfig
+  });
   const request: DockerScanRequest = {
     options: {
       ...options,
-      repoPath: repoContainerPath,
-      ...(projectChecksContainerPath ? {projectChecksDir: projectChecksContainerPath} : {}),
+      repoPath: mountPlan.repoContainerPath,
+      ...(mountPlan.projectChecksContainerPath
+        ? {projectChecksDir: mountPlan.projectChecksContainerPath}
+        : {}),
       runtimeMode: 'docker',
       logPath: '/io/' + path.basename(logHostPath),
       artifactsDir: '/io',
       ui: false
     },
-    reportPath: '/io/' + path.basename(reportHostPath)
+    reportPath: '/io/' + path.basename(reportHostPath),
+    ignoredRepoPaths
   };
 
   await fs.writeFile(requestHostPath, `${JSON.stringify(request, null, 2)}\n`, 'utf8');
@@ -372,21 +407,36 @@ async function runDockerScan(
   const dockerArgs = [
     'run',
     '--rm',
-    '--mount', `type=bind,src=${workspaceHostPath},dst=/workspace/repo,readonly`,
+    '--mount', `type=bind,src=${mountPlan.workspaceHostPath},dst=/workspace/repo,readonly`,
     '--mount', `type=bind,src=${artifactsDir},dst=/io`,
     '--workdir', '/workspace/tool'
   ];
+  mountPlan.extraMounts.forEach(mount => {
+    dockerArgs.push('--mount', formatDockerBindMount(mount));
+  });
+  opencodeHostAccess.mounts.forEach(mount => {
+    dockerArgs.push('--mount', formatDockerBindMount(mount));
+  });
+  applyDockerUserIdentity(dockerArgs);
 
   const dockerEnv: NodeJS.ProcessEnv = {
     ...process.env
   };
+  const containerEnvVars = dedupeEnvVarNames([
+    ...applyDockerHostEnvironment(dockerEnv, opencodeHostAccess.env),
+    ...opencodeHostAccess.passThroughEnvVarNames
+  ]);
+  containerEnvVars.push(...applyGitSafeDirectoryEnv(dockerEnv, mountPlan.safeDirectories));
   if (runtimeConfig) {
     dockerEnv[DOCKER_RUNTIME_CONFIG_ENV] = Buffer.from(
       JSON.stringify(runtimeConfig.config),
       'utf8'
     ).toString('base64');
-    dockerArgs.push('-e', DOCKER_RUNTIME_CONFIG_ENV);
+    containerEnvVars.push(DOCKER_RUNTIME_CONFIG_ENV);
   }
+  containerEnvVars.forEach(name => {
+    dockerArgs.push('-e', name);
+  });
   dockerArgs.push(
     imageRef,
     'node',
@@ -398,16 +448,16 @@ async function runDockerScan(
   );
 
   const stdoutLines: string[] = [];
-  const stderrChunks: string[] = [];
+  const stderrLines: string[] = [];
+  let workerReady = false;
 
+  progressTracker.setStatus(`Starting Docker worker (${imageRef})`);
   await new Promise<void>((resolve, reject) => {
     const child = spawn('docker', dockerArgs, {
       cwd: findToolRoot(),
       env: dockerEnv,
       stdio: ['ignore', 'pipe', 'pipe']
     });
-
-    let stdoutBuffer = '';
 
     const handleStdoutLine = (line: string) => {
       if (!line) {
@@ -417,9 +467,13 @@ async function runDockerScan(
       const wireMessage = tryDecodeDockerWireMessage(line);
       if (!wireMessage) {
         stdoutLines.push(line);
+        if (!workerReady) {
+          progressTracker.pushLine(line);
+        }
         return;
       }
 
+      workerReady = true;
       if (wireMessage.kind === 'progress') {
         hooks.onProgress?.(wireMessage.event);
         return;
@@ -428,30 +482,26 @@ async function runDockerScan(
       hooks.onRuntimeEvent?.(wireMessage.event);
     };
 
-    child.stdout.on('data', chunk => {
-      stdoutBuffer += chunk.toString();
-
-      while (true) {
-        const newlineIndex = stdoutBuffer.indexOf('\n');
-        if (newlineIndex < 0) {
-          break;
-        }
-
-        const line = stdoutBuffer.slice(0, newlineIndex).trimEnd();
-        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
-        handleStdoutLine(line);
+    const stdoutBuffer = createLineBuffer(handleStdoutLine);
+    const stderrBuffer = createLineBuffer(line => {
+      stderrLines.push(line);
+      if (!workerReady) {
+        progressTracker.pushLine(line);
       }
     });
 
+    child.stdout.on('data', chunk => {
+      stdoutBuffer.push(chunk);
+    });
+
     child.stderr.on('data', chunk => {
-      stderrChunks.push(chunk.toString());
+      stderrBuffer.push(chunk);
     });
 
     child.on('error', reject);
     child.on('close', code => {
-      if (stdoutBuffer.trim()) {
-        handleStdoutLine(stdoutBuffer.trimEnd());
-      }
+      stdoutBuffer.flush();
+      stderrBuffer.flush();
 
       if (code === 0 || code === 2) {
         resolve();
@@ -462,7 +512,7 @@ async function runDockerScan(
         new Error(
           [
             `Docker scan worker exited with code ${code}.`,
-            stderrChunks.join('').trim(),
+            stderrLines.join('\n').trim(),
             stdoutLines.join('\n').trim()
           ].filter(Boolean).join('\n')
         )
@@ -501,26 +551,58 @@ async function runDockerScan(
   };
 }
 
-async function ensureDockerRuntimeImage(imageRef: string): Promise<void> {
+async function ensureDockerRuntimeImage(
+  imageRef: string,
+  progressTracker: ReturnType<typeof createRuntimePreparationTracker>
+): Promise<void> {
   const toolRoot = findToolRoot();
   const dockerfilePath = path.join(toolRoot, 'docker', 'openshrike-runtime.Dockerfile');
+  const runtimeContextHash = await computeDockerRuntimeContextHash(toolRoot);
 
+  progressTracker.setStatus(`Checking Docker runtime image (${imageRef})`);
   try {
-    await runProcess('docker', ['image', 'inspect', imageRef], {
+    const {stdout} = await runProcess('docker', [
+      'image',
+      'inspect',
+      '--format',
+      `{{ index .Config.Labels "${DOCKER_RUNTIME_CONTEXT_LABEL}" }}`,
+      imageRef
+    ], {
       cwd: toolRoot,
       env: process.env
     });
-    return;
+
+    if (stdout.trim() === runtimeContextHash) {
+      return;
+    }
   } catch {
-    await fs.access(dockerfilePath);
-    await runProcess('docker', ['build', '-t', imageRef, '-f', dockerfilePath, '.'], {
-      cwd: toolRoot,
-      env: process.env
-    });
+    // Missing image falls through to rebuild.
   }
+
+  await fs.access(dockerfilePath);
+  progressTracker.setStatus(`Preparing Docker image (${imageRef})`);
+  await runStreamingProcess('docker', [
+    'build',
+    '--label',
+    `${DOCKER_RUNTIME_CONTEXT_LABEL}=${runtimeContextHash}`,
+    '-t',
+    imageRef,
+    '-f',
+    dockerfilePath,
+    '.'
+  ], {
+    cwd: toolRoot,
+    env: process.env,
+    onStdoutLine: line => {
+      progressTracker.pushLine(line);
+    },
+    onStderrLine: line => {
+      progressTracker.pushLine(line);
+    }
+  });
 }
 
-async function resolveDockerArtifactsDirectory(options: ScanCommandOptions): Promise<string> {
+export async function resolveDockerArtifactsDirectory(options: ScanCommandOptions): Promise<string> {
   if (options.artifactsDir) {
     const resolved = path.resolve(options.artifactsDir);
     await fs.mkdir(resolved, {recursive: true});
@@ -534,16 +616,225 @@ async function resolveDockerArtifactsDirectory(options: ScanCommandOptions): Pro
   }
 
   const repoRoot = path.resolve(options.repoPath);
-  const gitDirectory = path.join(repoRoot, '.git');
-  const gitDirectoryExists = await fs.stat(gitDirectory).then(
-    stats => stats.isDirectory(),
-    () => false
-  );
-  const baseDirectory = gitDirectoryExists
-    ? path.join(gitDirectory, 'openshrike-artifacts')
-    : path.join(repoRoot, '.openshrike-artifacts');
+  const baseDirectory = path.join(repoRoot, CONFIG_DIRECTORY_NAME, ARTIFACTS_DIRECTORY_NAME);
   await fs.mkdir(baseDirectory, {recursive: true});
   return await fs.mkdtemp(path.join(baseDirectory, 'docker-'));
+}
+
+function createRuntimePreparationTracker(hooks: ScanHooks) {
+  let statusLabel = 'Preparing Docker runtime';
+  const detailLines: string[] = [];
+  let lastSnapshot = '';
+
+  const emit = () => {
+    const event = {
+      type: 'runtime-status' as const,
+      scopeLabel: 'Preparing Docker runtime',
+      scopeFileCount: 0,
+      isFullRepository: false,
+      checkIds: [],
+      checkId: null,
+      workerId: null,
+      checkStatus: null,
+      checkResult: null,
+      passedCount: 0,
+      failedCount: 0,
+      unknownCount: 0,
+      checkIndex: 0,
+      completedCount: 0,
+      totalChecks: 0,
+      runningCheckIds: [],
+      statusLabel,
+      detailLines: [...detailLines]
+    } satisfies ScanProgressEvent;
+
+    const snapshot = JSON.stringify({
+      statusLabel: event.statusLabel,
+      detailLines: event.detailLines
+    });
+    if (snapshot === lastSnapshot) {
+      return;
+    }
+
+    lastSnapshot = snapshot;
+    hooks.onProgress?.(event);
+  };
+
+  return {
+    setStatus(nextStatusLabel: string) {
+      statusLabel = nextStatusLabel;
+      emit();
+    },
+    pushLine(line: string) {
+      const normalized = sanitizeProgressLine(line);
+      if (!normalized) {
+        return;
+      }
+
+      detailLines.push(normalized);
+      if (detailLines.length > MAX_PROGRESS_DETAIL_LINES) {
+        detailLines.splice(0, detailLines.length - MAX_PROGRESS_DETAIL_LINES);
+      }
+
+      emit();
+    }
+  };
+}
+
+function createLineBuffer(onLine: (line: string) => void): {
+  push: (chunk: Buffer | string) => void;
+  flush: () => void;
+} {
+  let buffer = '';
+
+  const flushCompleteLines = () => {
+    while (true) {
+      const newlineIndex = buffer.indexOf('\n');
+      if (newlineIndex < 0) {
+        return;
+      }
+
+      const line = buffer.slice(0, newlineIndex).trimEnd();
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line) {
+        onLine(line);
+      }
+    }
+  };
+
+  return {
+    push(chunk: Buffer | string) {
+      buffer += normalizeLineBreaks(chunk.toString());
+      flushCompleteLines();
+    },
+    flush() {
+      const line = buffer.trim();
+      buffer = '';
+      if (line) {
+        onLine(line);
+      }
+    }
+  };
+}
+
+async function runStreamingProcess(
+  command: string,
+  args: string[],
+  options: {
+    cwd: string;
+    env?: NodeJS.ProcessEnv;
+    allowedExitCodes?: number[];
+    onStdoutLine?: (line: string) => void;
+    onStderrLine?: (line: string) => void;
+  }
+): Promise<void> {
+  return await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    const stdoutLines: string[] = [];
+    const stderrLines: string[] = [];
+    const stdoutBuffer = createLineBuffer(line => {
+      stdoutLines.push(line);
+      options.onStdoutLine?.(line);
+    });
+    const stderrBuffer = createLineBuffer(line => {
+      stderrLines.push(line);
+      options.onStderrLine?.(line);
+    });
+
+    child.stdout.on('data', chunk => {
+      stdoutBuffer.push(chunk);
+    });
+
+    child.stderr.on('data', chunk => {
+      stderrBuffer.push(chunk);
+    });
+
+    child.on('error', reject);
+    child.on('close', code => {
+      stdoutBuffer.flush();
+      stderrBuffer.flush();
+
+      const allowedExitCodes = options.allowedExitCodes ?? [0];
+      if (allowedExitCodes.includes(code ?? -1)) {
+        resolve();
+        return;
+      }
+
+      reject(
+        new Error(
+          `Command failed (${command} ${args.join(' ')}): ${
+            stderrLines.join('\n').trim()
+            || stdoutLines.join('\n').trim()
+            || `exit code ${code}`
+          }`
+        )
+      );
+    });
+  });
+}
+
+async function computeDockerRuntimeContextHash(toolRoot: string): Promise<string> {
+  const hash = createHash('sha256');
+  const includedPaths = [
+    'docker/openshrike-runtime.Dockerfile',
+    'package.json',
+    'package-lock.json',
+    'tsconfig.json',
+    'vitest.config.ts',
+    'src',
+    'best_practices',
+    'docs'
+  ];
+
+  for (const relativePath of includedPaths) {
+    const absolutePath = path.join(toolRoot, relativePath);
+    const stats = await fs.stat(absolutePath);
+
+    if (stats.isDirectory()) {
+      const files = await collectFilesRecursively(absolutePath);
+      for (const filePath of files) {
+        await appendFileHash(hash, toolRoot, filePath);
+      }
+      continue;
+    }
+
+    if (stats.isFile()) {
+      await appendFileHash(hash, toolRoot, absolutePath);
+    }
+  }
+
+  return hash.digest('hex');
+}
+
+async function collectFilesRecursively(directoryPath: string): Promise<string[]> {
+  const entries = await fs.readdir(directoryPath, {withFileTypes: true});
+  const files = await Promise.all(entries.map(async entry => {
+    const absolutePath = path.join(directoryPath, entry.name);
+    if (entry.isDirectory()) {
+      return await collectFilesRecursively(absolutePath);
+    }
+
+    return entry.isFile() ? [absolutePath] : [];
+  }));
+
+  return files.flat().sort((left, right) => left.localeCompare(right));
+}
+
+async function appendFileHash(
+  hash: ReturnType<typeof createHash>,
+  rootPath: string,
+  filePath: string
+): Promise<void> {
+  const relativePath = path.relative(rootPath, filePath).replaceAll(path.sep, '/');
+  hash.update(relativePath);
+  hash.update('\0');
+  hash.update(await fs.readFile(filePath));
+  hash.update('\0');
 }
 
 async function runChecks(options: {
@@ -619,6 +910,47 @@ async function resolveScanCheckSelection(options: ScanCommandOptions): Promise<{
   };
 }
 
+export async function resolveDockerRuntimeMountPlan(
+  repoPath: string,
+  projectChecksPath: string | null
+): Promise<{
+  workspaceHostPath: string;
+  repoContainerPath: string;
+  projectChecksContainerPath?: string;
+  safeDirectories: string[];
+  extraMounts: DockerBindMount[];
+}> {
+  const repoFullPath = path.resolve(repoPath);
+  const resolvedProjectChecksPath = projectChecksPath ? path.resolve(projectChecksPath) : null;
+  const repoContext = await resolveGitRepositoryContext(repoFullPath);
+  const workspaceAnchorHostPath = repoContext?.worktreeRootHostPath ?? repoFullPath;
+  const workspaceHostPath = resolveDockerWorkspaceHostPath(
+    workspaceAnchorHostPath,
+    resolvedProjectChecksPath
+  );
+  const repoContainerPath = resolveDockerWorkspacePath(workspaceHostPath, repoFullPath);
+  const projectChecksContainerPath = resolvedProjectChecksPath
+    ? resolveDockerWorkspacePath(workspaceHostPath, resolvedProjectChecksPath)
+    : undefined;
+  const worktreeRootContainerPath = repoContext
+    ? resolveDockerWorkspacePath(workspaceHostPath, repoContext.worktreeRootHostPath)
+    : null;
+  const safeDirectories = dedupeIgnoredRepoPaths([
+    repoContainerPath,
+    ...(worktreeRootContainerPath ? [worktreeRootContainerPath] : [])
+  ]);
+
+  return {
+    workspaceHostPath,
+    repoContainerPath,
+    ...(projectChecksContainerPath ? {projectChecksContainerPath} : {}),
+    safeDirectories,
+    extraMounts: repoContext && worktreeRootContainerPath
+      ? resolveDockerGitMetadataMounts(repoContext, worktreeRootContainerPath)
+      : []
+  };
+}
+
 function resolveDockerWorkspaceHostPath(
   repoFullPath: string,
   projectChecksPath: string | null
@@ -652,6 +984,299 @@ function resolveDockerWorkspacePath(workspaceHostPath: string, targetHostPath: s
     : '/workspace/repo';
 }
 
+export function resolveDockerRepoVisibleIgnoredPaths(options: {
+  repoContainerPath: string;
+  workspaceHostPath: string;
+  hostPaths: string[];
+}): string[] {
+  return dedupeIgnoredRepoPaths(
+    options.hostPaths.flatMap(hostPath => {
+      const resolvedHostPath = path.resolve(hostPath);
+      const relativeToWorkspace = path.relative(options.workspaceHostPath, resolvedHostPath);
+      if (
+        !relativeToWorkspace ||
+        relativeToWorkspace.startsWith('..') ||
+        path.isAbsolute(relativeToWorkspace)
+      ) {
+        return [];
+      }
+
+      const containerPath = resolveDockerWorkspacePath(options.workspaceHostPath, resolvedHostPath);
+      const relativeToRepo = path.posix.relative(options.repoContainerPath, containerPath);
+      if (
+        !relativeToRepo ||
+        relativeToRepo.startsWith('..') ||
+        path.posix.isAbsolute(relativeToRepo)
+      ) {
+        return [];
+      }
+
+      return [normalizeRelativePath(relativeToRepo)];
+    })
+  );
+}
+
+export async function resolveDockerOpenCodeHostAccess(options: {
+  artifactsDir: string;
+  runtimeConfig: LoadedRuntimeConfig | null;
+  homePath?: string;
+}): Promise<{
+  env: Record<string, string>;
+  mounts: DockerBindMount[];
+  passThroughEnvVarNames: string[];
+}> {
+  const runtimeHomeHostPath = path.join(
+    path.resolve(options.artifactsDir),
+    DOCKER_OPENCODE_HOME_DIRECTORY_NAME
+  );
+  const runtimeHomeContainerPath = path.posix.join('/io', DOCKER_OPENCODE_HOME_DIRECTORY_NAME);
+  await Promise.all([
+    fs.mkdir(path.join(runtimeHomeHostPath, '.config', 'opencode'), {recursive: true}),
+    fs.mkdir(path.join(runtimeHomeHostPath, '.local', 'share', 'opencode'), {recursive: true}),
+    fs.mkdir(path.join(runtimeHomeHostPath, '.local', 'state'), {recursive: true}),
+    fs.mkdir(path.join(runtimeHomeHostPath, '.cache'), {recursive: true})
+  ]);
+
+  const homePath = path.resolve(options.homePath ?? os.homedir());
+  const configDirPath = path.join(homePath, '.config', 'opencode');
+  const dataDirPath = path.join(homePath, '.local', 'share', 'opencode');
+  const [hasConfigDir, hasDataDir] = await Promise.all([
+    pathIsDirectory(configDirPath),
+    pathIsDirectory(dataDirPath)
+  ]);
+
+  return {
+    env: {
+      HOME: runtimeHomeContainerPath,
+      XDG_CONFIG_HOME: path.posix.join(runtimeHomeContainerPath, '.config'),
+      XDG_DATA_HOME: path.posix.join(runtimeHomeContainerPath, '.local', 'share'),
+      XDG_STATE_HOME: path.posix.join(runtimeHomeContainerPath, '.local', 'state'),
+      XDG_CACHE_HOME: path.posix.join(runtimeHomeContainerPath, '.cache')
+    },
+    mounts: dedupeDockerMounts([
+      ...(hasConfigDir ? [{
+        source: configDirPath,
+        target: path.posix.join(runtimeHomeContainerPath, '.config', 'opencode'),
+        readonly: true
+      } satisfies DockerBindMount] : []),
+      ...(hasDataDir ? [{
+        source: dataDirPath,
+        target: path.posix.join(runtimeHomeContainerPath, '.local', 'share', 'opencode'),
+        readonly: false
+      } satisfies DockerBindMount] : [])
+    ]),
+    passThroughEnvVarNames: collectDockerPassThroughEnvVarNames(options.runtimeConfig)
+  };
+}
+
+async function pathIsDirectory(candidatePath: string): Promise<boolean> {
+  return await fs.stat(candidatePath).then(
+    stats => stats.isDirectory(),
+    () => false
+  );
+}
+
+function applyDockerHostEnvironment(
+  env: NodeJS.ProcessEnv,
+  values: Record<string, string>
+): string[] {
+  const names: string[] = [];
+  for (const [name, value] of Object.entries(values)) {
+    env[name] = value;
+    names.push(name);
+  }
+
+  return names;
+}
+
+function applyGitSafeDirectoryEnv(
+  env: NodeJS.ProcessEnv,
+  safeDirectories: string[]
+): string[] {
+  const envVarNames: string[] = [];
+  const baseCount = Number.parseInt(env.GIT_CONFIG_COUNT ?? '', 10);
+  let nextIndex = Number.isFinite(baseCount) && baseCount >= 0 ? baseCount : 0;
+
+  for (const safeDirectory of safeDirectories) {
+    const keyName = `GIT_CONFIG_KEY_${nextIndex}`;
+    const valueName = `GIT_CONFIG_VALUE_${nextIndex}`;
+    env[keyName] = 'safe.directory';
+    env[valueName] = safeDirectory;
+    envVarNames.push(keyName, valueName);
+    nextIndex += 1;
+  }
+
+  env.GIT_CONFIG_COUNT = String(nextIndex);
+  envVarNames.unshift('GIT_CONFIG_COUNT');
+  return envVarNames;
+}
+
+function applyDockerUserIdentity(dockerArgs: string[]): void {
+  if (typeof process.getuid !== 'function' || typeof process.getgid !== 'function') {
+    return;
+  }
+
+  dockerArgs.push('--user', `${process.getuid()}:${process.getgid()}`);
+}
+
+async function resolveGitRepositoryContext(repoPath: string): Promise<GitRepositoryContext | null> {
+  try {
+    const {stdout} = await runProcess('git', [
+      '-C',
+      repoPath,
+      'rev-parse',
+      '--show-toplevel',
+      '--absolute-git-dir',
+      '--path-format=absolute',
+      '--git-common-dir'
+    ], {
+      cwd: repoPath
+    });
+    const lines = stdout
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean);
+    const [worktreeRootHostPath, gitDirHostPath, gitCommonDirHostPath] = lines;
+    if (!worktreeRootHostPath || !gitDirHostPath || !gitCommonDirHostPath) {
+      return null;
+    }
+
+    const gitDirReference = await readGitDirReference(path.join(worktreeRootHostPath, '.git'));
+    const commonDirReference = await readGitPathReference(path.join(gitDirHostPath, 'commondir'));
+
+    return {
+      worktreeRootHostPath: path.resolve(worktreeRootHostPath),
+      gitDirHostPath: path.resolve(gitDirHostPath),
+      gitCommonDirHostPath: path.resolve(gitCommonDirHostPath),
+      gitDirReference,
+      commonDirReference,
+      usesLinkedGitDir: gitDirReference !== null
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function readGitDirReference(filePath: string): Promise<string | null> {
+  const isFile = await fs.stat(filePath).then(
+    stats => stats.isFile(),
+    () => false
+  );
+  if (!isFile) {
+    return null;
+  }
+
+  const raw = await fs.readFile(filePath, 'utf8');
+  const match = raw.match(/^\s*gitdir:\s*(.+)\s*$/imu);
+  return match?.[1]?.trim() || null;
+}
+
+async function readGitPathReference(filePath: string): Promise<string | null> {
+  const raw = await fs.readFile(filePath, 'utf8').catch(() => null);
+  if (!raw) {
+    return null;
+  }
+
+  return raw
+    .split('\n')
+    .map(line => line.trim())
+    .find(Boolean) ?? null;
+}
+
+function resolveDockerGitMetadataMounts(
+  context: GitRepositoryContext,
+  worktreeRootContainerPath: string
+): DockerBindMount[] {
+  if (!context.usesLinkedGitDir || !context.gitDirReference) {
+    return [];
+  }
+
+  const gitDirContainerPath = resolveContainerReferencePath(
+    worktreeRootContainerPath,
+    context.gitDirReference
+  );
+  const mounts: DockerBindMount[] = [
+    {
+      source: context.gitDirHostPath,
+      target: gitDirContainerPath,
+      readonly: true
+    }
+  ];
+
+  if (context.commonDirReference) {
+    mounts.push({
+      source: context.gitCommonDirHostPath,
+      target: resolveContainerReferencePath(gitDirContainerPath, context.commonDirReference),
+      readonly: true
+    });
+  } else if (context.gitCommonDirHostPath !== context.gitDirHostPath) {
+    mounts.push({
+      source: context.gitCommonDirHostPath,
+      target: context.gitCommonDirHostPath,
+      readonly: true
+    });
+  }
+
+  return dedupeDockerMounts(mounts);
+}
+
+function resolveContainerReferencePath(baseContainerPath: string, reference: string): string {
+  const normalizedReference = reference.replaceAll('\\', '/');
+  return path.posix.isAbsolute(normalizedReference)
+    ? path.posix.normalize(normalizedReference)
+    : path.posix.normalize(path.posix.resolve(baseContainerPath, normalizedReference));
+}
+
+function dedupeDockerMounts(mounts: DockerBindMount[]): DockerBindMount[] {
+  const result: DockerBindMount[] = [];
+  const seen = new Set<string>();
+
+  for (const mount of mounts) {
+    const key = `${mount.source}\u0000${mount.target}\u0000${mount.readonly}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(mount);
+  }
+
+  return result;
+}
+
+function dedupeEnvVarNames(names: string[]): string[] {
+  return [...new Set(names)];
+}
+
+function formatDockerBindMount(mount: DockerBindMount): string {
+  return `type=bind,src=${mount.source},dst=${mount.target}${mount.readonly ? ',readonly' : ''}`;
+}
+
+function collectDockerPassThroughEnvVarNames(
+  runtimeConfig: LoadedRuntimeConfig | null
+): string[] {
+  return [...new Set(runtimeConfig?.requiredEnvVars ?? [])]
+    .filter(name => {
+      const value = process.env[name];
+      return typeof value === 'string' && value.length > 0;
+    })
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function normalizeLineBreaks(value: string): string {
+  return value.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+function sanitizeProgressLine(line: string): string {
+  return line
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/gu, '')
+    .trim();
+}
+
+function normalizeRelativePath(value: string): string {
+  return value.trim().replaceAll(path.sep, '/').replace(/^\.\/+/, '').replace(/\/+$/, '');
+}
+
 function resolveEffectiveParallelism(requested: number | 'auto', checkCount: number): number {
   if (checkCount <= 1) {
     return Math.max(1, checkCount);
@@ -679,6 +1304,15 @@ function emitProgress(
   checkStatus: CheckResult['status'] | null,
   checkResult: CheckResult | null
 ): void {
+  const statusLabel = type === 'scope-resolved'
+    ? 'Scope resolved'
+    : type === 'no-changes-in-scope'
+      ? 'No files matched the selected scope'
+      : type === 'check-started'
+        ? (checkId ? `Running ${checkId}` : 'Running check')
+        : checkId && checkStatus
+          ? `Completed ${checkId} (${checkStatus})`
+          : 'Check completed';
   const event = {
     type,
     scopeLabel: scopeContext.label,
@@ -695,7 +1329,9 @@ function emitProgress(
     checkIndex: progressState.completedCount,
     completedCount: progressState.completedCount,
     totalChecks: checkOrder.length,
-    runningCheckIds: checkOrder.filter(candidate => progressState.runningCheckIds.has(candidate))
+    runningCheckIds: checkOrder.filter(candidate => progressState.runningCheckIds.has(candidate)),
+    statusLabel,
+    detailLines: []
   } satisfies ScanProgressEvent;
 
   logger?.write('scan.progress', event);
@@ -1055,10 +1691,9 @@ function buildOpenCodeSetupActions(options: {
   cause?: string | undefined;
   missingEnvVars?: string[] | undefined;
 }): string[] {
-  const configPath = path.resolve(options.configPath ?? getDefaultConfigPath());
   const actions = [
     OPENCODE_EXECUTION_LAYER_NOTE,
-    `Review and edit ${configPath} to configure the selected OpenCode model manually.`,
+    describeRuntimeConfigAction(options.configPath),
     `See the OpenCode provider setup docs: ${OPENCODE_PROVIDERS_DOCS_URL}`,
     "After updating the setup rerun `shrike scan`."
   ];
@@ -1067,7 +1702,7 @@ function buildOpenCodeSetupActions(options: {
     actions.splice(
       2,
       0,
-      `Set the environment variable(s) referenced by ${configPath}: ${options.missingEnvVars.join(', ')}.`
+      `Set the environment variable(s) referenced by ${describeRuntimeConfigTarget(options.configPath)}: ${options.missingEnvVars.join(', ')}.`
     );
   }
 
@@ -1080,6 +1715,31 @@ function buildOpenCodeSetupActions(options: {
   }
 
   return actions;
+}
+
+function describeRuntimeConfigTarget(configPath?: string): string {
+  if (!configPath) {
+    return path.resolve(getDefaultConfigPath());
+  }
+
+  return configPath === DOCKER_RUNTIME_CONFIG_PATH_LABEL
+    ? 'the injected Docker runtime config and your host OpenCode setup'
+    : path.resolve(configPath);
+}
+
+function describeRuntimeConfigAction(configPath?: string): string {
+  if (!configPath) {
+    return `Review and edit ${path.resolve(getDefaultConfigPath())} to configure the selected OpenCode model manually.`;
+  }
+
+  if (configPath === DOCKER_RUNTIME_CONFIG_PATH_LABEL) {
+    return [
+      'Docker runtime injects the repo-local OpenCode overlay and reuses your host OpenCode config/auth.',
+      'Verify your host OpenCode setup or add provider configuration directly to `.openshrike/opencode.json`.'
+    ].join(' ');
+  }
+
+  return `Review and edit ${path.resolve(configPath)} to configure the selected OpenCode model manually.`;
 }
 
 function isProviderSetupFailureMessage(message: string): boolean {
@@ -1106,21 +1766,41 @@ function isProviderSetupFailureMessage(message: string): boolean {
   ].some(pattern => pattern.test(message));
 }
 
-function resolveIgnoredRepoPaths(repoPath: string, logPath?: string): string[] {
-  if (!logPath) {
-    return [];
+function resolveIgnoredRepoPaths(repoPath: string, ...candidatePaths: Array<string | null | undefined>): string[] {
+  return dedupeIgnoredRepoPaths(
+    candidatePaths.flatMap(candidatePath => {
+      if (!candidatePath) {
+        return [];
+      }
+
+      const relativePath = path.relative(repoPath, path.resolve(candidatePath));
+      if (
+        !relativePath ||
+        relativePath.startsWith('..') ||
+        path.isAbsolute(relativePath)
+      ) {
+        return [];
+      }
+
+      return [normalizeRelativePath(relativePath)];
+    })
+  );
+}
+
+function dedupeIgnoredRepoPaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const candidatePath of paths.map(normalizeRelativePath).filter(Boolean)) {
+    if (seen.has(candidatePath)) {
+      continue;
+    }
+
+    seen.add(candidatePath);
+    deduped.push(candidatePath);
   }
 
-  const relativePath = path.relative(repoPath, logPath);
-  if (
-    !relativePath ||
-    relativePath.startsWith('..') ||
-    path.isAbsolute(relativePath)
-  ) {
-    return [];
-  }
-
-  return [relativePath.replaceAll(path.sep, '/')];
+  return deduped;
 }
 
 function summarizeRuntimeEvent(

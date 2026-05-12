@@ -23,7 +23,8 @@ export async function executeInternalScanWorkerCommand(options: {requestPath: st
     }
   }, {
     runtimeMode: 'docker',
-    runtimeConfigOverride: runtimeConfig
+    runtimeConfigOverride: runtimeConfig,
+    ignoredRepoPaths: request.ignoredRepoPaths
   });
 
   await fs.mkdir(path.dirname(request.reportPath), {recursive: true});
@@ -31,7 +32,11 @@ export async function executeInternalScanWorkerCommand(options: {requestPath: st
   return report.summary.failed > 0 ? 2 : 0;
 }
 
-async function loadRequest(requestPath: string): Promise<{options: ScanCommandOptions; reportPath: string}> {
+async function loadRequest(requestPath: string): Promise<{
+  options: ScanCommandOptions;
+  reportPath: string;
+  ignoredRepoPaths: string[];
+}> {
   const raw = await fs.readFile(path.resolve(requestPath), 'utf8');
   const request = parseDockerScanRequest(JSON.parse(raw));
   return {

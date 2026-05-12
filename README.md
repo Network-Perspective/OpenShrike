@@ -155,6 +155,10 @@ Common behavior:
   `docker/openshrike-runtime.Dockerfile` when needed.
 - `--artifacts-dir` controls where runtime artifacts such as `report.json` and
   logs are written.
+- In Docker mode, OpenShrike forwards only env vars explicitly referenced by
+  the selected OpenCode config (`provider.*.env`, `${VAR}`, or `{env:VAR}`).
+  Native/Docker parity depends on declaring required env vars in
+  `.openshrike/opencode.json`.
 - `--mock-opencode` exercises the scan path without live OpenCode calls.
 - `--no-ui` disables the live terminal dashboard on stderr.
 

@@ -114,7 +114,7 @@ Flow:
    - repo mounted read-only,
    - output directory mounted read-write,
    - temp request mounted read-only,
-   - explicit env allowlist,
+   - explicit env allowlist derived from the repo-local OpenCode config,
    - resource limits,
    - rootless user when supported.
 4. Container runs `shrike internal scan-worker --request /io/request.json`.
@@ -132,15 +132,26 @@ Baseline hardening:
 - Run as non-root.
 - Mount repo read-only.
 - Use a scratch writable directory for temp files and outputs.
-- Do not mount host home directories.
+- Do not mount host home directories wholesale.
+- If host OpenCode state is required for parity, mount only the minimal
+  OpenCode config/data directories into a synthetic runtime home.
+- Provide writable XDG state/cache directories inside the writable artifacts
+  mount so OpenCode does not need to create them in the host home.
 - Do not mount Docker socket.
 - Drop unnecessary Linux capabilities.
 - Keep the agent permission policy deny-by-default inside OpenCode.
 
 Critical credential note:
 - The model provider credential still has to reach the runtime somehow.
-- That credential must be forwarded only to the runner process, not written into the repo or emitted into logs.
+- That credential must be forwarded only when the repo-local OpenCode config
+  explicitly references it, not by broad env-prefix allowlists, and must not be
+  written into the repo or emitted into logs.
 - If OpenCode or its tool subprocess model makes credential hiding incomplete, Docker-hardened mode should be documented as reducing host exposure rather than fully eliminating provider-secret exposure to the runtime process.
+
+Accepted implementation note:
+- See `docs/implementation/06-docker-runtime-opencode-handoff.md` for the final
+  decision on env pass-through, host OpenCode mounts, and writable XDG runtime
+  state.
 
 ### Image strategy
 Recommended image approach:

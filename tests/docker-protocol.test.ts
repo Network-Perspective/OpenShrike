@@ -46,7 +46,9 @@ describe('docker protocol', () => {
         checkIndex: 0,
         completedCount: 0,
         totalChecks: 1,
-        runningCheckIds: ['check-a']
+        runningCheckIds: ['check-a'],
+        statusLabel: 'Running check-a',
+        detailLines: []
       }
     });
 

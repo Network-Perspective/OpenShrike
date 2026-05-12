@@ -27,6 +27,10 @@
 - CLI progress should continue streaming even when execution happens inside
   Docker or across multiple parallel workers.
 
+## Decision records
+- Docker/OpenCode state and credential handoff:
+  `docs/implementation/06-docker-runtime-opencode-handoff.md`
+
 ## Bundled execution model
 - Policy assembler emits an opencode skill with step-by-step instructions.
 - Bundle performs shared setup once (checkout, deps, index build).
@@ -41,10 +45,14 @@
 
 ## Container hardening (baseline)
 - Rootless containers where possible.
-- Read-only mounts for repo; scratch-only writable workspace.
+- Read-only mounts for repo; writable space is limited to artifacts and the
+  minimal OpenCode runtime-state exception documented in
+  `docs/implementation/06-docker-runtime-opencode-handoff.md`.
 - No privileged containers and minimal Linux capabilities.
 - Network disabled by default; allowlist only when explicitly required.
 - No host socket mounts (e.g., Docker socket) in agent containers.
+- No wholesale host-home mounts; only narrowly scoped OpenCode state mounts when
+  required for runtime parity.
 
 ## Known risks and mitigations
 - Kernel escape risk: containers share the host kernel. Mitigate with rootless

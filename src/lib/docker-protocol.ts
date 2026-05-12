@@ -51,7 +51,7 @@ const scanReportSchema = z.object({
 });
 
 const scanProgressEventSchema = z.object({
-  type: z.enum(['scope-resolved', 'no-changes-in-scope', 'check-started', 'check-completed']),
+  type: z.enum(['runtime-status', 'scope-resolved', 'no-changes-in-scope', 'check-started', 'check-completed']),
   scopeLabel: z.string(),
   scopeFileCount: z.number().int().min(0),
   isFullRepository: z.boolean(),
@@ -66,7 +66,9 @@ const scanProgressEventSchema = z.object({
   checkIndex: z.number().int().min(0),
   completedCount: z.number().int().min(0),
   totalChecks: z.number().int().min(0),
-  runningCheckIds: z.array(z.string())
+  runningCheckIds: z.array(z.string()),
+  statusLabel: z.string().min(1),
+  detailLines: z.array(z.string())
 });
 
 const scanRuntimeEventSchema = z.object({
@@ -93,12 +95,14 @@ const dockerWireMessageSchema = z.discriminatedUnion('kind', [
 
 const dockerScanRequestSchema = z.object({
   options: z.record(z.string(), z.unknown()),
-  reportPath: z.string().trim().min(1)
+  reportPath: z.string().trim().min(1),
+  ignoredRepoPaths: z.array(z.string().trim().min(1)).default([])
 });
 
 export interface DockerScanRequest {
   options: Record<string, unknown>;
   reportPath: string;
+  ignoredRepoPaths: string[];
 }
 
 export interface DockerProgressWireMessage {

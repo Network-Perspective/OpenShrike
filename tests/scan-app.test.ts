@@ -428,10 +428,12 @@ function makeCheckResult(id: string, status: CheckResult['status']): CheckResult
 }
 
 function makeProgressEvent(overrides: Partial<{
-  type: 'scope-resolved' | 'no-changes-in-scope' | 'check-started' | 'check-completed';
+  type: 'runtime-status' | 'scope-resolved' | 'no-changes-in-scope' | 'check-started' | 'check-completed';
   checkId: string | null;
   checkStatus: CheckResult['status'] | null;
   checkResult: CheckResult | null;
+  statusLabel: string;
+  detailLines: string[];
 }> = {}) {
   return {
     type: 'scope-resolved' as const,
@@ -450,6 +452,8 @@ function makeProgressEvent(overrides: Partial<{
     completedCount: 0,
     totalChecks: 1,
     runningCheckIds: [],
+    statusLabel: 'Scope resolved',
+    detailLines: [],
     ...overrides
   };
 }

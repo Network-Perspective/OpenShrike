@@ -15,7 +15,7 @@
     "configPath": ".openshrike/opencode.json",
     "agent": "shrike-checker",
     "model": "azure/gpt-5.4-mini",
-    "mode": "native",
+    "mode": "docker",
     "parallelism": "auto"
   },
   "scan": {
