@@ -279,6 +279,32 @@ describe('runInitCommand', () => {
       detectedFrom: ['package.json', 'tsconfig.json'],
       opencodeSetup: 'existing-config'
     });
+    const opencodeConfigPath = path.join(repoRoot, '.openshrike', 'opencode.json');
+    const originalOpencodeConfig = `${serializeConfig({
+      $schema: 'https://opencode.ai/config.json',
+      model: 'azure/gpt-5.4-mini',
+      provider: {
+        azure: {
+          env: ['AZURE_OPENAI_API_KEY'],
+          options: {
+            resourceName: 'custom-resource'
+          }
+        }
+      },
+      agent: {
+        'shrike-checker': {
+          description: 'Custom Shrike agent',
+          model: 'azure/gpt-5.4-mini',
+          permission: {
+            bash: 'ask'
+          }
+        },
+        reviewer: {
+          model: 'azure/gpt-5.4'
+        }
+      }
+    })}\n`;
+    await fs.writeFile(opencodeConfigPath, originalOpencodeConfig, 'utf8');
 
     const session = createScriptedSession([
       spec => {
@@ -295,6 +321,7 @@ describe('runInitCommand', () => {
         expect(spec.options.map(option => option.value)).toEqual([
           'policy',
           'runtime',
+          'parallelism',
           'done'
         ]);
         return {type: 'submit', value: 'runtime'};
@@ -307,6 +334,7 @@ describe('runInitCommand', () => {
       spec => {
         expect(spec.prompt).toBe('Change saved defaults');
         expect(spec.options.map(option => option.label)).toContain('Runtime: docker');
+        expect(spec.options.map(option => option.label)).toContain('Parallelism: auto');
         return {type: 'submit', value: 'done'};
       },
       spec => {
@@ -337,6 +365,75 @@ describe('runInitCommand', () => {
     expect(projectConfig.config.scan.defaultId).toBe('.openshrike/checks');
     expect(projectConfig.config.init.seedPolicyId).toBe('typescript-baseline');
     expect(projectConfig.config.init.detectedFrom).toEqual(['package.json', 'tsconfig.json']);
+    expect(await fs.readFile(opencodeConfigPath, 'utf8')).toBe(originalOpencodeConfig);
+  });
+
+  it('re-enters an existing init and updates default parallelism without touching opencode config', async () => {
+    const repoRoot = await makeTypescriptRepo();
+    const {homeRoot} = await makeDiscoveredOpenCodeHome({
+      models: ['azure/gpt-5.4-mini'],
+      defaultModel: 'azure/gpt-5.4-mini',
+      authPresent: true
+    });
+    useHome(homeRoot);
+
+    await writeShrikeInitFiles({
+      repoRoot,
+      policyId: 'typescript-baseline',
+      model: 'azure/gpt-5.4-mini',
+      runtimeMode: 'native',
+      projectType: 'typescript',
+      detectedFrom: ['package.json', 'tsconfig.json'],
+      opencodeSetup: 'existing-config'
+    });
+    const opencodeConfigPath = path.join(repoRoot, '.openshrike', 'opencode.json');
+    const originalOpencodeConfig = await fs.readFile(opencodeConfigPath, 'utf8');
+
+    const session = createScriptedSession([
+      spec => {
+        expect(spec.prompt).toBe('Project is already initialized');
+        return {type: 'submit', value: 'update'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Change saved defaults');
+        expect(spec.options.map(option => option.value)).toEqual([
+          'policy',
+          'runtime',
+          'parallelism',
+          'done'
+        ]);
+        return {type: 'submit', value: 'parallelism'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Select default parallelism');
+        expect(spec.initialValue).toBe('auto');
+        return {type: 'submit', value: '4'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Change saved defaults');
+        expect(spec.options.map(option => option.label)).toContain('Parallelism: 4');
+        return {type: 'submit', value: 'done'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Setup complete');
+        return {type: 'submit', value: 'exit'};
+      }
+    ]);
+    mockCreateInitUiSession.mockReturnValue(session);
+
+    const result = await runInitCommand({
+      cwd: repoRoot,
+      force: false
+    });
+
+    session.assertFinished();
+    expect(result.action).toBe('exit');
+    expect(result.wroteFiles).toBe(true);
+
+    const projectConfig = await loadProjectConfig(path.join(repoRoot, '.openshrike', 'project.json'));
+    expect(projectConfig.config.runtime.parallelism).toBe(4);
+    expect(projectConfig.config.runtime.mode).toBe('native');
+    expect(await fs.readFile(opencodeConfigPath, 'utf8')).toBe(originalOpencodeConfig);
   });
 
   it('runs auth login, refreshes OpenCode discovery, and continues even when OpenCode did not create a global config file', async () => {

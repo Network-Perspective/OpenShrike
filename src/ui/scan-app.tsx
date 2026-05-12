@@ -73,6 +73,7 @@ interface ProgressViewState {
   unknownCount: number;
   runningCheckIds: string[];
   statusLabel: string;
+  detailLines: string[];
 }
 
 interface SummaryMetricProps {
@@ -87,6 +88,8 @@ interface CheckListModuleProps {
   isScanComplete: boolean;
   checkTitles: Record<string, string>;
   runningIndicatorFrame: string;
+  statusLabel: string;
+  detailLines: string[];
   scrollRef: React.RefObject<ScrollViewRef | null>;
 }
 
@@ -706,6 +709,7 @@ function ScanApp(props: {
                 tokenLabel={tokenLabel}
                 parallelismLabel={parallelismLabel}
                 scopeLabel={scopeLabel}
+                statusLabel={progress.statusLabel}
                 totalChecks={totalChecks}
                 failedCount={report?.summary.failed ?? progress.failedCount}
                 unknownCount={report?.summary.unknown ?? progress.unknownCount}
@@ -719,6 +723,8 @@ function ScanApp(props: {
                 isScanComplete={isScanComplete}
                 checkTitles={checkTitles}
                 runningIndicatorFrame={runningIndicatorFrame}
+                statusLabel={progress.statusLabel}
+                detailLines={progress.detailLines}
                 scrollRef={listScrollRef}
               />
             </Box>
@@ -747,6 +753,7 @@ function SummaryModule(props: {
   tokenLabel: string;
   parallelismLabel: string;
   scopeLabel: string;
+  statusLabel: string;
   totalChecks: number;
   failedCount: number;
   unknownCount: number;
@@ -806,6 +813,10 @@ function SummaryModule(props: {
       <Box marginTop={1}>
         <Text>Scope: {props.scopeLabel}</Text>
       </Box>
+
+      <Box marginTop={1}>
+        <Text>Status: {props.statusLabel}</Text>
+      </Box>
     </Module>
   );
 }
@@ -842,7 +853,9 @@ function CheckListModule(props: CheckListModuleProps) {
             browser: props.browser,
             isScanComplete: props.isScanComplete,
             checkTitles: props.checkTitles,
-            runningIndicatorFrame: props.runningIndicatorFrame
+            runningIndicatorFrame: props.runningIndicatorFrame,
+            statusLabel: props.statusLabel,
+            detailLines: props.detailLines
           })}
         </ScrollView>
       </Box>
@@ -1039,11 +1052,32 @@ function renderCheckListRows(props: {
   isScanComplete: boolean;
   checkTitles: Record<string, string>;
   runningIndicatorFrame: string;
+  statusLabel: string;
+  detailLines: string[];
 }): React.ReactNode {
   if (props.checks.length === 0) {
+    if (!props.isScanComplete) {
+      return (
+        <Box key="empty-check-list" flexDirection="column">
+          <Text color="yellowBright">{`[${props.runningIndicatorFrame}] ${props.statusLabel}`}</Text>
+          {props.detailLines.length > 0 ? (
+            <Box marginTop={1} flexDirection="column">
+              {props.detailLines.map((line, index) => (
+                <Text key={`empty-check-list-line-${index}`} color="gray">
+                  {line}
+                </Text>
+              ))}
+            </Box>
+          ) : (
+            <Text color="gray">Checks will appear once the runtime is ready.</Text>
+          )}
+        </Box>
+      );
+    }
+
     return (
       <Text key="empty-check-list" color="gray">
-        {props.isScanComplete ? 'No checks in this report.' : 'Checks will appear when scope resolves.'}
+        No checks in this report.
       </Text>
     );
   }
@@ -1200,7 +1234,8 @@ function createProgressViewState(): ProgressViewState {
     failedCount: 0,
     unknownCount: 0,
     runningCheckIds: [],
-    statusLabel: 'Preparing scan'
+    statusLabel: 'Preparing scan',
+    detailLines: []
   };
 }
 
@@ -1219,27 +1254,11 @@ function applyProgressEvent(
     passedCount: event.passedCount,
     failedCount: event.failedCount,
     unknownCount: event.unknownCount,
-    runningCheckIds: [...event.runningCheckIds]
+    runningCheckIds: [...event.runningCheckIds],
+    statusLabel: event.statusLabel,
+    detailLines: [...event.detailLines]
   };
-
-  switch (event.type) {
-    case 'scope-resolved':
-      next.statusLabel = 'Scope resolved';
-      return next;
-    case 'no-changes-in-scope':
-      next.statusLabel = 'No files matched the selected scope';
-      return next;
-    case 'check-started':
-      next.statusLabel = event.checkId ? `Running ${event.checkId}` : 'Running check';
-      return next;
-    case 'check-completed':
-      next.statusLabel = event.checkId && event.checkStatus
-        ? `Completed ${event.checkId} (${event.checkStatus})`
-        : 'Check completed';
-      return next;
-    default:
-      return next;
-  }
+  return next;
 }
 
 function syncProgressWithReport(
@@ -1254,7 +1273,8 @@ function syncProgressWithReport(
     failedCount: report.summary.failed,
     unknownCount: report.summary.unknown,
     runningCheckIds: [],
-    statusLabel: 'Scan complete'
+    statusLabel: 'Scan complete',
+    detailLines: []
   };
 }
 

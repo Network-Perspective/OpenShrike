@@ -8,6 +8,7 @@ export const DEFAULT_PARALLELISM = 'auto';
 export const DEFAULT_DOCKER_IMAGE = 'openshrike-runtime:dev';
 
 export const CONFIG_DIRECTORY_NAME = '.openshrike';
+export const ARTIFACTS_DIRECTORY_NAME = 'artifacts';
 export const PROJECT_CHECKS_DIRECTORY_NAME = 'checks';
 export const CONFIG_FILE_NAME = 'opencode.json';
 export const PROJECT_CONFIG_FILE_NAME = 'project.json';
@@ -15,6 +16,7 @@ export const RUNTIME_ENV_FILE_NAME = 'runtime.env';
 export const RUNTIME_ENV_EXAMPLE_FILE_NAME = 'runtime.env.example';
 export const REQUIRED_ENV_FILE_NAME = 'required-env.txt';
 export const INIT_README_FILE_NAME = 'README.md';
+export const GITIGNORE_FILE_NAME = '.gitignore';
 
 export const SCOPE_VALUES = ['uncommitted', 'commit', 'branch', 'pr', 'full'] as const;
 export const OUTPUT_VALUES = ['json', 'markdown'] as const;

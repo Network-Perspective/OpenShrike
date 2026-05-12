@@ -1,6 +1,6 @@
 import {spawn} from 'node:child_process';
 import path from 'node:path';
-import {DEFAULT_OUTPUT, DEFAULT_RUNTIME_MODE} from './constants.js';
+import {DEFAULT_OUTPUT, DEFAULT_PARALLELISM, DEFAULT_RUNTIME_MODE} from './constants.js';
 import {listPolicyCatalog} from './policies.js';
 import {findToolRoot} from './project-root.js';
 import {
@@ -21,8 +21,8 @@ import type {
 } from './init/state.js';
 import {detectProjectType, rankPoliciesForProject} from './init/project-detect.js';
 import {discoverExistingInit, discoverOpenCodeSetup, findRepoRoot, getOpenCodeInstallOptions} from './init/discovery.js';
-import {writeShrikeInitFiles, type InitWriteResult} from './init/write.js';
-import type {RuntimeMode, ShrikeProjectConfig} from './types.js';
+import {writeShrikeInitFiles, type InitWriteResult, type InitWriteScope, type ProjectConfigPatch} from './init/write.js';
+import type {ParallelismValue, RuntimeMode, ShrikeProjectConfig} from './types.js';
 
 export interface InitCommandOptions {
   cwd: string;
@@ -48,6 +48,11 @@ export class InitCommandCancelledError extends Error {
 
 type SelectionFlow = 'initial' | 'change-model' | 'change-policy';
 type ChangeDefaultsOrigin = 'success' | 'existing-init';
+type WriteSelectionsRequest = {
+  scope: InitWriteScope;
+  preserveExisting: boolean;
+  projectPatch: ProjectConfigPatch;
+};
 
 export async function runInitCommand(options: InitCommandOptions): Promise<InitResult> {
   if (!process.stdin.isTTY || !process.stderr.isTTY) {
@@ -288,7 +293,11 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
 
           context.selections.model = selection.value;
           if (selectionFlow === 'change-model') {
-            await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults');
+            await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults', {
+              scope: 'project-and-opencode',
+              preserveExisting: true,
+              projectPatch: 'model'
+            });
             screen = context.error ? 'error' : 'change-defaults';
             selectionFlow = 'initial';
           } else {
@@ -314,7 +323,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             noteLines: [
               '',
               'Other defaults are written automatically:',
-              `${context.selections.runtimeMode} • uncommitted • auto • ${DEFAULT_OUTPUT}`
+              `${context.selections.runtimeMode} • uncommitted • ${formatParallelism(context.selections.parallelism)} • ${DEFAULT_OUTPUT}`
             ],
             allowBack: true,
             allowCancel: true
@@ -333,12 +342,20 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
 
           context.selections.policyId = selection.value;
           if (selectionFlow === 'change-policy') {
-            await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults');
+            await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults', {
+              scope: 'project',
+              preserveExisting: true,
+              projectPatch: 'policy'
+            });
             screen = context.error ? 'error' : 'change-defaults';
             selectionFlow = 'initial';
           } else {
             pushSelectedHistory(history, 'policy-selection', prompt, policyOptions, selection.value);
-            await writeSelectionsOrShowError(context, 'success', 'success');
+            await writeSelectionsOrShowError(context, 'success', 'success', {
+              scope: 'all',
+              preserveExisting: false,
+              projectPatch: 'full'
+            });
             screen = context.error ? 'error' : 'success';
             selectionFlow = 'initial';
           }
@@ -391,6 +408,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
               ? [{value: 'model' as const, label: `Model: ${context.selections.model ?? 'default'}`}]
               : []),
             {value: 'runtime', label: `Runtime: ${context.selections.runtimeMode}`},
+            {value: 'parallelism', label: `Parallelism: ${formatParallelism(context.selections.parallelism)}`},
             {value: 'done', label: 'Done'}
           ];
 
@@ -427,6 +445,11 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             break;
           }
 
+          if (selection.value === 'parallelism') {
+            screen = 'parallelism-selection';
+            break;
+          }
+
           screen = 'runtime-selection';
           break;
         }
@@ -453,7 +476,39 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
           }
 
           context.selections.runtimeMode = selection.value;
-          await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults');
+          await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults', {
+            scope: 'project',
+            preserveExisting: true,
+            projectPatch: 'runtime'
+          });
+          screen = context.error ? 'error' : 'change-defaults';
+          break;
+        }
+
+        case 'parallelism-selection': {
+          const prompt = 'Select default parallelism';
+          const optionsForScreen = buildParallelismOptions(context.selections.parallelism);
+          const selection = await ui.showScreen<string>({
+            prompt,
+            bodyLines: ['Choose how many checks `shrike scan` should run in parallel by default.'],
+            options: optionsForScreen,
+            initialValue: formatParallelism(context.selections.parallelism),
+            allowBack: true,
+            allowCancel: true
+          }, history);
+
+          if (selection.type === 'back') {
+            popHistoryForScreen(history, 'change-defaults');
+            screen = 'change-defaults';
+            break;
+          }
+
+          context.selections.parallelism = parseParallelism(selection.value);
+          await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults', {
+            scope: 'project',
+            preserveExisting: true,
+            projectPatch: 'parallelism'
+          });
           screen = context.error ? 'error' : 'change-defaults';
           break;
         }
@@ -544,6 +599,7 @@ async function buildWizardContext(
         ?? opencode.models[0],
       policyId: defaultPolicyId,
       runtimeMode: existingProjectConfig?.config.runtime.mode ?? DEFAULT_RUNTIME_MODE,
+      parallelism: existingProjectConfig?.config.runtime.parallelism ?? DEFAULT_PARALLELISM,
       projectType: existingProjectConfig?.config.init.projectType ?? projectDetection.recommended.projectType,
       detectedFrom: existingProjectConfig?.config.init.detectedFrom?.length
         ? existingProjectConfig.config.init.detectedFrom
@@ -553,6 +609,7 @@ async function buildWizardContext(
     },
     forceReplace: options.force,
     writeResult: null,
+    lastWriteRequest: null,
     error: null
   };
 }
@@ -572,6 +629,7 @@ function resetSelections(context: InitWizardContext, includeExistingDefaults: bo
         context.policyCatalog.map(policy => policy.id)
       ) ?? fallbackPolicyId,
       runtimeMode: context.existingProjectConfig.config.runtime.mode,
+      parallelism: context.existingProjectConfig.config.runtime.parallelism,
       projectType: context.existingProjectConfig.config.init.projectType,
       detectedFrom: context.existingProjectConfig.config.init.detectedFrom,
       opencodeSetup: context.existingProjectConfig.config.init.opencodeSetup
@@ -583,6 +641,7 @@ function resetSelections(context: InitWizardContext, includeExistingDefaults: bo
     model: context.opencode.defaultModel ?? context.opencode.models[0],
     policyId: fallbackPolicyId,
     runtimeMode: DEFAULT_RUNTIME_MODE,
+    parallelism: DEFAULT_PARALLELISM,
     projectType: context.projectDetection.recommended.projectType,
     detectedFrom: context.projectDetection.recommended.evidence,
     opencodeSetup: resolveDiscoveredOpenCodeSetup(context.opencode)
@@ -671,6 +730,43 @@ function buildPolicyOptions(context: InitWizardContext): InitScreenOption<string
     }));
 }
 
+function buildParallelismOptions(current: ParallelismValue): InitScreenOption<string>[] {
+  const seen = new Set<string>();
+  const values = [
+    formatParallelism(current),
+    'auto',
+    '1',
+    '2',
+    '4',
+    '8'
+  ].filter(value => {
+    if (seen.has(value)) {
+      return false;
+    }
+
+    seen.add(value);
+    return true;
+  });
+
+  return values.map(value => ({
+    value,
+    label: value,
+    detail: value === 'auto'
+      ? 'scale automatically'
+      : value === '1'
+        ? 'run checks sequentially'
+        : `run up to ${value} checks at once`
+  }));
+}
+
+function parseParallelism(value: string): ParallelismValue {
+  return value === 'auto' ? 'auto' : Number.parseInt(value, 10);
+}
+
+function formatParallelism(value: ParallelismValue): string {
+  return String(value);
+}
+
 function pushSelectedHistory<T extends string>(
   history: InitHistoryItem[],
   screen: string,
@@ -712,17 +808,24 @@ function resolveSavedPolicyId(
 async function writeSelectionsOrShowError(
   context: InitWizardContext,
   retryScreen: Exclude<InitScreen, 'error'>,
-  backScreen: InitScreen
+  backScreen: InitScreen,
+  request: WriteSelectionsRequest
 ): Promise<void> {
+  context.lastWriteRequest = request;
+
   try {
     context.writeResult = await writeShrikeInitFiles({
       repoRoot: context.repoRoot,
       policyId: context.selections.policyId,
       model: context.selections.model,
       runtimeMode: context.selections.runtimeMode,
+      parallelism: context.selections.parallelism,
       projectType: context.selections.projectType,
       detectedFrom: context.selections.detectedFrom,
-      opencodeSetup: context.selections.opencodeSetup
+      opencodeSetup: context.selections.opencodeSetup,
+      scope: request.scope,
+      preserveExisting: request.preserveExisting,
+      projectPatch: request.projectPatch
     });
     context.error = null;
   } catch (error) {
@@ -769,7 +872,9 @@ async function handleRetryAction(
         return;
       }
       case 'write-files':
-        await writeSelectionsOrShowError(context, retryScreen, retryScreen);
+        if (context.lastWriteRequest) {
+          await writeSelectionsOrShowError(context, retryScreen, retryScreen, context.lastWriteRequest);
+        }
         return;
       case 'none':
       case undefined:

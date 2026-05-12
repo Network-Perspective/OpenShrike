@@ -34,14 +34,14 @@ const projectConfigSchema = z
       detectedFrom: z.array(z.string().trim().min(1)).default([]),
       opencodeSetup: z.enum(['existing-config', 'auth-login']),
       seedPolicyId: z.string().trim().min(1).optional()
-    }),
+    }).passthrough(),
     runtime: z.object({
       configPath: z.string().trim().min(1),
       agent: z.string().trim().min(1),
       model: z.string().trim().min(1).optional(),
       mode: z.enum(RUNTIME_MODE_VALUES),
       parallelism: projectParallelismSchema
-    }),
+    }).passthrough(),
     scan: z.object({
       defaultKind: z.enum(['check', 'policy', 'project-checks']),
       defaultId: z.string().trim().min(1),
@@ -50,7 +50,7 @@ const projectConfigSchema = z
       output: z.enum(OUTPUT_VALUES),
       ui: z.boolean(),
       artifactsDir: z.string().trim().min(1).nullable()
-    })
+    }).passthrough()
   })
   .passthrough();
 

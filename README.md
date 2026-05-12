@@ -64,11 +64,11 @@ shrike scan
   AI provider access, lets you choose defaults, and writes
   `.openshrike/project.json`, `.openshrike/opencode.json`, and seeds
   `.openshrike/checks/`.
-- `shrike scan` uses those saved defaults automatically and reads only the
-  Markdown checks from `.openshrike/checks/`. By default it scans uncommitted
-  changes in the current repository.
-- Re-run `shrike init` when you want to seed checks from a different policy or
-  change model/runtime settings.
+- `shrike scan` uses those saved defaults automatically and reads the
+  Markdown checks from `.openshrike/checks/`. By default it scans
+  uncommitted changes in the current repository.
+- Re-run `shrike init` when you want to seed checks from a different policy
+  or change saved model, runtime mode, or parallelism defaults.
 
 ## Install From Source
 
@@ -155,6 +155,10 @@ Common behavior:
   `docker/openshrike-runtime.Dockerfile` when needed.
 - `--artifacts-dir` controls where runtime artifacts such as `report.json` and
   logs are written.
+- In Docker mode, OpenShrike forwards only env vars explicitly referenced by
+  the selected OpenCode config (`provider.*.env`, `${VAR}`, or `{env:VAR}`).
+  Native/Docker parity depends on declaring required env vars in
+  `.openshrike/opencode.json`.
 - `--mock-opencode` exercises the scan path without live OpenCode calls.
 - `--no-ui` disables the live terminal dashboard on stderr.
 
