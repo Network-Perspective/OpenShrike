@@ -15,12 +15,12 @@
         "azure/gpt-5.4-mini": {
           "name": "gpt-5.4-mini"
         }
-      },      
+      },
       "options": {
         "apiKey": "{env:AZURE_OPENAI_API_KEY}",
         "resourceName": "{env:AZURE_RESOURCE_PREFIX}"
       }
-    }    
+    }
   },
   "permission": {
     "bash": "allow",
@@ -36,6 +36,17 @@
       "permission": {
         "bash": "allow",
         "edit": "deny",
+        "webfetch": "deny",
+        "doom_loop": "deny",
+        "external_directory": "deny"
+      }
+    },
+    "shrike-fixer": {
+      "description": "Fixes a single OpenShrike finding and may edit repository files.",
+      "model": "azure/gpt-5.4",
+      "permission": {
+        "bash": "allow",
+        "edit": "allow",
         "webfetch": "deny",
         "doom_loop": "deny",
         "external_directory": "deny"

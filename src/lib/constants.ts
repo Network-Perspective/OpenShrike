@@ -1,5 +1,7 @@
 export const DEFAULT_AGENT_NAME = 'shrike-checker';
 export const DEFAULT_MODEL = 'azure/gpt-5.4-mini';
+export const DEFAULT_FIX_AGENT_NAME = 'shrike-fixer';
+export const DEFAULT_FIX_MODEL = 'azure/gpt-5.4';
 export const DEFAULT_PROVIDER = 'azure';
 export const DEFAULT_OUTPUT = 'markdown';
 export const DEFAULT_SCAN_SCOPE = 'uncommitted';
@@ -12,6 +14,8 @@ export const ARTIFACTS_DIRECTORY_NAME = 'artifacts';
 export const PROJECT_CHECKS_DIRECTORY_NAME = 'checks';
 export const CONFIG_FILE_NAME = 'opencode.json';
 export const PROJECT_CONFIG_FILE_NAME = 'project.json';
+export const LAST_SCAN_JSON_FILE_NAME = 'last-scan.json';
+export const LAST_SCAN_MARKDOWN_FILE_NAME = 'last-scan.md';
 export const RUNTIME_ENV_FILE_NAME = 'runtime.env';
 export const RUNTIME_ENV_EXAMPLE_FILE_NAME = 'runtime.env.example';
 export const REQUIRED_ENV_FILE_NAME = 'required-env.txt';

@@ -4,10 +4,14 @@ import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, render, useApp, useInput, useStdout} from 'ink';
 import {ScrollView, type ScrollViewRef} from 'ink-scroll-view';
 import {readCheckTitle} from '../lib/checks.js';
-import {runScan} from '../lib/scan.js';
+import {fixAndRecheckCheck, recheckSingleCheck, updateReportCheck} from '../lib/fix.js';
+import {createSavedScanRequest, saveLastScanState} from '../lib/last-scan.js';
+import {createNativeScanSession, runScan, type ScanSessionSnapshot} from '../lib/scan.js';
 import type {
   CheckResult,
   CheckStatus,
+  SavedScanRequest,
+  SavedScanScope,
   ScanCommandOptions,
   ScanProgressEvent,
   ScanReport,
@@ -15,7 +19,7 @@ import type {
 } from '../lib/types.js';
 
 type SectionViewMode = 'detail' | 'list';
-type CheckDisplayStatus = CheckStatus | 'pending' | 'running';
+type CheckDisplayStatus = CheckStatus | 'pending' | 'running' | 'fixing';
 type ExitConfirmationChoice = 'yes' | 'no';
 export type EscapeKeyAction = 'dismiss-exit-confirm' | 'back-to-list' | 'prompt-exit-confirm' | 'exit';
 export type VerticalArrowAction = 'scroll' | 'navigate';
@@ -76,6 +80,12 @@ interface ProgressViewState {
   detailLines: string[];
 }
 
+interface ActionState {
+  runningCheckIds: string[];
+  fixingCheckIds: string[];
+  message: string | null;
+}
+
 interface SummaryMetricProps {
   label: string;
   value: string;
@@ -104,6 +114,7 @@ const SECTION_LABELS: Record<CheckStatus, string> = {
 const STATUS_BADGES: Record<CheckDisplayStatus, string> = {
   pending: 'PENDING',
   running: 'RUNNING',
+  fixing: 'FIXING',
   fail: 'FAIL',
   unknown: 'INCONCLUSIVE',
   pass: 'PASS'
@@ -115,6 +126,7 @@ const RUNNING_SPINNER_INTERVAL_MS = 160;
 const STATUS_MARKERS: Record<CheckDisplayStatus, string> = {
   pending: '[ ]',
   running: `[${RUNNING_SPINNER_FRAMES[0]}]`,
+  fixing: '[>]',
   fail: '[x]',
   unknown: '[~]',
   pass: '[v]'
@@ -123,6 +135,7 @@ const STATUS_MARKERS: Record<CheckDisplayStatus, string> = {
 const STATUS_COLORS: Record<CheckDisplayStatus, string> = {
   pending: 'gray',
   running: 'whiteBright',
+  fixing: 'cyanBright',
   fail: 'redBright',
   unknown: 'yellowBright',
   pass: 'greenBright'
@@ -140,7 +153,14 @@ export class ScanUiCancelledError extends Error {
   }
 }
 
-export function runScanWithInk(options: ScanCommandOptions): Promise<ScanReport> {
+export function runScanWithInk(
+  options: ScanCommandOptions,
+  initialState?: {
+    initialReport: ScanReport;
+    savedRequest: SavedScanRequest;
+    savedScope?: SavedScanScope;
+  }
+): Promise<ScanReport> {
   return new Promise<ScanReport>((resolve, reject) => {
     let finalReport: ScanReport | null = null;
     let finalError: Error | null = null;
@@ -148,6 +168,7 @@ export function runScanWithInk(options: ScanCommandOptions): Promise<ScanReport>
     const instance = render(
       <ScanApp
         options={options}
+        {...(initialState ? {initialState} : {})}
         onDone={report => {
           finalReport = report;
         }}
@@ -187,6 +208,11 @@ export function runScanWithInk(options: ScanCommandOptions): Promise<ScanReport>
 
 function ScanApp(props: {
   options: ScanCommandOptions;
+  initialState?: {
+    initialReport: ScanReport;
+    savedRequest: SavedScanRequest;
+    savedScope?: SavedScanScope;
+  };
   onDone: (report: ScanReport) => void;
   onCancel: () => void;
   onError: (error: Error) => void;
@@ -195,27 +221,38 @@ function ScanApp(props: {
   const {stdout} = useStdout();
   const detailScrollRef = useRef<ScrollViewRef>(null);
   const listScrollRef = useRef<ScrollViewRef>(null);
+  const sessionRef = useRef<ReturnType<typeof createNativeScanSession> | null>(null);
   const startedAtRef = useRef(Date.now());
   const finishedAtRef = useRef<number | null>(null);
-  const [progress, setProgress] = useState<ProgressViewState>(createProgressViewState());
+  const actionRequest = props.initialState?.savedRequest ?? createSavedScanRequest(props.options);
+  const useNativeSession = (props.initialState?.savedRequest.runtimeMode ?? props.options.runtimeMode) === 'native';
+  const [progress, setProgress] = useState<ProgressViewState>(() => props.initialState?.initialReport
+    ? syncProgressWithReport(createProgressViewState(), props.initialState.initialReport)
+    : createProgressViewState());
   const [streamedReportState, setStreamedReportState] = useState<StreamedReportState>(
     createStreamedReportState()
   );
   const [tokenUsage, setTokenUsage] = useState<TokenUsageState>(createTokenUsageState());
-  const [report, setReport] = useState<ScanReport | null>(null);
-  const [browser, setBrowser] = useState<BrowserState>(createInitialBrowserState(null));
+  const [report, setReport] = useState<ScanReport | null>(props.initialState?.initialReport ?? null);
+  const [browser, setBrowser] = useState<BrowserState>(createInitialBrowserState(props.initialState?.initialReport ?? null));
   const [checkTitles, setCheckTitles] = useState<Record<string, string>>({});
   const [showHelp, setShowHelp] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [exitConfirmChoice, setExitConfirmChoice] = useState<ExitConfirmationChoice>('no');
   const [exitAfterDismiss, setExitAfterDismiss] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [actionState, setActionState] = useState<ActionState>({
+    runningCheckIds: [],
+    fixingCheckIds: [],
+    message: null
+  });
 
   const terminalWidth = stdout.columns || 80;
   const terminalHeight = Math.max(12, (stdout.rows || 24) - 1);
   const displayChecks = buildDisplayChecks({
     checkIds: progress.checkIds,
-    runningCheckIds: progress.runningCheckIds,
+    runningCheckIds: [...progress.runningCheckIds, ...actionState.runningCheckIds],
+    fixingCheckIds: actionState.fixingCheckIds,
     streamedResultsByCheckId: streamedReportState.resultsByCheckId,
     reportChecks: report?.checks
   });
@@ -230,12 +267,15 @@ function ScanApp(props: {
     ? elapsedMs
     : finishedAtRef.current - startedAtRef.current;
   const runningIndicatorFrame = getRunningIndicatorFrame(elapsedMs);
+  const hasAnimatedChecks = progress.runningCheckIds.length > 0
+    || actionState.runningCheckIds.length > 0
+    || actionState.fixingCheckIds.length > 0;
   const totalChecks = report?.summary.total_checks ?? progress.totalChecks;
   const {inProgressCount, pendingCount} = deriveProgressCounts({
     isScanComplete,
     totalChecks,
     completedCount: progress.completedCount,
-    runningCheckIds: progress.runningCheckIds
+    runningCheckIds: [...progress.runningCheckIds, ...actionState.runningCheckIds, ...actionState.fixingCheckIds]
   });
   const metricWidth = Math.max(14, Math.floor((terminalWidth - 12) / 4));
   const progressBarWidth = Math.max(24, terminalWidth - 8);
@@ -249,7 +289,8 @@ function ScanApp(props: {
   const footerText = buildFooterText({
     showExitConfirm,
     showHelp,
-    viewMode: browser.viewMode
+    viewMode: browser.viewMode,
+    reportReady
   });
 
   const cancelAndExit = () => {
@@ -274,6 +315,221 @@ function ScanApp(props: {
   const confirmCancelExit = () => {
     dismissExitConfirm();
     setExitAfterDismiss(true);
+  };
+
+  const setActionMessage = (message: string | null) => {
+    setActionState(previous => ({
+      ...previous,
+      message
+    }));
+  };
+
+  const performRecheck = () => {
+    if (useNativeSession && sessionRef.current && selectedCheck) {
+      setActionState({
+        runningCheckIds: [selectedCheck.id],
+        fixingCheckIds: [],
+        message: `Rechecking ${selectedCheck.id}...`
+      });
+      void (async () => {
+        try {
+          await sessionRef.current?.requestRecheck(selectedCheck.id);
+          const nextReport = sessionRef.current?.getPersistableReport();
+          if (nextReport) {
+            const warnings = await saveLastScanState({
+              report: nextReport,
+              request: actionRequest,
+              scope: sessionRef.current?.getScope() ?? undefined
+            });
+            if (warnings.length > 0) {
+              setActionState({
+                runningCheckIds: [],
+                fixingCheckIds: [],
+                message: warnings[0] ?? null
+              });
+              return;
+            }
+          }
+          setActionState({
+            runningCheckIds: [],
+            fixingCheckIds: [],
+            message: `Rechecked ${selectedCheck.id}.`
+          });
+        } catch (error) {
+          setActionState({
+            runningCheckIds: [],
+            fixingCheckIds: [],
+            message: error instanceof Error ? error.message : String(error)
+          });
+        }
+      })();
+      return;
+    }
+
+    if (!report || !selectedCheck) {
+      setActionMessage('Actions are available after the current scan completes.');
+      return;
+    }
+
+    if (actionState.runningCheckIds.length > 0 || actionState.fixingCheckIds.length > 0) {
+      setActionMessage('Another action is already running.');
+      return;
+    }
+
+    setActionState({
+      runningCheckIds: [selectedCheck.id],
+      fixingCheckIds: [],
+      message: `Rechecking ${selectedCheck.id}...`
+    });
+
+    void (async () => {
+      try {
+        const nextCheck = await recheckSingleCheck({
+          base: {
+            ...props.options,
+            repoPath: report.repo.path,
+            ui: false,
+            lastScan: false
+          },
+          request: actionRequest,
+          repoPath: report.repo.path,
+          checkId: selectedCheck.id
+        });
+        const nextReport = updateReportCheck(report, nextCheck);
+        setReport(nextReport);
+        setProgress(previous => syncProgressWithReport(previous, nextReport));
+        const warnings = await saveLastScanState({
+          report: nextReport,
+          request: actionRequest
+        });
+        if (warnings.length > 0) {
+          setActionState({
+            runningCheckIds: [],
+            fixingCheckIds: [],
+            message: warnings[0] ?? null
+          });
+          return;
+        }
+        setActionState({
+          runningCheckIds: [],
+          fixingCheckIds: [],
+          message: `Rechecked ${selectedCheck.id}.`
+        });
+      } catch (error) {
+        setActionState({
+          runningCheckIds: [],
+          fixingCheckIds: [],
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    })();
+  };
+
+  const performFix = () => {
+    if (useNativeSession && sessionRef.current && selectedCheck) {
+      setActionState({
+        runningCheckIds: [],
+        fixingCheckIds: [selectedCheck.id],
+        message: `Fixing ${selectedCheck.id}...`
+      });
+      void (async () => {
+        try {
+          await sessionRef.current?.requestFix(selectedCheck.id);
+          const nextReport = sessionRef.current?.getPersistableReport();
+          if (nextReport) {
+            const warnings = await saveLastScanState({
+              report: nextReport,
+              request: actionRequest,
+              scope: sessionRef.current?.getScope() ?? undefined
+            });
+            if (warnings.length > 0) {
+              setActionState({
+                runningCheckIds: [],
+                fixingCheckIds: [],
+                message: warnings[0] ?? null
+              });
+              return;
+            }
+          }
+          setActionState({
+            runningCheckIds: [],
+            fixingCheckIds: [],
+            message: `Fixed and rechecked ${selectedCheck.id}.`
+          });
+        } catch (error) {
+          setActionState({
+            runningCheckIds: [],
+            fixingCheckIds: [],
+            message: error instanceof Error ? error.message : String(error)
+          });
+        }
+      })();
+      return;
+    }
+
+    if (!report || !selectedCheck) {
+      setActionMessage('Actions are available after the current scan completes.');
+      return;
+    }
+
+    const failedCheck = selectedCheck.result;
+    if (selectedCheck.status !== 'fail' || !failedCheck || failedCheck.status !== 'fail') {
+      setActionMessage('Fix is only available for failed checks.');
+      return;
+    }
+
+    if (actionState.runningCheckIds.length > 0 || actionState.fixingCheckIds.length > 0) {
+      setActionMessage('Another action is already running.');
+      return;
+    }
+
+    setActionState({
+      runningCheckIds: [],
+      fixingCheckIds: [selectedCheck.id],
+      message: `Fixing ${selectedCheck.id}...`
+    });
+
+    void (async () => {
+      try {
+        const nextCheck = await fixAndRecheckCheck({
+          base: {
+            ...props.options,
+            repoPath: report.repo.path,
+            ui: false,
+            lastScan: false
+          },
+          request: actionRequest,
+          report,
+          check: failedCheck
+        });
+        const nextReport = updateReportCheck(report, nextCheck);
+        setReport(nextReport);
+        setProgress(previous => syncProgressWithReport(previous, nextReport));
+        const warnings = await saveLastScanState({
+          report: nextReport,
+          request: actionRequest
+        });
+        if (warnings.length > 0) {
+          setActionState({
+            runningCheckIds: [],
+            fixingCheckIds: [],
+            message: warnings[0] ?? null
+          });
+          return;
+        }
+        setActionState({
+          runningCheckIds: [],
+          fixingCheckIds: [],
+          message: `Fixed and rechecked ${selectedCheck.id}.`
+        });
+      } catch (error) {
+        setActionState({
+          runningCheckIds: [],
+          fixingCheckIds: [],
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    })();
   };
 
   useInput((input, key) => {
@@ -479,13 +735,23 @@ function ScanApp(props: {
       return;
     }
 
+    if (normalizedInput === 'r') {
+      performRecheck();
+      return;
+    }
+
+    if (normalizedInput === 'f') {
+      performFix();
+      return;
+    }
+
     if (key.return) {
       setBrowser(previous => toggleBrowserViewMode(previous));
     }
   });
 
   useEffect(() => {
-    if (report) {
+    if (report && !hasAnimatedChecks) {
       return undefined;
     }
 
@@ -496,9 +762,79 @@ function ScanApp(props: {
     return () => {
       clearInterval(timer);
     };
-  }, [report]);
+  }, [hasAnimatedChecks, report]);
 
   useEffect(() => {
+    if (useNativeSession) {
+      let active = true;
+      const session = createNativeScanSession(
+        props.options,
+        props.initialState,
+        {
+          onUpdate: snapshot => {
+            if (!active) {
+              return;
+            }
+
+            applySessionSnapshot(snapshot, {
+              setProgress,
+              setStreamedReportState,
+              setReport,
+              setActionState
+            });
+          },
+          onRuntimeEvent: event => {
+            if (!active) {
+              return;
+            }
+
+            setTokenUsage(previous => reduceTokenUsageState(previous, event));
+          }
+        }
+      );
+      sessionRef.current = session;
+
+      if (props.initialState?.initialReport) {
+        finishedAtRef.current = startedAtRef.current;
+        setElapsedMs(0);
+      }
+
+      void session.start().then(
+        completedReport => {
+          if (!active) {
+            return;
+          }
+
+          finishedAtRef.current ??= Date.now();
+          setElapsedMs(finishedAtRef.current - startedAtRef.current);
+          setProgress(previous => syncProgressWithReport(previous, completedReport));
+          setReport(completedReport);
+        },
+        error => {
+          if (!active) {
+            return;
+          }
+
+          props.onError(error instanceof Error ? error : new Error(String(error)));
+          exit();
+        }
+      );
+
+      return () => {
+        active = false;
+        sessionRef.current = null;
+        void session.close().catch(error => {
+          props.onError(error instanceof Error ? error : new Error(String(error)));
+        });
+      };
+    }
+
+    if (props.initialState?.initialReport) {
+      finishedAtRef.current = startedAtRef.current;
+      setElapsedMs(0);
+      return undefined;
+    }
+
     let active = true;
 
     void (async () => {
@@ -532,6 +868,7 @@ function ScanApp(props: {
         setBrowser(previous => syncBrowserState(previous, buildDisplayChecks({
           checkIds: completedReport.checks.map(check => check.id),
           runningCheckIds: [],
+          fixingCheckIds: [],
           streamedResultsByCheckId: streamedReportState.resultsByCheckId,
           reportChecks: completedReport.checks
         })));
@@ -548,7 +885,7 @@ function ScanApp(props: {
     return () => {
       active = false;
     };
-  }, [exit, props.onError, props.options]);
+  }, [exit, props.initialState, props.onError, props.options, useNativeSession]);
 
   useEffect(() => {
     if (displayChecks.length === 0) {
@@ -730,6 +1067,11 @@ function ScanApp(props: {
             </Box>
           )}
         </Box>
+        {actionState.message ? (
+          <Box marginTop={1}>
+            <Text color="cyanBright">{actionState.message}</Text>
+          </Box>
+        ) : null}
         <Box marginTop={1}>
           <Text color="gray">{footerText}</Text>
         </Box>
@@ -1278,6 +1620,60 @@ function syncProgressWithReport(
   };
 }
 
+function syncProgressWithSessionSnapshot(
+  previous: ProgressViewState,
+  snapshot: ScanSessionSnapshot
+): ProgressViewState {
+  return {
+    ...previous,
+    scopeLabel: snapshot.scopeLabel,
+    scopeFileCount: snapshot.scopeFileCount,
+    scopeIsFullRepository: snapshot.isFullRepository,
+    checkIds: [...snapshot.checkOrder],
+    completedCount: snapshot.completedCount,
+    totalChecks: snapshot.totalChecks,
+    passedCount: snapshot.passedCount,
+    failedCount: snapshot.failedCount,
+    unknownCount: snapshot.unknownCount,
+    runningCheckIds: [...snapshot.runningCheckIds],
+    statusLabel: snapshot.statusLabel,
+    detailLines: [...snapshot.detailLines]
+  };
+}
+
+function applySessionSnapshot(
+  snapshot: ScanSessionSnapshot,
+  setters: {
+    setProgress: React.Dispatch<React.SetStateAction<ProgressViewState>>;
+    setStreamedReportState: React.Dispatch<React.SetStateAction<StreamedReportState>>;
+    setReport: React.Dispatch<React.SetStateAction<ScanReport | null>>;
+    setActionState: React.Dispatch<React.SetStateAction<ActionState>>;
+  }
+): void {
+  setters.setProgress(previous => syncProgressWithSessionSnapshot(previous, snapshot));
+  setters.setStreamedReportState({
+    checkOrder: [...snapshot.checkOrder],
+    resultsByCheckId: {...snapshot.resultsByCheckId}
+  });
+  setters.setReport(snapshot.report);
+  setters.setActionState(previous => ({
+    ...previous,
+    runningCheckIds: dedupeActionCheckIds([
+      ...snapshot.runningCheckIds,
+      ...previous.runningCheckIds.filter(checkId =>
+        checkId !== snapshot.fixingCheckId && !snapshot.runningCheckIds.includes(checkId)
+      )
+    ]),
+    fixingCheckIds: snapshot.fixingCheckId
+      ? [snapshot.fixingCheckId]
+      : previous.fixingCheckIds.filter(checkId => !snapshot.runningCheckIds.includes(checkId))
+  }));
+}
+
+function dedupeActionCheckIds(checkIds: string[]): string[] {
+  return [...new Set(checkIds)];
+}
+
 function createTokenUsageState(): TokenUsageState {
   return {
     byMessageId: {},
@@ -1375,11 +1771,13 @@ export function buildScanSections(report: Pick<ScanReport, 'checks'> | null): Sc
 function buildDisplayChecks(options: {
   checkIds: string[];
   runningCheckIds: string[];
+  fixingCheckIds: string[];
   streamedResultsByCheckId: Record<string, CheckResult>;
   reportChecks: CheckResult[] | undefined;
 }): DisplayCheck[] {
   const reportById = new Map((options.reportChecks ?? []).map(check => [check.id, check] as const));
   const runningCheckIds = new Set(options.runningCheckIds);
+  const fixingCheckIds = new Set(options.fixingCheckIds);
   const checkIds: string[] = [];
   const seen = new Set<string>();
 
@@ -1400,7 +1798,11 @@ function buildDisplayChecks(options: {
     const result = reportById.get(checkId) ?? options.streamedResultsByCheckId[checkId] ?? null;
     return {
       id: checkId,
-      status: result?.status ?? (runningCheckIds.has(checkId) ? 'running' : 'pending'),
+      status: fixingCheckIds.has(checkId)
+        ? 'fixing'
+        : runningCheckIds.has(checkId)
+          ? 'running'
+          : result?.status ?? 'pending',
       result
     };
   });
@@ -1507,7 +1909,7 @@ export function formatStatusMarker(
   status: CheckDisplayStatus,
   runningIndicatorFrame: string = RUNNING_SPINNER_FRAMES[0]
 ): string {
-  if (status === 'running') {
+  if (status === 'running' || status === 'fixing') {
     return `[${runningIndicatorFrame}]`;
   }
 
@@ -1565,6 +1967,8 @@ function getOutcomeLabel(status: CheckDisplayStatus): string {
       return 'What Is Pending';
     case 'running':
       return 'What Is Running';
+    case 'fixing':
+      return 'What Is Being Fixed';
     case 'fail':
       return 'What Failed';
     case 'unknown':
@@ -1575,10 +1979,16 @@ function getOutcomeLabel(status: CheckDisplayStatus): string {
 }
 
 function formatOutcome(check: DisplayCheck): string {
+  if (check.status === 'fixing') {
+    return 'Check is currently being fixed.';
+  }
+
+  if (check.status === 'running') {
+    return 'Check is currently running.';
+  }
+
   if (!check.result) {
-    return check.status === 'running'
-      ? 'Check is currently running.'
-      : 'Check is pending execution.';
+    return 'Check is pending execution.';
   }
 
   switch (check.result.status) {
@@ -1939,6 +2349,7 @@ function buildFooterText(options: {
   showExitConfirm: boolean;
   showHelp: boolean;
   viewMode: SectionViewMode;
+  reportReady: boolean;
 }): string {
   if (options.showExitConfirm) {
     return '[ESC] Stay | [ARROWS] Select | [ENTER] Confirm';
@@ -1949,10 +2360,14 @@ function buildFooterText(options: {
   }
 
   if (options.viewMode === 'detail') {
-    return '[ESC] List | [UP/DOWN] Scroll | [<- / ->] Check | [ENTER] List';
+    return options.reportReady
+      ? '[ESC] List | [UP/DOWN] Scroll | [<- / ->] Check | [R] Recheck | [F] Fix | [ENTER] List'
+      : '[ESC] List | [UP/DOWN] Scroll | [<- / ->] Check | [ENTER] List';
   }
 
-  return '[ESC] Exit | [ARROWS] Navigate | [PGUP/PGDN] Page | [ENTER] Details';
+  return options.reportReady
+    ? '[ESC] Exit | [ARROWS] Navigate | [PGUP/PGDN] Page | [R] Recheck | [F] Fix | [ENTER] Details'
+    : '[ESC] Exit | [ARROWS] Navigate | [PGUP/PGDN] Page | [ENTER] Details';
 }
 
 function formatDuration(durationMs: number): string {

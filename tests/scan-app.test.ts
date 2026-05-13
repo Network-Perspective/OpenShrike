@@ -174,6 +174,7 @@ describe('formatStatusMarker', () => {
     expect(formatStatusMarker('pass')).toBe('[v]');
     expect(formatStatusMarker('running', '⠋')).toBe('[⠋]');
     expect(formatStatusMarker('running', '⠏')).toBe('[⠏]');
+    expect(formatStatusMarker('fixing', '⠴')).toBe('[⠴]');
     expect(formatStatusMarker('pending')).toBe('[ ]');
   });
 });

@@ -150,6 +150,10 @@ describe('runtime config', () => {
     expect(projectConfig.config.scan.defaultId).toBe('.openshrike/checks');
     expect(projectConfig.config.scan.output).toBe('markdown');
     expect(projectConfig.config.runtime.configPath).toBe('.openshrike/opencode.json');
+    expect(projectConfig.config.runtime.scanAgent).toBe('shrike-checker');
+    expect(projectConfig.config.runtime.scanModel).toBe('azure/gpt-5.4-mini');
+    expect(projectConfig.config.runtime.fixAgent).toBe('shrike-fixer');
+    expect(projectConfig.config.runtime.fixModel).toBe('azure/gpt-5.4-mini');
     expect(projectConfig.config.init.detectedFrom).toEqual(['package.json', 'tsconfig.json']);
     expect(projectConfig.config.init.seedPolicyId).toBe('typescript-baseline');
     expect(result.checksDirectory).toBe(path.join(tempRoot, '.openshrike', 'checks'));
@@ -158,6 +162,8 @@ describe('runtime config', () => {
     expect(readme).toContain('`opencode.json`');
     expect(readme).toContain('`checks/`');
     expect(gitignore).toContain('artifacts/');
+    expect(gitignore).toContain('last-scan.json');
+    expect(gitignore).toContain('last-scan.md');
   });
 
   it('preserves existing .openshrike/.gitignore entries and adds the artifacts rule', async () => {
@@ -344,7 +350,8 @@ describe('runtime config', () => {
     expect(rawRuntimeConfig.agent['shrike-checker'].permission.bash).toBe('ask');
     expect(rawRuntimeConfig.agent['shrike-checker'].extraSetting).toBe(true);
     expect(rawRuntimeConfig.agent['shrike-checker'].model).toBe('azure/gpt-5.4');
-    expect(projectConfig.config.runtime.model).toBe('azure/gpt-5.4');
+    expect(projectConfig.config.runtime.scanModel).toBe('azure/gpt-5.4');
+    expect(projectConfig.config.runtime.fixModel).toBe('azure/gpt-5.4');
   });
 
   it('loads project config from a nested repository path', async () => {

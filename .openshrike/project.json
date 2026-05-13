@@ -13,10 +13,14 @@
   },
   "runtime": {
     "configPath": ".openshrike/opencode.json",
+    "scanAgent": "shrike-checker",
+    "scanModel": "azure/gpt-5.4-mini",
+    "fixAgent": "shrike-fixer",
+    "fixModel": "azure/gpt-5.4",
+    "mode": "native",
+    "parallelism": "auto",
     "agent": "shrike-checker",
-    "model": "azure/gpt-5.4-mini",
-    "mode": "docker",
-    "parallelism": "auto"
+    "model": "azure/gpt-5.4-mini"
   },
   "scan": {
     "defaultKind": "project-checks",

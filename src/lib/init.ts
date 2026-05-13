@@ -13,6 +13,7 @@ import {
 import type {
   ChangeDefaultsAction,
   ExistingInitAction,
+  FixModelChoiceAction,
   InitScreen,
   InitWizardContext,
   OpenCodeDiscoveryAction,
@@ -46,7 +47,8 @@ export class InitCommandCancelledError extends Error {
   }
 }
 
-type SelectionFlow = 'initial' | 'change-model' | 'change-policy';
+type ModelSelectionFlow = 'initial-scan' | 'initial-fix' | 'change-scan' | 'change-fix';
+type SelectionFlow = 'initial' | 'change-policy';
 type ChangeDefaultsOrigin = 'success' | 'existing-init';
 type WriteSelectionsRequest = {
   scope: InitWriteScope;
@@ -63,6 +65,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
   const context = await buildWizardContext(options, toolRoot);
   let screen: InitScreen = context.existingInit.existingFiles.length > 0 ? 'existing-init' : 'opencode-discovery';
   let selectionFlow: SelectionFlow = 'initial';
+  let modelSelectionFlow: ModelSelectionFlow = 'initial-scan';
   let changeDefaultsOrigin: ChangeDefaultsOrigin = 'success';
   const history: InitHistoryItem[] = [];
   const ui = createInitUiSession();
@@ -94,8 +97,14 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
                 ) ?? 'unknown'
               },
               {
-                label: 'model',
-                value: context.existingProjectConfig?.config.runtime.model ?? 'auto'
+                label: 'scan model',
+                value: context.existingProjectConfig?.config.runtime.scanModel ?? 'auto'
+              },
+              {
+                label: 'fix model',
+                value: context.existingProjectConfig?.config.runtime.fixModel
+                  ?? context.existingProjectConfig?.config.runtime.scanModel
+                  ?? 'auto'
               }
             ],
             options: optionsForScreen,
@@ -207,8 +216,10 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
 
           if (context.opencode.models.length === 1) {
             context.selections.model = context.opencode.models[0];
+            context.selections.fixModel = context.opencode.models[0];
             screen = 'policy-selection';
           } else {
+            modelSelectionFlow = 'initial-scan';
             screen = 'model-selection';
           }
           break;
@@ -268,16 +279,17 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
         }
 
         case 'model-selection': {
-          const prompt = 'Select default model';
+          const selectingFixModel = modelSelectionFlow === 'initial-fix' || modelSelectionFlow === 'change-fix';
+          const prompt = selectingFixModel ? 'Select default fix model' : 'Select default scan model';
           const modelOptions = context.opencode.models.map(model => ({
             value: model,
             label: model
           }));
           const selection = await ui.showScreen<string>({
             prompt,
-            bodyLines: buildModelSelectionLines(context),
+            bodyLines: buildModelSelectionLines(context, selectingFixModel),
             options: modelOptions,
-            initialValue: context.selections.model,
+            initialValue: selectingFixModel ? context.selections.fixModel : context.selections.model,
             searchable: true,
             searchLabel: 'Search',
             allowBack: true,
@@ -285,14 +297,23 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
           }, history);
 
           if (selection.type === 'back') {
-            const previousScreen = selectionFlow === 'change-model' ? 'change-defaults' : 'opencode-discovery';
+            const previousScreen = modelSelectionFlow === 'change-scan' || modelSelectionFlow === 'change-fix'
+              ? 'change-defaults'
+              : modelSelectionFlow === 'initial-fix'
+                ? 'fix-model-choice'
+                : 'opencode-discovery';
             popHistoryForScreen(history, previousScreen);
             screen = previousScreen;
             break;
           }
 
-          context.selections.model = selection.value;
-          if (selectionFlow === 'change-model') {
+          if (selectingFixModel) {
+            context.selections.fixModel = selection.value;
+          } else {
+            context.selections.model = selection.value;
+          }
+
+          if (modelSelectionFlow === 'change-scan' || modelSelectionFlow === 'change-fix') {
             await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults', {
               scope: 'project-and-opencode',
               preserveExisting: true,
@@ -300,10 +321,66 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             });
             screen = context.error ? 'error' : 'change-defaults';
             selectionFlow = 'initial';
+            modelSelectionFlow = 'initial-scan';
           } else {
             pushSelectedHistory(history, 'model-selection', prompt, modelOptions, selection.value);
-            screen = 'policy-selection';
+            screen = selectingFixModel ? 'policy-selection' : 'fix-model-choice';
           }
+          break;
+        }
+
+        case 'fix-model-choice': {
+          const prompt = 'Select default fix model';
+          const scanModel = context.selections.model ?? context.opencode.defaultModel ?? context.opencode.models[0] ?? 'default';
+          const suggestedFixModel = resolveSuggestedFixModel(context);
+          const initialValue = suggestedFixModel !== scanModel ? 'use-suggested' : 'same-as-scan';
+          const optionsForScreen: InitScreenOption<FixModelChoiceAction>[] = [
+            {
+              value: 'use-suggested',
+              label: `Suggested: ${suggestedFixModel}`,
+              detail: suggestedFixModel === scanModel ? 'Use the same model for scan and fix' : 'Recommended'
+            },
+            {
+              value: 'same-as-scan',
+              label: `Same as scan: ${scanModel}`
+            },
+            {
+              value: 'choose-other',
+              label: 'Choose another model'
+            }
+          ];
+          const selection = await ui.showScreen<FixModelChoiceAction>({
+            prompt,
+            bodyLines: buildFixModelChoiceLines(context, suggestedFixModel),
+            options: optionsForScreen,
+            initialValue,
+            allowBack: true,
+            allowCancel: true
+          }, history);
+
+          if (selection.type === 'back') {
+            popHistoryForScreen(history, 'model-selection');
+            modelSelectionFlow = 'initial-scan';
+            screen = 'model-selection';
+            break;
+          }
+
+          if (selection.value === 'same-as-scan') {
+            context.selections.fixModel = context.selections.model;
+            pushSelectedHistory(history, 'fix-model-choice', prompt, optionsForScreen, selection.value);
+            screen = 'policy-selection';
+            break;
+          }
+
+          if (selection.value === 'use-suggested') {
+            context.selections.fixModel = suggestedFixModel;
+            pushSelectedHistory(history, 'fix-model-choice', prompt, optionsForScreen, selection.value);
+            screen = 'policy-selection';
+            break;
+          }
+
+          modelSelectionFlow = 'initial-fix';
+          screen = 'model-selection';
           break;
         }
 
@@ -332,9 +409,11 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
           if (selection.type === 'back') {
             const previousScreen = selectionFlow === 'change-policy'
               ? 'change-defaults'
-              : context.opencode.models.length > 1
+              : modelSelectionFlow === 'initial-fix'
                 ? 'model-selection'
-                : 'opencode-discovery';
+                : context.opencode.models.length > 1
+                  ? 'fix-model-choice'
+                  : 'opencode-discovery';
             popHistoryForScreen(history, previousScreen);
             screen = previousScreen;
             break;
@@ -358,6 +437,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             });
             screen = context.error ? 'error' : 'success';
             selectionFlow = 'initial';
+            modelSelectionFlow = 'initial-scan';
           }
           break;
         }
@@ -373,8 +453,8 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             prompt,
             bodyLines: ['Repository initialized for Shrike.'],
             summaryItems: [
-              {label: 'Provider', value: resolveProviderLabel(context.selections.model, context.opencode.providers)},
-              {label: 'Model', value: context.selections.model ?? 'default'},
+              {label: 'Scan model', value: context.selections.model ?? 'default'},
+              {label: 'Fix model', value: context.selections.fixModel ?? context.selections.model ?? 'default'},
               {label: 'Default policy', value: context.selections.policyId},
               {label: 'Runtime mode', value: context.selections.runtimeMode}
             ],
@@ -405,7 +485,10 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
           const optionsForScreen: InitScreenOption<ChangeDefaultsAction>[] = [
             {value: 'policy', label: `Policy: ${context.selections.policyId}`},
             ...(context.opencode.models.length > 1
-              ? [{value: 'model' as const, label: `Model: ${context.selections.model ?? 'default'}`}]
+              ? [
+                  {value: 'scan-model' as const, label: `Scan model: ${context.selections.model ?? 'default'}`},
+                  {value: 'fix-model' as const, label: `Fix model: ${context.selections.fixModel ?? context.selections.model ?? 'default'}`}
+                ]
               : []),
             {value: 'runtime', label: `Runtime: ${context.selections.runtimeMode}`},
             {value: 'parallelism', label: `Parallelism: ${formatParallelism(context.selections.parallelism)}`},
@@ -439,8 +522,14 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             break;
           }
 
-          if (selection.value === 'model') {
-            selectionFlow = 'change-model';
+          if (selection.value === 'scan-model') {
+            modelSelectionFlow = 'change-scan';
+            screen = 'model-selection';
+            break;
+          }
+
+          if (selection.value === 'fix-model') {
+            modelSelectionFlow = 'change-fix';
             screen = 'model-selection';
             break;
           }
@@ -594,9 +683,15 @@ async function buildWizardContext(
     projectDetection,
     policyCatalog,
     selections: {
-      model: existingProjectConfig?.config.runtime.model
+      model: existingProjectConfig?.config.runtime.scanModel
         ?? opencode.defaultModel
         ?? opencode.models[0],
+      fixModel: existingProjectConfig?.config.runtime.fixModel
+        ?? existingProjectConfig?.config.runtime.scanModel
+        ?? resolveSuggestedFixModelFromModels(
+          existingProjectConfig?.config.runtime.scanModel ?? opencode.defaultModel ?? opencode.models[0],
+          opencode.models
+        ),
       policyId: defaultPolicyId,
       runtimeMode: existingProjectConfig?.config.runtime.mode ?? DEFAULT_RUNTIME_MODE,
       parallelism: existingProjectConfig?.config.runtime.parallelism ?? DEFAULT_PARALLELISM,
@@ -623,7 +718,13 @@ function resetSelections(context: InitWizardContext, includeExistingDefaults: bo
 
   if (includeExistingDefaults && context.existingProjectConfig?.config) {
     context.selections = {
-      model: context.existingProjectConfig.config.runtime.model ?? context.opencode.defaultModel ?? context.opencode.models[0],
+      model: context.existingProjectConfig.config.runtime.scanModel ?? context.opencode.defaultModel ?? context.opencode.models[0],
+      fixModel: context.existingProjectConfig.config.runtime.fixModel
+        ?? context.existingProjectConfig.config.runtime.scanModel
+        ?? resolveSuggestedFixModelFromModels(
+          context.existingProjectConfig.config.runtime.scanModel ?? context.opencode.defaultModel ?? context.opencode.models[0],
+          context.opencode.models
+        ),
       policyId: resolveSavedPolicyId(
         context.existingProjectConfig.config,
         context.policyCatalog.map(policy => policy.id)
@@ -639,6 +740,10 @@ function resetSelections(context: InitWizardContext, includeExistingDefaults: bo
 
   context.selections = {
     model: context.opencode.defaultModel ?? context.opencode.models[0],
+    fixModel: resolveSuggestedFixModelFromModels(
+      context.opencode.defaultModel ?? context.opencode.models[0],
+      context.opencode.models
+    ),
     policyId: fallbackPolicyId,
     runtimeMode: DEFAULT_RUNTIME_MODE,
     parallelism: DEFAULT_PARALLELISM,
@@ -818,6 +923,7 @@ async function writeSelectionsOrShowError(
       repoRoot: context.repoRoot,
       policyId: context.selections.policyId,
       model: context.selections.model,
+      fixModel: context.selections.fixModel,
       runtimeMode: context.selections.runtimeMode,
       parallelism: context.selections.parallelism,
       projectType: context.selections.projectType,
@@ -907,6 +1013,9 @@ async function refreshOpenCodeDiscovery(context: InitWizardContext, toolRoot: st
   if (!context.selections.model || !context.opencode.models.includes(context.selections.model)) {
     context.selections.model = context.opencode.defaultModel ?? context.opencode.models[0];
   }
+  if (!context.selections.fixModel || !context.opencode.models.includes(context.selections.fixModel)) {
+    context.selections.fixModel = resolveSuggestedFixModel(context);
+  }
   context.selections.opencodeSetup = resolveDiscoveredOpenCodeSetup(context.opencode);
 }
 
@@ -979,18 +1088,80 @@ function resolveProviderLabel(model: string | undefined, providers: string[]): s
   return providers[0] ?? 'unknown';
 }
 
-function buildModelSelectionLines(context: InitWizardContext): string[] {
+function buildModelSelectionLines(context: InitWizardContext, selectingFixModel: boolean): string[] {
   if (!context.opencode.configPath) {
     return [
       'No global OpenCode config was found. Shrike will save the selected model in `.openshrike/opencode.json`.',
-      'Smaller models are fine for local scans, e.g. `gpt-5.4-mini` or a Haiku-class model.'
+      selectingFixModel
+        ? 'Pick the model Shrike should use for fixes. A stronger model is often better for code changes.'
+        : 'Smaller models are fine for local scans, e.g. `gpt-5.4-mini` or a Haiku-class model.'
     ];
   }
 
   return [
-    'Choose the model Shrike should use for scans.',
-    'Smaller models are fine for local scans, e.g. `gpt-5.4-mini` or a Haiku-class model.'
+    selectingFixModel
+      ? 'Choose the model Shrike should use for fixes.'
+      : 'Choose the model Shrike should use for scans.',
+    selectingFixModel
+      ? 'A stronger model is often better for fixes than for scans.'
+      : 'Smaller models are fine for local scans, e.g. `gpt-5.4-mini` or a Haiku-class model.'
   ];
+}
+
+function buildFixModelChoiceLines(context: InitWizardContext, suggestedFixModel: string): string[] {
+  const scanModel = context.selections.model ?? 'default';
+  return [
+    `Scan model: ${scanModel}`,
+    `Suggested fix model: ${suggestedFixModel}`,
+    'Fixes may benefit from a stronger model, but you can keep the same default if you prefer.'
+  ];
+}
+
+function resolveSuggestedFixModel(context: Pick<InitWizardContext, 'opencode' | 'selections'>): string {
+  return resolveSuggestedFixModelFromModels(context.selections.model, context.opencode.models);
+}
+
+function resolveSuggestedFixModelFromModels(
+  scanModel: string | undefined,
+  availableModels: string[]
+): string {
+  if (!scanModel) {
+    return availableModels[0] ?? 'default';
+  }
+
+  if (availableModels.includes('azure/gpt-5.4')) {
+    return 'azure/gpt-5.4';
+  }
+
+  if (availableModels.includes('openai/gpt-5.1')) {
+    return 'openai/gpt-5.1';
+  }
+
+  const preferredSibling = scanModel
+    .replace(/-mini$/i, '')
+    .replace(/-nano$/i, '')
+    .replace(/-haiku$/i, '-sonnet');
+  if (preferredSibling !== scanModel && availableModels.includes(preferredSibling)) {
+    return preferredSibling;
+  }
+
+  return availableModels.find(model => isStrongerModel(model, scanModel))
+    ?? scanModel;
+}
+
+function isStrongerModel(candidate: string, scanModel: string): boolean {
+  if (candidate === scanModel) {
+    return false;
+  }
+
+  const lightweightTokens = ['mini', 'nano', 'haiku'];
+  const candidateIsLight = lightweightTokens.some(token => candidate.toLowerCase().includes(token));
+  const scanIsLight = lightweightTokens.some(token => scanModel.toLowerCase().includes(token));
+  if (scanIsLight && !candidateIsLight) {
+    return true;
+  }
+
+  return false;
 }
 
 function resolveDiscoveredOpenCodeSetup(

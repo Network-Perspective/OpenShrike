@@ -7,6 +7,8 @@ import type {ScanCommandOptions} from '../src/lib/types.js';
 const mockResolveScanOptions = vi.fn();
 const mockRunScan = vi.fn();
 const mockRunScanWithInk = vi.fn();
+const mockLoadLastScanState = vi.fn();
+const mockSaveLastScanState = vi.fn();
 
 vi.mock('../src/lib/bundle.js', () => ({
   assembleBundleForCheck: vi.fn(),
@@ -26,6 +28,19 @@ vi.mock('../src/lib/scan.js', () => ({
   runScan: mockRunScan
 }));
 
+vi.mock('../src/lib/last-scan.js', () => ({
+  createSavedScanRequest: vi.fn(() => ({
+    checkId: 'check-a',
+    policyId: null,
+    projectChecksDir: null,
+    scanScope: 'full',
+    scanTarget: null,
+    runtimeMode: 'native'
+  })),
+  loadLastScanState: mockLoadLastScanState,
+  saveLastScanState: mockSaveLastScanState
+}));
+
 class MockScanUiCancelledError extends Error {}
 
 vi.mock('../src/ui/scan-app.js', () => ({
@@ -42,6 +57,8 @@ beforeEach(() => {
   mockResolveScanOptions.mockReset();
   mockRunScan.mockReset();
   mockRunScanWithInk.mockReset();
+  mockLoadLastScanState.mockReset();
+  mockSaveLastScanState.mockReset();
   writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 });
 
@@ -105,6 +122,69 @@ describe('executeScanCommand', () => {
     expect(writeSpy).toHaveBeenCalledOnce();
     expect(String(writeSpy.mock.calls[0]?.[0])).toContain('"error"');
     expect(String(writeSpy.mock.calls[0]?.[0])).toContain('"code": "SCAN_FAILED"');
+  });
+
+  it('does not rewrite last-scan state when rendering a saved report', async () => {
+    const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-scan-command-last-scan-'));
+    tempDirectories.push(repoRoot);
+    mockResolveScanOptions.mockResolvedValue(makeOptions(repoRoot, {
+      checkId: 'check-a',
+      lastScan: true
+    }));
+    mockLoadLastScanState.mockResolvedValue({
+      state: {
+        version: 1,
+        savedAt: '2026-05-12T12:00:00.000Z',
+        repo: {
+          path: repoRoot,
+          head: 'abc123',
+          dirty: false
+        },
+        request: {
+          checkId: 'check-a',
+          policyId: null,
+          projectChecksDir: null,
+          scanScope: 'full',
+          scanTarget: null,
+          runtimeMode: 'native'
+        },
+        report: {
+          bundle_id: 'check-a',
+          policy_version: '2026-05-12',
+          repo: {path: repoRoot},
+          summary: {
+            total_checks: 1,
+            passed: 0,
+            failed: 1,
+            unknown: 0
+          },
+          checks: [
+            {
+              id: 'check-a',
+              version: '0.1.0',
+              status: 'fail',
+              confidence: 'HIGH',
+              evidence: [],
+              rationale: 'result',
+              remediation: []
+            }
+          ]
+        }
+      },
+      warnings: ['stale report']
+    });
+
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const exitCode = await executeScanCommand({
+      repoPath: repoRoot,
+      lastScan: true
+    });
+
+    expect(exitCode).toBe(2);
+    expect(mockRunScan).not.toHaveBeenCalled();
+    expect(mockSaveLastScanState).not.toHaveBeenCalled();
+    expect(stderrSpy).toHaveBeenCalledWith('OpenShrike warning: stale report\n');
+    stderrSpy.mockRestore();
   });
 });
 

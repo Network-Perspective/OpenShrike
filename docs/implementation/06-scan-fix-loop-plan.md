@@ -52,6 +52,30 @@ That model is sufficient for read-only review, but it cannot support:
 
 ## Proposed design
 
+## Decision record
+
+- We will implement `shrike fix` as a live session feature that shares the same
+  runtime lifecycle as `shrike scan`, rather than as a detached follow-up job.
+  This keeps the fix agent inside the same operator session so fixes can be
+  applied, rechecked, and persisted without losing state.
+- We will persist the latest completed report to `.openshrike/last-scan.json`
+  and `.openshrike/last-scan.md` so operators can resume from the last known
+  findings without rerunning the scan first.
+- We will start with the `native` runtime path for fixing because Docker-based
+  fixing still assumes a read-only repository mount; supporting write-capable
+  fixes there would require a larger isolation redesign.
+- We will keep separate scan and fix agents/models so read-only review settings
+  stay strict while the fix path can use a distinct edit-capable profile.
+
+Alternatives considered:
+
+- Detached background fix jobs: rejected because they would outlive the live
+  session state and make recheck/persistence coordination harder.
+- Storing only the Markdown snapshot: rejected because the JSON payload is the
+  authoritative resume source and the Markdown view is for inspection only.
+- Enabling Docker fixes in the first pass: rejected because the current Docker
+  design intentionally keeps the repository mount read-only.
+
 ### 1. Introduce a session/controller layer for scan state
 
 Add a long-lived controller around scan execution rather than letting the UI

@@ -89,7 +89,17 @@ describe('runInitCommand', () => {
       },
       (_spec, history) => {
         expect(history.map(item => item.screen)).toEqual(['opencode-discovery']);
-        return {type: 'submit', value: 'azure/gpt-5.4'};
+        expect(_spec.prompt).toBe('Select default scan model');
+        return {type: 'submit', value: 'azure/gpt-5.4-mini'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Select default fix model');
+        expect(spec.options.map(option => option.value)).toEqual([
+          'use-suggested',
+          'same-as-scan',
+          'choose-other'
+        ]);
+        return {type: 'submit', value: 'use-suggested'};
       },
       spec => {
         expect(spec.prompt).toBe('Select default policy');
@@ -104,8 +114,8 @@ describe('runInitCommand', () => {
       spec => {
         expect(spec.prompt).toBe('Setup complete');
         expect(spec.summaryItems).toEqual([
-          {label: 'Provider', value: 'azure'},
-          {label: 'Model', value: 'azure/gpt-5.4'},
+          {label: 'Scan model', value: 'azure/gpt-5.4-mini'},
+          {label: 'Fix model', value: 'azure/gpt-5.4'},
           {label: 'Default policy', value: 'typescript-baseline'},
           {label: 'Runtime mode', value: 'native'}
         ]);
@@ -134,7 +144,7 @@ describe('runInitCommand', () => {
     const projectConfig = await loadProjectConfig(result.projectConfigPath);
     const runtimeConfig = await loadRuntimeConfig(result.opencodeConfigPath, {
       agent: 'shrike-checker',
-      model: 'azure/gpt-5.4'
+      model: 'azure/gpt-5.4-mini'
     });
 
     expect(projectConfig.config.init.projectType).toBe('typescript');
@@ -148,8 +158,10 @@ describe('runInitCommand', () => {
     ]));
     expect(projectConfig.config.runtime).toEqual({
       configPath: '.openshrike/opencode.json',
-      agent: 'shrike-checker',
-      model: 'azure/gpt-5.4',
+      scanAgent: 'shrike-checker',
+      scanModel: 'azure/gpt-5.4-mini',
+      fixAgent: 'shrike-fixer',
+      fixModel: 'azure/gpt-5.4',
       mode: 'native',
       parallelism: 'auto'
     });
@@ -166,8 +178,9 @@ describe('runInitCommand', () => {
     await expect(fs.readdir(path.join(repoRoot, '.openshrike', 'checks'))).resolves.toContain(
       'typescript-arch-001-external-data-not-cast-to-trusted-types.md'
     );
-    expect(runtimeConfig.config.model).toBe('azure/gpt-5.4');
-    expect(runtimeConfig.config.agent?.['shrike-checker']?.model).toBe('azure/gpt-5.4');
+    expect(runtimeConfig.config.model).toBe('azure/gpt-5.4-mini');
+    expect(runtimeConfig.config.agent?.['shrike-checker']?.model).toBe('azure/gpt-5.4-mini');
+    expect(runtimeConfig.config.agent?.['shrike-fixer']?.model).toBe('azure/gpt-5.4');
   });
 
   it('continues from auth-only OpenCode setup and writes the selected model to the repo-local config', async () => {
@@ -216,12 +229,16 @@ describe('runInitCommand', () => {
         return {type: 'submit', value: 'use-discovered'};
       },
       spec => {
-        expect(spec.prompt).toBe('Select default model');
+        expect(spec.prompt).toBe('Select default scan model');
         expect(spec.bodyLines).toEqual([
           'No global OpenCode config was found. Shrike will save the selected model in `.openshrike/opencode.json`.',
           'Smaller models are fine for local scans, e.g. `gpt-5.4-mini` or a Haiku-class model.'
         ]);
         return {type: 'submit', value: 'openai/gpt-5.1-mini'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Select default fix model');
+        return {type: 'submit', value: 'same-as-scan'};
       },
       spec => {
         expect(spec.prompt).toBe('Select default policy');
@@ -230,8 +247,8 @@ describe('runInitCommand', () => {
       spec => {
         expect(spec.prompt).toBe('Setup complete');
         expect(spec.summaryItems).toEqual([
-          {label: 'Provider', value: 'openai'},
-          {label: 'Model', value: 'openai/gpt-5.1-mini'},
+          {label: 'Scan model', value: 'openai/gpt-5.1-mini'},
+          {label: 'Fix model', value: 'openai/gpt-5.1-mini'},
           {label: 'Default policy', value: 'typescript-baseline'},
           {label: 'Runtime mode', value: 'native'}
         ]);
@@ -256,7 +273,8 @@ describe('runInitCommand', () => {
     });
 
     expect(projectConfig.config.init.opencodeSetup).toBe('auth-login');
-    expect(projectConfig.config.runtime.model).toBe('openai/gpt-5.1-mini');
+    expect(projectConfig.config.runtime.scanModel).toBe('openai/gpt-5.1-mini');
+    expect(projectConfig.config.runtime.fixModel).toBe('openai/gpt-5.1-mini');
     expect(runtimeConfig.config.model).toBe('openai/gpt-5.1-mini');
     expect(runtimeConfig.config.provider).toBeUndefined();
   });
@@ -312,7 +330,8 @@ describe('runInitCommand', () => {
         expect(spec.initialValue).toBe('update');
         expect(spec.summaryItems).toEqual([
           {label: 'policy', value: 'typescript-baseline'},
-          {label: 'model', value: 'azure/gpt-5.4-mini'}
+          {label: 'scan model', value: 'azure/gpt-5.4-mini'},
+          {label: 'fix model', value: 'azure/gpt-5.4-mini'}
         ]);
         return {type: 'submit', value: 'update'};
       },
@@ -340,8 +359,8 @@ describe('runInitCommand', () => {
       spec => {
         expect(spec.prompt).toBe('Setup complete');
         expect(spec.summaryItems).toEqual([
-          {label: 'Provider', value: 'azure'},
-          {label: 'Model', value: 'azure/gpt-5.4-mini'},
+          {label: 'Scan model', value: 'azure/gpt-5.4-mini'},
+          {label: 'Fix model', value: 'azure/gpt-5.4-mini'},
           {label: 'Default policy', value: 'typescript-baseline'},
           {label: 'Runtime mode', value: 'docker'}
         ]);
@@ -361,7 +380,8 @@ describe('runInitCommand', () => {
 
     const projectConfig = await loadProjectConfig(path.join(repoRoot, '.openshrike', 'project.json'));
     expect(projectConfig.config.runtime.mode).toBe('docker');
-    expect(projectConfig.config.runtime.model).toBe('azure/gpt-5.4-mini');
+    expect(projectConfig.config.runtime.scanModel).toBe('azure/gpt-5.4-mini');
+    expect(projectConfig.config.runtime.fixModel).toBe('azure/gpt-5.4-mini');
     expect(projectConfig.config.scan.defaultId).toBe('.openshrike/checks');
     expect(projectConfig.config.init.seedPolicyId).toBe('typescript-baseline');
     expect(projectConfig.config.init.detectedFrom).toEqual(['package.json', 'tsconfig.json']);
@@ -501,8 +521,12 @@ describe('runInitCommand', () => {
         return {type: 'submit', value: 'use-discovered'};
       },
       spec => {
-        expect(spec.prompt).toBe('Select default model');
+        expect(spec.prompt).toBe('Select default scan model');
         return {type: 'submit', value: 'azure/gpt-5.4-mini'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Select default fix model');
+        return {type: 'submit', value: 'same-as-scan'};
       },
       spec => {
         expect(spec.prompt).toBe('Select default policy');
@@ -528,7 +552,8 @@ describe('runInitCommand', () => {
 
     const projectConfig = await loadProjectConfig(path.join(repoRoot, '.openshrike', 'project.json'));
     expect(projectConfig.config.init.opencodeSetup).toBe('auth-login');
-    expect(projectConfig.config.runtime.model).toBe('azure/gpt-5.4-mini');
+    expect(projectConfig.config.runtime.scanModel).toBe('azure/gpt-5.4-mini');
+    expect(projectConfig.config.runtime.fixModel).toBe('azure/gpt-5.4-mini');
   });
 });
 

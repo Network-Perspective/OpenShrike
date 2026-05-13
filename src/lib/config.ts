@@ -6,6 +6,8 @@ import {
   CONFIG_DIRECTORY_NAME,
   CONFIG_FILE_NAME,
   DEFAULT_AGENT_NAME,
+  DEFAULT_FIX_AGENT_NAME,
+  DEFAULT_FIX_MODEL,
   DEFAULT_MODEL
 } from './constants.js';
 import {findToolRoot} from './project-root.js';
@@ -60,6 +62,8 @@ export async function loadRuntimeConfig(
   options?: {
     agent?: string | undefined;
     model?: string | undefined;
+    fixAgent?: string | undefined;
+    fixModel?: string | undefined;
   }
 ): Promise<LoadedRuntimeConfig> {
   const absolutePath = path.resolve(configPath);
@@ -73,6 +77,8 @@ export function parseRuntimeConfigContent(
   options?: {
     agent?: string | undefined;
     model?: string | undefined;
+    fixAgent?: string | undefined;
+    fixModel?: string | undefined;
   }
 ): LoadedRuntimeConfig {
   const parsed = runtimeConfigSchema.parse(JSON.parse(raw)) as Config;
@@ -84,7 +90,7 @@ export function parseRuntimeConfigContent(
   const missingEnvVars = requiredEnvVars.filter(name => !process.env[name]);
   const resolved = resolveEnvPlaceholders(parsed);
 
-  const runtimeConfig = ensureShrikeAgent(normalizeRuntimeConfig(resolved as Config), options);
+  const runtimeConfig = ensureShrikeAgents(normalizeRuntimeConfig(resolved as Config), options);
   return {
     configPath,
     config: runtimeConfig,
@@ -93,24 +99,43 @@ export function parseRuntimeConfigContent(
   };
 }
 
-export function buildDefaultOpencodeConfig(model = DEFAULT_MODEL): Config {
-  const permission: NonNullable<Config['permission']> = {
+function buildPermissionProfile(edit: 'allow' | 'deny'): NonNullable<Config['permission']> {
+  return {
     bash: 'allow',
-    edit: 'deny',
+    edit,
     webfetch: 'deny',
     doom_loop: 'deny',
     external_directory: 'deny'
   };
+}
+
+export function buildDefaultOpencodeConfig(options?: {
+  model?: string | undefined;
+  fixModel?: string | undefined;
+  agent?: string | undefined;
+  fixAgent?: string | undefined;
+}): Config {
+  const scanModel = options?.model ?? DEFAULT_MODEL;
+  const fixModel = options?.fixModel ?? scanModel ?? DEFAULT_FIX_MODEL;
+  const scanAgentName = options?.agent ?? DEFAULT_AGENT_NAME;
+  const fixAgentName = options?.fixAgent ?? DEFAULT_FIX_AGENT_NAME;
+  const permission = buildPermissionProfile('deny');
+  const fixPermission = buildPermissionProfile('allow');
 
   return {
     $schema: 'https://opencode.ai/config.json',
-    model,
+    model: scanModel,
     permission,
     agent: {
-      [DEFAULT_AGENT_NAME]: {
+      [scanAgentName]: {
         description: 'Runs OpenShrike checks in a read-only review session.',
-        model,
+        model: scanModel,
         permission
+      },
+      [fixAgentName]: {
+        description: 'Fixes a single OpenShrike finding and may edit repository files.',
+        model: fixModel,
+        permission: fixPermission
       }
     }
   };
@@ -131,23 +156,42 @@ export function ensureLocalNodeBinsOnPath(): void {
   }
 }
 
-function ensureShrikeAgent(
+function ensureShrikeAgents(
   config: Config,
   options?: {
     agent?: string | undefined;
     model?: string | undefined;
+    fixAgent?: string | undefined;
+    fixModel?: string | undefined;
   }
 ): Config {
   const defaultModel = options?.model?.trim() || config.model || DEFAULT_MODEL;
-  const defaultAgentConfig: NonNullable<NonNullable<Config['agent']>[string]> =
-    config.agent?.[DEFAULT_AGENT_NAME] ?? buildDefaultAgentConfig(defaultModel, config.permission);
-
+  const fixModel = options?.fixModel?.trim()
+    || config.agent?.[DEFAULT_FIX_AGENT_NAME]?.model
+    || DEFAULT_FIX_MODEL;
   const agentName = options?.agent?.trim() || DEFAULT_AGENT_NAME;
+  const fixAgentName = options?.fixAgent?.trim() || DEFAULT_FIX_AGENT_NAME;
+  const defaultAgentConfig: NonNullable<NonNullable<Config['agent']>[string]> =
+    config.agent?.[agentName]
+    ?? config.agent?.[DEFAULT_AGENT_NAME]
+    ?? buildDefaultAgentConfig(defaultModel, config.permission);
+  const defaultFixAgentConfig: NonNullable<NonNullable<Config['agent']>[string]> =
+    config.agent?.[fixAgentName]
+    ?? config.agent?.[DEFAULT_FIX_AGENT_NAME]
+    ?? {
+      ...buildDefaultAgentConfig(fixModel, buildPermissionProfile('allow')),
+      description: 'Fixes a single OpenShrike finding and may edit repository files.'
+    };
   const agent = {
     ...config.agent,
     [agentName]: {
       ...defaultAgentConfig,
       model: options?.model?.trim() || defaultAgentConfig.model || defaultModel
+    },
+    [fixAgentName]: {
+      ...defaultFixAgentConfig,
+      model: options?.fixModel?.trim() || defaultFixAgentConfig.model || fixModel,
+      permission: defaultFixAgentConfig.permission ?? buildPermissionProfile('allow')
     }
   };
 

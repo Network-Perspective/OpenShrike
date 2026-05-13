@@ -11,6 +11,8 @@ import {
   CONFIG_DIRECTORY_NAME,
   DEFAULT_AGENT_NAME,
   DEFAULT_DOCKER_IMAGE,
+  DEFAULT_FIX_AGENT_NAME,
+  DEFAULT_FIX_MODEL,
   DEFAULT_MODEL,
   DOCKER_RUNTIME_CONFIG_ENV,
   DOCKER_SCAN_LOG_FILE,
@@ -25,6 +27,8 @@ import {
   type DockerScanRequest,
   tryDecodeDockerWireMessage
 } from './docker-protocol.js';
+import {runFixForCheck} from './fix-runtime.js';
+import {createSavedScanRequest} from './last-scan.js';
 import {resolveProjectCheckSelection} from './checks.js';
 import {CheckEvaluationError, evaluateCheck, getCheckEvaluationOriginalOutput} from './evaluator.js';
 import {resolvePolicyDefinition} from './policies.js';
@@ -38,6 +42,8 @@ import {resolveScanScope} from './scope.js';
 import type {
   CheckResult,
   RuntimeMode,
+  SavedScanRequest,
+  SavedScanScope,
   ScanCommandOptions,
   ScanProgressEvent,
   ScanProgressEventType,
@@ -82,6 +88,735 @@ const DOCKER_OPENCODE_HOME_DIRECTORY_NAME = 'opencode-home';
 export interface ScanHooks {
   onProgress?: (event: ScanProgressEvent) => void;
   onRuntimeEvent?: (event: ScanRuntimeEvent) => void;
+}
+
+interface ScanSessionHooks {
+  onUpdate?: (snapshot: ScanSessionSnapshot) => void;
+  onRuntimeEvent?: (event: ScanRuntimeEvent) => void;
+}
+
+interface PendingReadJob {
+  kind: 'scan' | 'recheck';
+  checkId: string;
+  resolve?: ((result: CheckResult) => void) | undefined;
+  reject?: ((error: unknown) => void) | undefined;
+}
+
+interface ActiveReadJob {
+  kind: PendingReadJob['kind'];
+  workerId: string;
+}
+
+export interface ScanSessionSnapshot {
+  request: SavedScanRequest;
+  repoPath: string;
+  bundleId: string | null;
+  policyVersion: string | null;
+  checkOrder: string[];
+  resultsByCheckId: Record<string, CheckResult>;
+  runningCheckIds: string[];
+  fixingCheckId: string | null;
+  scopeLabel: string;
+  scopeFileCount: number;
+  isFullRepository: boolean;
+  completedCount: number;
+  totalChecks: number;
+  passedCount: number;
+  failedCount: number;
+  unknownCount: number;
+  statusLabel: string;
+  detailLines: string[];
+  isPrepared: boolean;
+  isScanComplete: boolean;
+  report: ScanReport | null;
+}
+
+export interface NativeScanSession {
+  getRequest(): SavedScanRequest;
+  getScope(): SavedScanScope | null;
+  getSnapshot(): ScanSessionSnapshot;
+  getReport(): ScanReport | null;
+  getPersistableReport(): ScanReport | null;
+  start(): Promise<ScanReport>;
+  waitForIdle(): Promise<ScanReport>;
+  requestRecheck(checkId: string): Promise<CheckResult>;
+  requestFix(checkId: string): Promise<CheckResult>;
+  close(): Promise<void>;
+}
+
+export function createNativeScanSession(
+  options: ScanCommandOptions,
+  initialState?: {
+    initialReport: ScanReport;
+    savedRequest: SavedScanRequest;
+    savedScope?: SavedScanScope | undefined;
+  },
+  hooks: ScanSessionHooks = {}
+): NativeScanSession {
+  const request = initialState?.savedRequest ?? createSavedScanRequest(options);
+  const repoPath = path.resolve(initialState?.initialReport.repo.path ?? options.repoPath);
+  const agentName = options.agent?.trim() || DEFAULT_AGENT_NAME;
+  const model = options.model?.trim() || DEFAULT_MODEL;
+  const fixAgent = options.fixAgent?.trim() || agentName || DEFAULT_FIX_AGENT_NAME;
+  const fixModel = options.fixModel?.trim() || options.model?.trim() || DEFAULT_FIX_MODEL;
+  const resultsByCheckId = new Map<string, CheckResult>(
+    (initialState?.initialReport.checks ?? []).map(check => [check.id, check] as const)
+  );
+  const pendingReadJobs: PendingReadJob[] = [];
+  const activeReadJobs = new Map<string, ActiveReadJob>();
+  const idleWaiters: Array<{
+    resolve: (report: ScanReport) => void;
+    reject: (error: unknown) => void;
+  }> = [];
+  const drainWaiters: Array<{
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  }> = [];
+
+  let bundleId = initialState?.initialReport.bundle_id ?? null;
+  let policyVersion = initialState?.initialReport.policy_version ?? null;
+  let checkOrder = initialState?.initialReport.checks.map(check => check.id) ?? [];
+  let scopeContext: Awaited<ReturnType<typeof resolveScanScope>> | null = initialState
+    ? (initialState.savedScope
+        ? {
+            kind: initialState.savedScope.kind,
+            label: initialState.savedScope.label,
+            files: [...initialState.savedScope.files],
+            isFullRepository: initialState.savedScope.isFullRepository
+          }
+        : null)
+    : null;
+  let effectiveParallelism = initialState?.initialReport.execution?.effective_parallelism ?? 1;
+  let requestedParallelism = initialState?.initialReport.execution?.requested_parallelism ?? options.parallelism;
+  let artifactsDir = initialState?.initialReport.execution?.artifacts_dir ?? options.artifactsDir ?? null;
+  let statusLabel = initialState ? 'Loaded saved last scan' : 'Preparing scan';
+  let detailLines: string[] = [];
+  let nextWorkerNumber = 1;
+  let started = Boolean(initialState);
+  let preparing = false;
+  let preparePromise: Promise<void> | null = null;
+  let isPrepared = Boolean(initialState);
+  let isScanComplete = Boolean(initialState);
+  let pumping = false;
+  let pauseDispatch = false;
+  let closed = false;
+  let fatalError: unknown = null;
+  let fixingCheckId: string | null = null;
+  let logger: Awaited<ReturnType<typeof createScanLogger>> | null = null;
+  let loggerPromise: Promise<Awaited<ReturnType<typeof createScanLogger>>> | null = null;
+  let runtimeConfig: LoadedRuntimeConfig | null = null;
+  let runtimeConfigPromise: Promise<LoadedRuntimeConfig | null> | null = null;
+  let runtime: OpenCodeRuntime | null = null;
+  let runtimePromise: Promise<OpenCodeRuntime | null> | null = null;
+  let startPromise: Promise<ScanReport> | null = null;
+  let remainingInitialCheckIds = new Set(checkOrder.filter(checkId => !resultsByCheckId.has(checkId)));
+
+  if (initialState) {
+    statusLabel = 'Scan complete';
+  }
+
+  emitUpdate();
+
+  return {
+    getRequest: () => request,
+    getScope: () => scopeContext ? serializeSavedScope(scopeContext) : null,
+    getSnapshot,
+    getReport,
+    getPersistableReport,
+    async start(): Promise<ScanReport> {
+      if (!startPromise) {
+        startPromise = (async () => {
+          await prepareFreshScan();
+          return await waitForIdle();
+        })();
+      }
+
+      return await startPromise;
+    },
+    async waitForIdle(): Promise<ScanReport> {
+      return await waitForIdle();
+    },
+    async requestRecheck(checkId: string): Promise<CheckResult> {
+      await prepareFreshScan();
+      return await enqueueRecheck(checkId);
+    },
+    async requestFix(checkId: string): Promise<CheckResult> {
+      await prepareFreshScan();
+      return await runExclusiveFix(checkId);
+    },
+    async close(): Promise<void> {
+      if (closed) {
+        return;
+      }
+
+      closed = true;
+      const error = new Error('Scan session closed.');
+      rejectPendingJobs(error);
+      rejectIdleWaiters(error);
+      rejectDrainWaiters(error);
+      await runtime?.close().catch(() => undefined);
+      await logger?.close().catch(() => undefined);
+    }
+  };
+
+  function getSnapshot(): ScanSessionSnapshot {
+    const report = getReport();
+    return {
+      request,
+      repoPath,
+      bundleId,
+      policyVersion,
+      checkOrder: [...checkOrder],
+      resultsByCheckId: Object.fromEntries(resultsByCheckId.entries()),
+      runningCheckIds: [...activeReadJobs.keys()],
+      fixingCheckId,
+      scopeLabel: scopeContext?.label ?? 'Resolving scope',
+      scopeFileCount: scopeContext?.files.length ?? 0,
+      isFullRepository: scopeContext?.isFullRepository ?? false,
+      completedCount: checkOrder.filter(checkId => resultsByCheckId.has(checkId)).length,
+      totalChecks: checkOrder.length,
+      passedCount: countChecks(resultsByCheckId, 'pass'),
+      failedCount: countChecks(resultsByCheckId, 'fail'),
+      unknownCount: countChecks(resultsByCheckId, 'unknown'),
+      statusLabel,
+      detailLines: [...detailLines],
+      isPrepared,
+      isScanComplete,
+      report
+    };
+  }
+
+  function getReport(): ScanReport | null {
+    if (!bundleId || !policyVersion || checkOrder.length === 0) {
+      return initialState?.initialReport ?? null;
+    }
+
+    const checks = checkOrder
+      .map(checkId => resultsByCheckId.get(checkId) ?? null)
+      .filter((check): check is CheckResult => check !== null);
+    if (checks.length !== checkOrder.length) {
+      return null;
+    }
+
+    return buildReport({
+      bundleId,
+      policyVersion,
+      repoPath,
+      checks,
+      runtimeMode: 'native',
+      requestedParallelism,
+      effectiveParallelism,
+      artifactsDir
+    });
+  }
+
+  function getPersistableReport(): ScanReport | null {
+    if (!bundleId || !policyVersion || checkOrder.length === 0) {
+      return initialState?.initialReport ?? null;
+    }
+
+    const checks = checkOrder.map(checkId =>
+      resultsByCheckId.get(checkId)
+      ?? createPendingSavedResult(checkId, activeReadJobs.has(checkId) || pendingReadJobs.some(job => job.checkId === checkId))
+    );
+
+    return buildReport({
+      bundleId,
+      policyVersion,
+      repoPath,
+      checks,
+      runtimeMode: 'native',
+      requestedParallelism,
+      effectiveParallelism,
+      artifactsDir
+    });
+  }
+
+  function serializeSavedScope(scope: Awaited<ReturnType<typeof resolveScanScope>>): SavedScanScope {
+    return {
+      kind: scope.kind,
+      label: scope.label,
+      files: [...scope.files],
+      isFullRepository: scope.isFullRepository
+    };
+  }
+
+  async function prepareFreshScan(): Promise<void> {
+    if (closed) {
+      throw new Error('Scan session closed.');
+    }
+
+    if (fatalError) {
+      throw fatalError;
+    }
+
+    if (isPrepared || preparing) {
+      if (preparePromise) {
+        await preparePromise;
+      }
+
+      return;
+    }
+
+    preparePromise = (async () => {
+      started = true;
+      preparing = true;
+      logger = await ensureLogger();
+      logger?.write('scan.started', {
+        repoPath,
+        policyId: options.policyId ?? null,
+        checkId: options.checkId ?? null,
+        projectChecksDir: options.projectChecksDir ?? null,
+        scanScope: options.scanScope,
+        scanTarget: options.scanTarget ?? null,
+        outputFormat: options.outputFormat,
+        agent: options.agent ?? null,
+        model: options.model ?? null,
+        mockOpencode: options.mockOpencode,
+        configPath: options.configPath ?? null,
+        runtimeMode: 'native',
+        image: options.image ?? null,
+        artifactsDir: options.artifactsDir ?? null,
+        parallelism: options.parallelism,
+        ui: options.ui
+      });
+
+      const stats = await fs.stat(repoPath).catch(() => null);
+      if (!stats?.isDirectory()) {
+        throw new Error(`Repository path not found: ${repoPath}`);
+      }
+
+      const selection = await resolveScanCheckSelection(options);
+      checkOrder = selection.checkIds;
+      bundleId = selection.bundleId;
+      policyVersion = selection.version;
+      remainingInitialCheckIds = new Set(checkOrder.filter(checkId => !resultsByCheckId.has(checkId)));
+      effectiveParallelism = resolveEffectiveParallelism(options.parallelism, checkOrder.length);
+      requestedParallelism = options.parallelism;
+      artifactsDir = options.artifactsDir ?? null;
+      scopeContext = await resolveScanScope(repoPath, request.scanScope, request.scanTarget ?? undefined);
+      statusLabel = 'Scope resolved';
+      detailLines = [];
+      isPrepared = true;
+      emitUpdate();
+
+      if (!scopeContext.isFullRepository && scopeContext.files.length === 0) {
+        for (const checkId of checkOrder) {
+          resultsByCheckId.set(checkId, createNoChangesResult(checkId));
+        }
+        remainingInitialCheckIds.clear();
+        isScanComplete = true;
+        statusLabel = 'Scan complete';
+        logger?.write('scan.completed', {
+          summary: getReport()?.summary ?? null
+        });
+        emitUpdate();
+        resolveDrainWaiters();
+        resolveIdleWaitersIfReady();
+        return;
+      }
+
+      pendingReadJobs.push(...checkOrder
+        .filter(checkId => !resultsByCheckId.has(checkId))
+        .map(checkId => ({kind: 'scan' as const, checkId})));
+      pumpReadJobs();
+    })().catch(error => {
+      failSession(error);
+      throw error;
+    }).finally(() => {
+      preparing = false;
+      preparePromise = null;
+    });
+
+    await preparePromise;
+  }
+
+  async function enqueueRecheck(checkId: string): Promise<CheckResult> {
+    const existing = resultsByCheckId.get(checkId);
+    if (!existing) {
+      throw new Error('Recheck is only available for completed checks.');
+    }
+
+    if (fixingCheckId === checkId) {
+      throw new Error('This check is already being fixed.');
+    }
+
+    if (activeReadJobs.has(checkId) || pendingReadJobs.some(job => job.checkId === checkId)) {
+      throw new Error('This check is already being rechecked.');
+    }
+
+    return await new Promise<CheckResult>((resolve, reject) => {
+      pendingReadJobs.unshift({
+        kind: 'recheck',
+        checkId,
+        resolve,
+        reject
+      });
+      pumpReadJobs();
+    });
+  }
+
+  async function runExclusiveFix(checkId: string): Promise<CheckResult> {
+    const existing = resultsByCheckId.get(checkId);
+    if (!existing || existing.status !== 'fail') {
+      throw new Error('Fix is only available for failed checks.');
+    }
+
+    if (request.runtimeMode !== 'native') {
+      throw new Error('Fix is currently supported only in native runtime mode.');
+    }
+
+    if (fixingCheckId === checkId) {
+      throw new Error('This check is already being fixed.');
+    }
+
+    if (fixingCheckId) {
+      throw new Error('Another action is already running.');
+    }
+
+    if (activeReadJobs.has(checkId)) {
+      throw new Error('This check is already being rechecked.');
+    }
+
+    if (pendingReadJobs.some(job => job.checkId === checkId)) {
+      throw new Error('This check is already being rechecked.');
+    }
+
+    pauseDispatch = true;
+    fixingCheckId = checkId;
+    statusLabel = `Fixing ${checkId}`;
+    detailLines = [];
+    emitUpdate();
+
+    try {
+      await waitForReadDrain();
+      const runtimeInstance = await ensureRuntime();
+      await runFixForCheck({
+        check: existing,
+        request,
+        repoPath,
+        projectChecksDir: request.projectChecksDir ?? undefined,
+        agent: fixAgent,
+        model: fixModel,
+        runtime: runtimeInstance,
+        emulateOpencode: options.mockOpencode,
+        scopeContext: await ensureScopeContext()
+      });
+      const workerId = `fix-worker-${nextWorkerNumber++}`;
+      fixingCheckId = null;
+      activeReadJobs.set(checkId, {
+        kind: 'recheck',
+        workerId
+      });
+      statusLabel = `Rechecking ${checkId}`;
+      emitUpdate();
+      return await runReadCheck({
+        kind: 'recheck',
+        checkId
+      }, workerId);
+    } catch (error) {
+      fixingCheckId = null;
+      emitUpdate();
+      if (!isRecoverableCheckError(error)) {
+        failSession(error);
+      }
+      throw error;
+    } finally {
+      pauseDispatch = false;
+      pumpReadJobs();
+      resolveIdleWaitersIfReady();
+    }
+  }
+
+  function pumpReadJobs(): void {
+    if (pumping || closed || fatalError || !isPrepared || pauseDispatch) {
+      return;
+    }
+
+    pumping = true;
+    try {
+      while (activeReadJobs.size < effectiveParallelism) {
+        const nextIndex = pendingReadJobs.findIndex(job =>
+          !activeReadJobs.has(job.checkId) && fixingCheckId !== job.checkId
+        );
+        if (nextIndex < 0) {
+          break;
+        }
+
+        const [job] = pendingReadJobs.splice(nextIndex, 1);
+        if (!job) {
+          break;
+        }
+
+        const workerId = `worker-${nextWorkerNumber++}`;
+        activeReadJobs.set(job.checkId, {
+          kind: job.kind,
+          workerId
+        });
+        statusLabel = job.kind === 'recheck'
+          ? `Rechecking ${job.checkId}`
+          : `Running ${job.checkId}`;
+        detailLines = [];
+        emitUpdate();
+        void runReadCheck(job, workerId).then(
+          result => {
+            job.resolve?.(result);
+          },
+          error => {
+            job.reject?.(error);
+          }
+        );
+      }
+    } finally {
+      pumping = false;
+      resolveIdleWaitersIfReady();
+    }
+  }
+
+  async function runReadCheck(job: PendingReadJob, workerId: string): Promise<CheckResult> {
+    try {
+      const runtimeInstance = await ensureRuntime();
+      const result = await evaluateCheckWithRecovery({
+        checkId: job.checkId,
+        workerId,
+        repoPath,
+        agent: agentName,
+        model,
+        runtimeConfigPath: runtimeConfig?.configPath,
+        projectChecksDir: request.projectChecksDir ?? undefined,
+        scopeContext: await ensureScopeContext(),
+        emulateOpencode: options.mockOpencode,
+        runtime: runtimeInstance,
+        ignoredRepoPaths: dedupeIgnoredRepoPaths([
+          ...resolveIgnoredRepoPaths(repoPath, logger?.path, options.artifactsDir),
+          ...(options.artifactsDir ? [options.artifactsDir] : [])
+        ]),
+        logger
+      });
+      resultsByCheckId.set(job.checkId, result);
+      if (job.kind === 'scan') {
+        remainingInitialCheckIds.delete(job.checkId);
+      }
+      if (remainingInitialCheckIds.size === 0 && !pendingReadJobs.some(candidate => candidate.kind === 'scan')) {
+        isScanComplete = true;
+      }
+      statusLabel = isScanComplete && activeReadJobs.size <= 1 && !fixingCheckId
+        ? 'Scan complete'
+        : `Completed ${job.checkId} (${result.status})`;
+      detailLines = [];
+      emitUpdate();
+      if (isScanComplete && !fixingCheckId) {
+        logger?.write('scan.completed', {
+          summary: getReport()?.summary ?? null
+        });
+      }
+      return result;
+    } catch (error) {
+      if (!isRecoverableCheckError(error)) {
+        failSession(error);
+      }
+      throw error;
+    } finally {
+      activeReadJobs.delete(job.checkId);
+      emitUpdate();
+      resolveDrainWaiters();
+      if (!pauseDispatch) {
+        pumpReadJobs();
+      }
+      resolveIdleWaitersIfReady();
+    }
+  }
+
+  async function ensureScopeContext(): Promise<Awaited<ReturnType<typeof resolveScanScope>>> {
+    if (scopeContext) {
+      return scopeContext;
+    }
+
+    scopeContext = await resolveScanScope(repoPath, request.scanScope, request.scanTarget ?? undefined);
+    return scopeContext;
+  }
+
+  async function ensureRuntime(): Promise<OpenCodeRuntime | null> {
+    if (options.mockOpencode) {
+      return null;
+    }
+
+    if (runtime) {
+      return runtime;
+    }
+
+    if (!runtimePromise) {
+      runtimePromise = (async () => {
+        runtimeConfig = await ensureRuntimeConfig();
+        runtime = runtimeConfig
+          ? await OpenCodeRuntime.create({
+              repoPath,
+              config: runtimeConfig.config,
+              onEvent: handleRuntimeEvent,
+              logger
+            }).catch(error => {
+              throw createOpenCodeRuntimeCliError(error, {
+                stage: 'start',
+                model,
+                configPath: runtimeConfig?.configPath
+              });
+            })
+          : null;
+        return runtime;
+      })();
+    }
+
+    return await runtimePromise;
+  }
+
+  async function ensureRuntimeConfig(): Promise<LoadedRuntimeConfig | null> {
+    if (options.mockOpencode) {
+      return null;
+    }
+
+    if (!runtimeConfigPromise) {
+      runtimeConfigPromise = loadRuntimeConfig(options.configPath, {
+        agent: agentName,
+        model,
+        fixAgent: options.fixAgent,
+        fixModel: options.fixModel
+      }).catch(error => {
+        throw createRuntimeConfigCliError(error, {
+          configPath: options.configPath,
+          repoPath,
+          model
+        });
+      });
+    }
+
+    const loaded = await runtimeConfigPromise;
+    logger?.write('runtime.config', loaded
+      ? {
+          configPath: loaded.configPath,
+          missingEnvVars: loaded.missingEnvVars
+        }
+      : {
+          mode: 'mock'
+        });
+    if (loaded && loaded.missingEnvVars.length > 0) {
+      throw createMissingEnvironmentCliError(loaded, model);
+    }
+
+    return loaded;
+  }
+
+  async function ensureLogger(): Promise<Awaited<ReturnType<typeof createScanLogger>>> {
+    if (logger) {
+      return logger;
+    }
+
+    if (!loggerPromise) {
+      loggerPromise = createScanLogger(options.logPath);
+    }
+
+    logger = await loggerPromise;
+    return logger;
+  }
+
+  function handleRuntimeEvent(runtimeEvent: RuntimeEventEnvelope): void {
+    logger?.write('opencode.event', {
+      ...summarizeRuntimeEvent(runtimeEvent.event),
+      checkId: runtimeEvent.checkId,
+      workerId: runtimeEvent.workerId,
+      runtimeMode: 'native'
+    });
+    hooks.onRuntimeEvent?.({
+      checkId: runtimeEvent.checkId,
+      workerId: runtimeEvent.workerId,
+      runtimeMode: 'native',
+      event: runtimeEvent.event
+    });
+  }
+
+  async function waitForReadDrain(): Promise<void> {
+    if (activeReadJobs.size === 0) {
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      drainWaiters.push({resolve, reject});
+    });
+  }
+
+  async function waitForIdle(): Promise<ScanReport> {
+    if (fatalError) {
+      throw fatalError;
+    }
+
+    const report = getReport();
+    if (report && activeReadJobs.size === 0 && pendingReadJobs.length === 0 && !fixingCheckId && !preparing) {
+      return report;
+    }
+
+    return await new Promise<ScanReport>((resolve, reject) => {
+      idleWaiters.push({resolve, reject});
+      resolveIdleWaitersIfReady();
+    });
+  }
+
+  function resolveIdleWaitersIfReady(): void {
+    if (fatalError) {
+      rejectIdleWaiters(fatalError);
+      return;
+    }
+
+    const report = getReport();
+    if (!report || activeReadJobs.size > 0 || pendingReadJobs.length > 0 || fixingCheckId || preparing) {
+      return;
+    }
+
+    while (idleWaiters.length > 0) {
+      idleWaiters.shift()?.resolve(report);
+    }
+  }
+
+  function resolveDrainWaiters(): void {
+    if (activeReadJobs.size > 0) {
+      return;
+    }
+
+    while (drainWaiters.length > 0) {
+      drainWaiters.shift()?.resolve();
+    }
+  }
+
+  function rejectIdleWaiters(error: unknown): void {
+    while (idleWaiters.length > 0) {
+      idleWaiters.shift()?.reject(error);
+    }
+  }
+
+  function rejectDrainWaiters(error: unknown): void {
+    while (drainWaiters.length > 0) {
+      drainWaiters.shift()?.reject(error);
+    }
+  }
+
+  function rejectPendingJobs(error: unknown): void {
+    while (pendingReadJobs.length > 0) {
+      pendingReadJobs.shift()?.reject?.(error);
+    }
+  }
+
+  function failSession(error: unknown): void {
+    if (fatalError) {
+      return;
+    }
+
+    fatalError = error;
+    rejectPendingJobs(error);
+    rejectIdleWaiters(error);
+    rejectDrainWaiters(error);
+  }
+
+  function emitUpdate(): void {
+    hooks.onUpdate?.(getSnapshot());
+  }
 }
 
 export async function runScan(
@@ -190,7 +925,9 @@ export async function runNativeScan(
       ? null
       : executionOptions.runtimeConfigOverride ?? await loadRuntimeConfig(options.configPath, {
           agent: agentName,
-          model
+          model,
+          fixAgent: options.fixAgent,
+          fixModel: options.fixModel
         }).catch(error => {
           throw createRuntimeConfigCliError(error, {
             configPath: options.configPath,
@@ -352,7 +1089,9 @@ async function runDockerScan(
     ? null
     : await loadRuntimeConfig(options.configPath, {
         agent: agentName,
-        model
+        model,
+        fixAgent: options.fixAgent,
+        fixModel: options.fixModel
       }).catch(error => {
         throw createRuntimeConfigCliError(error, {
           configPath: options.configPath,
@@ -1397,6 +2136,23 @@ function createNoChangesResult(checkId: string): CheckResult {
     remediation: [
       'Choose a scope that includes changed files.',
       "Use '--scan-scope full' to evaluate the full repository."
+    ]
+  };
+}
+
+function createPendingSavedResult(checkId: string, wasInProgress: boolean): CheckResult {
+  return {
+    id: checkId,
+    version: '0.1.0',
+    status: 'unknown',
+    confidence: 'LOW',
+    evidence: [],
+    rationale: wasInProgress
+      ? 'This check was still running when the last-scan state was saved.'
+      : 'This check had not completed when the last-scan state was saved.',
+    remediation: [
+      'Resume from the saved report and recheck this finding if needed.',
+      'Run a fresh `shrike scan` to regenerate a fully completed report.'
     ]
   };
 }

@@ -92,7 +92,7 @@ export async function resolveScanOutputFormat(
 }
 
 export async function resolveCliOutputFormatFromArgv(argv: string[]): Promise<OutputFormat> {
-  if (argv[2] !== 'scan') {
+  if (argv[2] !== 'scan' && argv[2] !== 'fix') {
     return DEFAULT_OUTPUT;
   }
 
