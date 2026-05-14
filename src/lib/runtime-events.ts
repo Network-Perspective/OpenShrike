@@ -155,6 +155,152 @@ export function extractAssistantTextFromParts(parts: Part[]): string {
     .trim();
 }
 
+export function summarizeRuntimeEvent(
+  event: Event | {type: string; properties?: Record<string, unknown>}
+): Record<string, unknown> {
+  const runtimeEvent = event as {type: string; properties?: Record<string, unknown>};
+
+  if (runtimeEvent.type === 'message.part.delta') {
+    const properties = runtimeEvent.properties as
+      | {
+          sessionID?: string;
+          messageID?: string;
+          partID?: string;
+          field?: string;
+          delta?: string;
+        }
+      | undefined;
+    return {
+      type: runtimeEvent.type,
+      sessionID: properties?.sessionID ?? null,
+      messageID: properties?.messageID ?? null,
+      partID: properties?.partID ?? null,
+      field: properties?.field ?? null,
+      deltaLength: properties?.delta?.length ?? 0
+    };
+  }
+
+  switch (runtimeEvent.type) {
+    case 'message.part.updated': {
+      const properties = runtimeEvent.properties as
+        | {
+            part?: {
+              type?: string;
+              sessionID?: string;
+              messageID?: string;
+              text?: string;
+            };
+          }
+        | undefined;
+      return {
+        type: runtimeEvent.type,
+        partType: properties?.part?.type ?? null,
+        sessionID: properties?.part?.sessionID ?? null,
+        messageID: properties?.part?.messageID ?? null,
+        textLength: typeof properties?.part?.text === 'string' ? properties.part.text.length : undefined
+      };
+    }
+    case 'message.updated': {
+      const properties = runtimeEvent.properties as
+        | {
+            info?: {
+              role?: string;
+              sessionID?: string;
+              id?: string;
+            };
+          }
+        | undefined;
+      return {
+        type: runtimeEvent.type,
+        role: properties?.info?.role ?? null,
+        sessionID: properties?.info?.sessionID ?? null,
+        messageID: properties?.info?.id ?? null
+      };
+    }
+    case 'session.status': {
+      const properties = runtimeEvent.properties as
+        | {
+            sessionID?: string;
+            status?: {
+              type?: string;
+            };
+          }
+        | undefined;
+      return {
+        type: runtimeEvent.type,
+        sessionID: properties?.sessionID ?? null,
+        status: properties?.status?.type ?? null
+      };
+    }
+    case 'session.error': {
+      const properties = runtimeEvent.properties as
+        | {
+            sessionID?: string;
+            error?: {
+              data?: {
+                message?: string;
+              };
+            };
+          }
+        | undefined;
+      return {
+        type: runtimeEvent.type,
+        sessionID: properties?.sessionID ?? null,
+        message: properties?.error?.data?.message ?? 'unknown error'
+      };
+    }
+    case 'permission.updated': {
+      const properties = runtimeEvent.properties as
+        | {
+            sessionID?: string;
+            id?: string;
+            title?: string;
+          }
+        | undefined;
+      return {
+        type: runtimeEvent.type,
+        sessionID: properties?.sessionID ?? null,
+        permissionID: properties?.id ?? null,
+        title: properties?.title ?? null
+      };
+    }
+    case 'permission.replied': {
+      const properties = runtimeEvent.properties as
+        | {
+            sessionID?: string;
+            permissionID?: string;
+            response?: string;
+          }
+        | undefined;
+      return {
+        type: runtimeEvent.type,
+        sessionID: properties?.sessionID ?? null,
+        permissionID: properties?.permissionID ?? null,
+        response: properties?.response ?? null
+      };
+    }
+    case 'command.executed': {
+      const properties = runtimeEvent.properties as
+        | {
+            sessionID?: string;
+            name?: string;
+            arguments?: string;
+          }
+        | undefined;
+      return {
+        type: runtimeEvent.type,
+        sessionID: properties?.sessionID ?? null,
+        name: properties?.name ?? null,
+        arguments: properties?.arguments ?? null
+      };
+    }
+    default:
+      return {
+        type: runtimeEvent.type
+      };
+  }
+}
+
 function applyPartEvent(state: RuntimeStreamState, part: Part, delta?: string): void {
   switch (part.type) {
     case 'text': {

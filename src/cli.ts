@@ -2,6 +2,7 @@
 
 import {Command, CommanderError} from 'commander';
 import {executeFixCommand} from './commands/fix.js';
+import {executeInternalFixWorkerCommand} from './commands/fix-worker.js';
 import {executeInitCommand} from './commands/init.js';
 import {executeInternalScanWorkerCommand} from './commands/scan-worker.js';
 import {executeScanCommand} from './commands/scan.js';
@@ -151,6 +152,16 @@ program
   });
 
 const internal = program.command('internal').description('Internal OpenShrike commands');
+
+internal
+  .command('fix-worker')
+  .description('Internal fix worker entry point.')
+  .requiredOption('--request <PATH>', 'Path to the worker request JSON')
+  .action(async (commandOptions: Record<string, unknown>) => {
+    process.exitCode = await executeInternalFixWorkerCommand({
+      requestPath: asOptionalString(commandOptions.request) ?? ''
+    });
+  });
 
 internal
   .command('scan-worker')

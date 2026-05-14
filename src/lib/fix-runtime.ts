@@ -1,4 +1,8 @@
 import {readCheckDefinition} from './checks.js';
+import {
+  OPENCODE_FIX_POLL_TIMEOUT_MS,
+  OPENCODE_FIX_REQUEST_TIMEOUT_MS
+} from './constants.js';
 import {type OpenCodeRuntime} from './runtime.js';
 import type {CheckResult, SavedScanRequest, ScanScopeContext} from './types.js';
 
@@ -37,7 +41,10 @@ export async function runFixForCheck(options: {
     agent: options.agent,
     model: options.model,
     title: `${options.check.id} fix`,
-    checkId: options.check.id
+    checkId: options.check.id,
+    allowEmptyText: true,
+    requestTimeoutMs: OPENCODE_FIX_REQUEST_TIMEOUT_MS,
+    completionTimeoutMs: OPENCODE_FIX_POLL_TIMEOUT_MS
   });
 }
 

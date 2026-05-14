@@ -283,6 +283,7 @@ function ScanApp(props: {
   const targetLabel = truncateMiddle(report?.repo.path ?? props.options.repoPath, metricValueWidth);
   const scopeLabel = progress.scopeLabel;
   const tokenLabel = `${formatTokenCount(tokenUsage.input)} / ${formatTokenCount(tokenUsage.output)}`;
+  const summaryStatusLabel = resolveSummaryStatusLabel(progress.statusLabel, actionState.message);
   const parallelismLabel = report?.execution
     ? String(report.execution.effective_parallelism)
     : formatRequestedParallelism(props.options.parallelism);
@@ -393,14 +394,18 @@ function ScanApp(props: {
           },
           request: actionRequest,
           repoPath: report.repo.path,
-          checkId: selectedCheck.id
+          checkId: selectedCheck.id,
+          onRuntimeEvent: event => {
+            setTokenUsage(previous => reduceTokenUsageState(previous, event));
+          }
         });
         const nextReport = updateReportCheck(report, nextCheck);
         setReport(nextReport);
         setProgress(previous => syncProgressWithReport(previous, nextReport));
         const warnings = await saveLastScanState({
           report: nextReport,
-          request: actionRequest
+          request: actionRequest,
+          ...(props.initialState?.savedScope ? {scope: props.initialState.savedScope} : {})
         });
         if (warnings.length > 0) {
           setActionState({
@@ -500,14 +505,19 @@ function ScanApp(props: {
           },
           request: actionRequest,
           report,
-          check: failedCheck
+          check: failedCheck,
+          onRuntimeEvent: event => {
+            setTokenUsage(previous => reduceTokenUsageState(previous, event));
+          },
+          ...(props.initialState?.savedScope ? {scope: props.initialState.savedScope} : {})
         });
         const nextReport = updateReportCheck(report, nextCheck);
         setReport(nextReport);
         setProgress(previous => syncProgressWithReport(previous, nextReport));
         const warnings = await saveLastScanState({
           report: nextReport,
-          request: actionRequest
+          request: actionRequest,
+          ...(props.initialState?.savedScope ? {scope: props.initialState.savedScope} : {})
         });
         if (warnings.length > 0) {
           setActionState({
@@ -1046,7 +1056,7 @@ function ScanApp(props: {
                 tokenLabel={tokenLabel}
                 parallelismLabel={parallelismLabel}
                 scopeLabel={scopeLabel}
-                statusLabel={progress.statusLabel}
+                statusLabel={summaryStatusLabel}
                 totalChecks={totalChecks}
                 failedCount={report?.summary.failed ?? progress.failedCount}
                 unknownCount={report?.summary.unknown ?? progress.unknownCount}
@@ -1067,11 +1077,6 @@ function ScanApp(props: {
             </Box>
           )}
         </Box>
-        {actionState.message ? (
-          <Box marginTop={1}>
-            <Text color="cyanBright">{actionState.message}</Text>
-          </Box>
-        ) : null}
         <Box marginTop={1}>
           <Text color="gray">{footerText}</Text>
         </Box>
@@ -1672,6 +1677,13 @@ function applySessionSnapshot(
 
 function dedupeActionCheckIds(checkIds: string[]): string[] {
   return [...new Set(checkIds)];
+}
+
+export function resolveSummaryStatusLabel(
+  progressStatusLabel: string,
+  actionMessage: string | null
+): string {
+  return actionMessage ?? progressStatusLabel;
 }
 
 function createTokenUsageState(): TokenUsageState {

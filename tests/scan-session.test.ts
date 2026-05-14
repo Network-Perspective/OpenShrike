@@ -1,4 +1,7 @@
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {CheckResult, ScanCommandOptions} from '../src/lib/types.js';
 
 const mockResolvePolicyDefinition = vi.fn();
@@ -8,6 +11,7 @@ const mockLoadRuntimeConfig = vi.fn();
 const mockCreateRuntime = vi.fn();
 const mockCreateScanLogger = vi.fn();
 const mockRunFixForCheck = vi.fn();
+let repoRoot = '';
 
 vi.mock('../src/lib/policies.js', () => ({
   resolvePolicyDefinition: mockResolvePolicyDefinition
@@ -52,7 +56,14 @@ vi.mock('../src/lib/fix-runtime.js', () => ({
 
 const {createNativeScanSession} = await import('../src/lib/scan.js');
 
-beforeEach(() => {
+afterEach(async () => {
+  if (repoRoot) {
+    await fs.rm(repoRoot, {recursive: true, force: true});
+    repoRoot = '';
+  }
+});
+
+beforeEach(async () => {
   mockResolvePolicyDefinition.mockReset();
   mockResolveScanScope.mockReset();
   mockEvaluateCheck.mockReset();
@@ -61,6 +72,7 @@ beforeEach(() => {
   mockCreateScanLogger.mockReset();
   mockRunFixForCheck.mockReset();
 
+  repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-scan-session-'));
   mockResolveScanScope.mockResolvedValue({
     kind: 'full',
     label: 'Full repository',
@@ -95,13 +107,17 @@ describe('createNativeScanSession', () => {
     const sequence: string[] = [];
     const firstCheck = deferred<CheckResult>();
     const secondCheck = deferred<CheckResult>();
+    const firstScanStarted = deferred<void>();
+    const secondScanStarted = deferred<void>();
     mockEvaluateCheck.mockImplementation(async ({checkId}: {checkId: string}) => {
       sequence.push(`scan:${checkId}`);
       if (checkId === 'check-a' && sequence.filter(step => step === 'scan:check-a').length === 1) {
+        firstScanStarted.resolve();
         return await firstCheck.promise;
       }
 
       if (checkId === 'check-b') {
+        secondScanStarted.resolve();
         return await secondCheck.promise;
       }
 
@@ -111,23 +127,22 @@ describe('createNativeScanSession', () => {
       sequence.push(`fix:${check.id}`);
     });
 
-    const session = createNativeScanSession(makeOptions());
+    const updates = createSnapshotUpdates();
+    const session = createNativeScanSession(makeOptions(), undefined, {
+      onUpdate: updates.onUpdate
+    });
     const completion = session.start();
 
-    await waitUntil(() => {
-      expect(sequence).toEqual(['scan:check-a']);
-    });
+    await firstScanStarted.promise;
+    expect(sequence).toEqual(['scan:check-a']);
 
     firstCheck.resolve(makeResult('check-a', 'fail'));
-    await waitUntil(() => {
-      expect(sequence).toEqual(['scan:check-a', 'scan:check-b']);
-    });
+    await secondScanStarted.promise;
+    expect(sequence).toEqual(['scan:check-a', 'scan:check-b']);
 
     const fixPromise = session.requestFix('check-a');
-    await waitUntil(() => {
-      expect(session.getSnapshot().fixingCheckId).toBe('check-a');
-      expect(sequence).toEqual(['scan:check-a', 'scan:check-b']);
-    });
+    await updates.waitFor(snapshot => snapshot.fixingCheckId === 'check-a');
+    expect(sequence).toEqual(['scan:check-a', 'scan:check-b']);
 
     secondCheck.resolve(makeResult('check-b', 'pass'));
     await fixPromise;
@@ -155,13 +170,17 @@ describe('createNativeScanSession', () => {
     const sequence: string[] = [];
     const firstCheck = deferred<CheckResult>();
     const secondCheck = deferred<CheckResult>();
+    const firstScanStarted = deferred<void>();
+    const secondScanStarted = deferred<void>();
     mockEvaluateCheck.mockImplementation(async ({checkId}: {checkId: string}) => {
       sequence.push(`scan:${checkId}`);
       if (checkId === 'check-a' && sequence.filter(step => step === 'scan:check-a').length === 1) {
+        firstScanStarted.resolve();
         return await firstCheck.promise;
       }
 
       if (checkId === 'check-b') {
+        secondScanStarted.resolve();
         return await secondCheck.promise;
       }
 
@@ -171,18 +190,14 @@ describe('createNativeScanSession', () => {
     const session = createNativeScanSession(makeOptions());
     const completion = session.start();
 
-    await waitUntil(() => {
-      expect(sequence).toEqual(['scan:check-a']);
-    });
+    await firstScanStarted.promise;
+    expect(sequence).toEqual(['scan:check-a']);
     firstCheck.resolve(makeResult('check-a', 'fail'));
-    await waitUntil(() => {
-      expect(sequence).toEqual(['scan:check-a', 'scan:check-b']);
-    });
+    await secondScanStarted.promise;
+    expect(sequence).toEqual(['scan:check-a', 'scan:check-b']);
 
     const recheckPromise = session.requestRecheck('check-a');
-    await waitUntil(() => {
-      expect(sequence).toEqual(['scan:check-a', 'scan:check-b']);
-    });
+    expect(sequence).toEqual(['scan:check-a', 'scan:check-b']);
 
     secondCheck.resolve(makeResult('check-b', 'pass'));
     const rechecked = await recheckPromise;
@@ -211,10 +226,14 @@ describe('createNativeScanSession', () => {
       return makeResult(checkId, 'pass');
     });
 
-    const session = createNativeScanSession(makeOptions());
+    const updates = createSnapshotUpdates();
+    const session = createNativeScanSession(makeOptions(), undefined, {
+      onUpdate: updates.onUpdate
+    });
     const completion = session.start();
 
-    await waitUntil(() => {
+    await updates.waitFor(snapshot => {
+      expect(snapshot.runningCheckIds).toEqual(['check-a']);
       expect(session.getSnapshot().runningCheckIds).toEqual(['check-a']);
       const savedReport = session.getPersistableReport();
       expect(savedReport?.summary.total_checks).toBe(2);
@@ -222,6 +241,7 @@ describe('createNativeScanSession', () => {
         expect.objectContaining({id: 'check-a', status: 'unknown'}),
         expect.objectContaining({id: 'check-b', status: 'unknown'})
       ]));
+      return true;
     });
 
     firstCheck.resolve(makeResult('check-a', 'fail'));
@@ -285,7 +305,7 @@ function makeOptions(overrides: Partial<ScanCommandOptions> = {}): ScanCommandOp
     checkId: undefined,
     policyId: 'policy-a',
     projectChecksDir: undefined,
-    repoPath: '/home/blazej/Projects/OpenShrike.fix',
+    repoPath: repoRoot,
     outputFormat: 'markdown',
     agent: 'shrike-checker',
     model: 'azure/gpt-5.4-mini',
@@ -334,20 +354,44 @@ function deferred<T>() {
   };
 }
 
-async function waitUntil(assertion: () => void, timeoutMs: number = 1000): Promise<void> {
-  const startedAt = Date.now();
-  let lastError: unknown = null;
+function createSnapshotUpdates() {
+  let latestSnapshot: ReturnType<ReturnType<typeof createNativeScanSession>['getSnapshot']> | null = null;
+  const waiters: Array<{
+    predicate: (snapshot: ReturnType<ReturnType<typeof createNativeScanSession>['getSnapshot']>) => boolean;
+    resolve: (snapshot: ReturnType<ReturnType<typeof createNativeScanSession>['getSnapshot']>) => void;
+    reject: (error: unknown) => void;
+  }> = [];
 
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      lastError = error;
-      await Promise.resolve();
-      await new Promise(resolve => setTimeout(resolve, 5));
+  return {
+    onUpdate(snapshot: ReturnType<ReturnType<typeof createNativeScanSession>['getSnapshot']>) {
+      latestSnapshot = snapshot;
+      for (let index = waiters.length - 1; index >= 0; index -= 1) {
+        const waiter = waiters[index];
+        if (!waiter) {
+          continue;
+        }
+
+        try {
+          if (waiter.predicate(snapshot)) {
+            waiters.splice(index, 1);
+            waiter.resolve(snapshot);
+          }
+        } catch (error) {
+          waiters.splice(index, 1);
+          waiter.reject(error);
+        }
+      }
+    },
+    async waitFor(
+      predicate: (snapshot: ReturnType<ReturnType<typeof createNativeScanSession>['getSnapshot']>) => boolean
+    ) {
+      if (latestSnapshot && predicate(latestSnapshot)) {
+        return latestSnapshot;
+      }
+
+      return await new Promise<ReturnType<ReturnType<typeof createNativeScanSession>['getSnapshot']>>((resolve, reject) => {
+        waiters.push({predicate, resolve, reject});
+      });
     }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  };
 }

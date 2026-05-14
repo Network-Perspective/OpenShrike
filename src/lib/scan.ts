@@ -3,7 +3,6 @@ import {spawn} from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type {Event} from '@opencode-ai/sdk';
 import {CliError} from './cli-error.js';
 import {
   ARTIFACTS_DIRECTORY_NAME,
@@ -37,6 +36,7 @@ import {findToolRoot} from './project-root.js';
 import {RepoMutationGuard} from './repo-guard.js';
 import {sortChecksByStatus} from './report.js';
 import {createScanLogger} from './scan-log.js';
+import {summarizeRuntimeEvent} from './runtime-events.js';
 import {type RuntimeEventEnvelope, OpenCodeRuntime} from './runtime.js';
 import {resolveScanScope} from './scope.js';
 import type {
@@ -1290,15 +1290,18 @@ async function runDockerScan(
   };
 }
 
-async function ensureDockerRuntimeImage(
+export async function ensureDockerRuntimeImage(
   imageRef: string,
-  progressTracker: ReturnType<typeof createRuntimePreparationTracker>
+  progressTracker?: {
+    setStatus: (statusLabel: string) => void;
+    pushLine: (line: string) => void;
+  }
 ): Promise<void> {
   const toolRoot = findToolRoot();
   const dockerfilePath = path.join(toolRoot, 'docker', 'openshrike-runtime.Dockerfile');
   const runtimeContextHash = await computeDockerRuntimeContextHash(toolRoot);
 
-  progressTracker.setStatus(`Checking Docker runtime image (${imageRef})`);
+  progressTracker?.setStatus(`Checking Docker runtime image (${imageRef})`);
   try {
     const {stdout} = await runProcess('docker', [
       'image',
@@ -1319,7 +1322,7 @@ async function ensureDockerRuntimeImage(
   }
 
   await fs.access(dockerfilePath);
-  progressTracker.setStatus(`Preparing Docker image (${imageRef})`);
+  progressTracker?.setStatus(`Preparing Docker image (${imageRef})`);
   await runStreamingProcess('docker', [
     'build',
     '--label',
@@ -1333,10 +1336,10 @@ async function ensureDockerRuntimeImage(
     cwd: toolRoot,
     env: process.env,
     onStdoutLine: line => {
-      progressTracker.pushLine(line);
+      progressTracker?.pushLine(line);
     },
     onStderrLine: line => {
-      progressTracker.pushLine(line);
+      progressTracker?.pushLine(line);
     }
   });
 }
@@ -2557,150 +2560,4 @@ function dedupeIgnoredRepoPaths(paths: string[]): string[] {
   }
 
   return deduped;
-}
-
-function summarizeRuntimeEvent(
-  event: Event | {type: string; properties?: Record<string, unknown>}
-): Record<string, unknown> {
-  const runtimeEvent = event as {type: string; properties?: Record<string, unknown>};
-
-  if (runtimeEvent.type === 'message.part.delta') {
-    const properties = runtimeEvent.properties as
-      | {
-          sessionID?: string;
-          messageID?: string;
-          partID?: string;
-          field?: string;
-          delta?: string;
-        }
-      | undefined;
-    return {
-      type: runtimeEvent.type,
-      sessionID: properties?.sessionID ?? null,
-      messageID: properties?.messageID ?? null,
-      partID: properties?.partID ?? null,
-      field: properties?.field ?? null,
-      deltaLength: properties?.delta?.length ?? 0
-    };
-  }
-
-  switch (runtimeEvent.type) {
-    case 'message.part.updated': {
-      const properties = runtimeEvent.properties as
-        | {
-            part?: {
-              type?: string;
-              sessionID?: string;
-              messageID?: string;
-              text?: string;
-            };
-          }
-        | undefined;
-      return {
-        type: runtimeEvent.type,
-        partType: properties?.part?.type ?? null,
-        sessionID: properties?.part?.sessionID ?? null,
-        messageID: properties?.part?.messageID ?? null,
-        textLength: typeof properties?.part?.text === 'string' ? properties.part.text.length : undefined
-      };
-    }
-    case 'message.updated': {
-      const properties = runtimeEvent.properties as
-        | {
-            info?: {
-              role?: string;
-              sessionID?: string;
-              id?: string;
-            };
-          }
-        | undefined;
-      return {
-        type: runtimeEvent.type,
-        role: properties?.info?.role ?? null,
-        sessionID: properties?.info?.sessionID ?? null,
-        messageID: properties?.info?.id ?? null
-      };
-    }
-    case 'session.status': {
-      const properties = runtimeEvent.properties as
-        | {
-            sessionID?: string;
-            status?: {
-              type?: string;
-            };
-          }
-        | undefined;
-      return {
-        type: runtimeEvent.type,
-        sessionID: properties?.sessionID ?? null,
-        status: properties?.status?.type ?? null
-      };
-    }
-    case 'session.error': {
-      const properties = runtimeEvent.properties as
-        | {
-            sessionID?: string;
-            error?: {
-              data?: {
-                message?: string;
-              };
-            };
-          }
-        | undefined;
-      return {
-        type: runtimeEvent.type,
-        sessionID: properties?.sessionID ?? null,
-        message: properties?.error?.data?.message ?? 'unknown error'
-      };
-    }
-    case 'permission.updated': {
-      const properties = runtimeEvent.properties as
-        | {
-            sessionID?: string;
-            id?: string;
-            title?: string;
-          }
-        | undefined;
-      return {
-        type: runtimeEvent.type,
-        sessionID: properties?.sessionID ?? null,
-        permissionID: properties?.id ?? null,
-        title: properties?.title ?? null
-      };
-    }
-    case 'permission.replied': {
-      const properties = runtimeEvent.properties as
-        | {
-            sessionID?: string;
-            permissionID?: string;
-            response?: string;
-          }
-        | undefined;
-      return {
-        type: runtimeEvent.type,
-        sessionID: properties?.sessionID ?? null,
-        permissionID: properties?.permissionID ?? null,
-        response: properties?.response ?? null
-      };
-    }
-    case 'command.executed': {
-      const properties = runtimeEvent.properties as
-        | {
-            sessionID?: string;
-            name?: string;
-            arguments?: string;
-          }
-        | undefined;
-      return {
-        type: runtimeEvent.type,
-        sessionID: properties?.sessionID ?? null,
-        name: properties?.name ?? null,
-        arguments: properties?.arguments ?? null
-      };
-    }
-    default:
-      return {
-        type: runtimeEvent.type
-      };
-  }
 }

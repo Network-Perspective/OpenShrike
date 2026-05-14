@@ -47,10 +47,6 @@ export async function executeFixCommand(rawOptions: Partial<ScanCommandOptions>)
       });
     }
 
-    if (savedRequest.runtimeMode !== 'native') {
-      throw new Error('Fix is currently supported only in native runtime mode.');
-    }
-
     let nextReport = report;
 
     if (savedRequest.runtimeMode === 'native') {
@@ -113,12 +109,14 @@ export async function executeFixCommand(rawOptions: Partial<ScanCommandOptions>)
           },
           request: savedRequest,
           report: nextReport,
-          check
+          check,
+          ...(savedScope ? {scope: savedScope} : {})
         });
         nextReport = updateReportCheck(nextReport, rechecked);
         const saveWarnings = await saveLastScanState({
           report: nextReport,
-          request: savedRequest
+          request: savedRequest,
+          ...(savedScope ? {scope: savedScope} : {})
         });
         saveWarnings.forEach(warning => {
           process.stderr.write(`OpenShrike warning: ${warning}\n`);

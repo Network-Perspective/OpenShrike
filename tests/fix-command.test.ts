@@ -22,13 +22,13 @@ vi.mock('../src/lib/scan.js', () => ({
 }));
 
 vi.mock('../src/lib/last-scan.js', () => ({
-  createSavedScanRequest: vi.fn(() => ({
+  createSavedScanRequest: vi.fn((options?: {runtimeMode?: 'native' | 'docker'}) => ({
     checkId: null,
     policyId: 'policy-a',
     projectChecksDir: null,
     scanScope: 'full',
     scanTarget: null,
-    runtimeMode: 'native'
+    runtimeMode: options?.runtimeMode ?? 'native'
   })),
   loadLastScanState: mockLoadLastScanState,
   saveLastScanState: mockSaveLastScanState
@@ -115,6 +115,37 @@ describe('executeFixCommand', () => {
     expect(mockRunScan).not.toHaveBeenCalled();
     expect(mockCreateNativeScanSession).toHaveBeenCalledOnce();
     expect(stderrSpy).toHaveBeenCalledWith('OpenShrike warning: stale report\n');
+  });
+
+  it('uses the docker fix path when the saved request runtime is docker', async () => {
+    const report = makeReport('fail');
+    const fixedCheck = {
+      ...report.checks[0],
+      status: 'pass' as const
+    };
+
+    mockResolveScanOptions.mockResolvedValue(makeOptions({
+      policyId: 'policy-a',
+      runtimeMode: 'docker'
+    }));
+    mockRunScan.mockResolvedValue(report);
+    mockSaveLastScanState.mockResolvedValue([]);
+    mockFixAndRecheckCheck.mockResolvedValue(fixedCheck);
+
+    const exitCode = await executeFixCommand({
+      repoPath: '.',
+      runtimeMode: 'docker'
+    });
+
+    expect(exitCode).toBe(0);
+    expect(mockCreateNativeScanSession).not.toHaveBeenCalled();
+    expect(mockFixAndRecheckCheck).toHaveBeenCalledOnce();
+    expect(mockFixAndRecheckCheck).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        runtimeMode: 'docker'
+      })
+    }));
+    expect(stdoutSpy).toHaveBeenCalledWith('# fixed report\n');
   });
 });
 
