@@ -5,7 +5,14 @@ import {
   MAX_CHECK_REMEDIATION_ITEMS,
   RUNTIME_MODE_VALUES
 } from './constants.js';
-import type {CheckResult, ScanProgressEvent, ScanReport, ScanRuntimeEvent} from './types.js';
+import type {
+  CheckResult,
+  SavedScanRequest,
+  SavedScanScope,
+  ScanProgressEvent,
+  ScanReport,
+  ScanRuntimeEvent
+} from './types.js';
 
 const checkStatusSchema = z.enum(['pass', 'fail', 'unknown']);
 const confidenceSchema = z.enum(['HIGH', 'MEDIUM', 'LOW']);
@@ -99,10 +106,50 @@ const dockerScanRequestSchema = z.object({
   ignoredRepoPaths: z.array(z.string().trim().min(1)).default([])
 });
 
+const savedScanRequestSchema = z.object({
+  checkId: z.string().trim().min(1).nullable(),
+  policyId: z.string().trim().min(1).nullable(),
+  projectChecksDir: z.string().trim().min(1).nullable(),
+  scanScope: z.enum(['uncommitted', 'commit', 'branch', 'pr', 'full']),
+  scanTarget: z.string().trim().min(1).nullable(),
+  runtimeMode: runtimeModeSchema
+});
+
+const savedScanScopeSchema = z.object({
+  kind: z.enum(['uncommitted', 'commit', 'branch', 'pr', 'full']),
+  label: z.string().trim().min(1),
+  files: z.array(z.string().trim().min(1)),
+  isFullRepository: z.boolean()
+});
+
+const dockerFixRequestSchema = z.object({
+  repoPath: z.string().trim().min(1),
+  projectChecksDir: z.string().trim().min(1).nullable().default(null),
+  logPath: z.string().trim().min(1).nullable().default(null),
+  request: savedScanRequestSchema,
+  check: checkResultSchema,
+  scope: savedScanScopeSchema.optional(),
+  agent: z.string().trim().min(1),
+  model: z.string().trim().min(1),
+  emulateOpencode: z.boolean().default(false)
+});
+
 export interface DockerScanRequest {
   options: Record<string, unknown>;
   reportPath: string;
   ignoredRepoPaths: string[];
+}
+
+export interface DockerFixRequest {
+  repoPath: string;
+  projectChecksDir: string | null;
+  logPath: string | null;
+  request: SavedScanRequest;
+  check: CheckResult;
+  scope?: SavedScanScope | undefined;
+  agent: string;
+  model: string;
+  emulateOpencode: boolean;
 }
 
 export interface DockerProgressWireMessage {
@@ -123,6 +170,10 @@ export function encodeDockerWireMessage(message: DockerWireMessage): string {
 
 export function parseDockerScanRequest(input: unknown): DockerScanRequest {
   return dockerScanRequestSchema.parse(input);
+}
+
+export function parseDockerFixRequest(input: unknown): DockerFixRequest {
+  return dockerFixRequestSchema.parse(input);
 }
 
 export function tryDecodeDockerWireMessage(line: string): DockerWireMessage | null {

@@ -131,6 +131,8 @@ export interface ScanCommandOptions {
   outputFormat: OutputFormat;
   agent?: string | undefined;
   model?: string | undefined;
+  fixAgent?: string | undefined;
+  fixModel?: string | undefined;
   emitBundlePath?: string | undefined;
   scanScope: ScanScopeKind;
   scanTarget?: string | undefined;
@@ -142,6 +144,7 @@ export interface ScanCommandOptions {
   artifactsDir?: string | undefined;
   parallelism: ParallelismValue;
   ui: boolean;
+  lastScan?: boolean | undefined;
 }
 
 export interface ShrikeProjectConfig {
@@ -155,8 +158,10 @@ export interface ShrikeProjectConfig {
   };
   runtime: {
     configPath: string;
-    agent: string;
-    model?: string | undefined;
+    scanAgent: string;
+    scanModel?: string | undefined;
+    fixAgent: string;
+    fixModel?: string | undefined;
     mode: RuntimeMode;
     parallelism: ParallelismValue;
   };
@@ -179,4 +184,33 @@ export interface AgentCheckPayload {
   evidence?: string[];
   rationale?: string;
   remediation?: string[];
+}
+
+export interface SavedScanRequest {
+  checkId: string | null;
+  policyId: string | null;
+  projectChecksDir: string | null;
+  scanScope: ScanScopeKind;
+  scanTarget: string | null;
+  runtimeMode: RuntimeMode;
+}
+
+export interface SavedScanScope {
+  kind: ScanScopeKind;
+  label: string;
+  files: string[];
+  isFullRepository: boolean;
+}
+
+export interface SavedLastScanState {
+  version: 1;
+  savedAt: string;
+  repo: {
+    path: string;
+    head: string | null;
+    dirty: boolean;
+  };
+  request: SavedScanRequest;
+  scope?: SavedScanScope | undefined;
+  report: ScanReport;
 }

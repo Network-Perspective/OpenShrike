@@ -12,8 +12,9 @@
 ## Deployment tiers
 
 ### Standard mode (local development)
-- Opencode runs natively with read-only agent permissions.
-- The agent permission config is the security boundary.
+- Opencode runs natively with separate scan and fix agents.
+- The scan agent is read-only; the fix agent is edit-capable and opt-in.
+- The agent permission config is still the primary local security boundary.
 - Suitable for individual developers on their own workstations.
 - No containers required; fast and zero setup friction.
 - Example opencode permission config:
@@ -51,6 +52,8 @@
 - Inputs are categorized: public, internal, secret. Only public/internal allowed.
 - Redaction pass for logs before any export or feedback output.
 - Policy assembler limits context by emitting only the checks selected.
+- Fix prompts include only the selected check content and the selected failing
+  result, not the full report bundle.
 
 ## Threats and mitigations
 - Prompt injection in repo files: treat repo content as untrusted input.

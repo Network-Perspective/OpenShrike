@@ -31,6 +31,8 @@ const rawScanOptionsSchema = z.object({
   outputFormat: z.enum(OUTPUT_VALUES).optional(),
   agent: z.string().trim().min(1).optional(),
   model: z.string().trim().min(1).optional(),
+  fixAgent: z.string().trim().min(1).optional(),
+  fixModel: z.string().trim().min(1).optional(),
   emitBundlePath: z.string().trim().min(1).optional(),
   scanScope: z.enum(SCOPE_VALUES).optional(),
   scanTarget: z.string().trim().min(1).optional(),
@@ -41,7 +43,8 @@ const rawScanOptionsSchema = z.object({
   image: z.string().trim().min(1).optional(),
   artifactsDir: z.string().trim().min(1).optional(),
   parallelism: parallelismSchema.optional(),
-  ui: z.boolean().optional()
+  ui: z.boolean().optional(),
+  lastScan: z.boolean().optional()
 });
 
 const scanOptionsSchema = z
@@ -53,6 +56,8 @@ const scanOptionsSchema = z
     outputFormat: z.enum(OUTPUT_VALUES).default(DEFAULT_OUTPUT),
     agent: z.string().trim().min(1).optional(),
     model: z.string().trim().min(1).optional(),
+    fixAgent: z.string().trim().min(1).optional(),
+    fixModel: z.string().trim().min(1).optional(),
     emitBundlePath: z.string().trim().min(1).optional(),
     scanScope: z.enum(SCOPE_VALUES).default(DEFAULT_SCAN_SCOPE),
     scanTarget: z.string().trim().min(1).optional(),
@@ -63,9 +68,22 @@ const scanOptionsSchema = z
     image: z.string().trim().min(1).optional(),
     artifactsDir: z.string().trim().min(1).optional(),
     parallelism: parallelismSchema.default(DEFAULT_PARALLELISM),
-    ui: z.boolean().default(true)
+    ui: z.boolean().default(true),
+    lastScan: z.boolean().default(false)
   })
   .superRefine((value, ctx) => {
+    if (value.lastScan) {
+      const hasConflictingSelection = Boolean(value.checkId || value.policyId || value.projectChecksDir || value.scanTarget);
+      if (hasConflictingSelection) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: '`--last-scan` cannot be combined with explicit selection or scope-target flags.'
+        });
+      }
+
+      return;
+    }
+
     if (value.projectChecksDir) {
       if (value.policyId) {
         ctx.addIssue({
@@ -113,6 +131,13 @@ export async function resolveScanOptions(input: unknown): Promise<ScanCommandOpt
     ...rawOptions
   };
 
+  if (rawOptions.lastScan) {
+    delete merged.checkId;
+    delete merged.policyId;
+    delete merged.projectChecksDir;
+    delete merged.scanTarget;
+  }
+
   if (!merged.repoPath) {
     merged.repoPath = loadedProjectConfig
       ? resolveProjectConfigRelativePath(loadedProjectConfig, loadedProjectConfig.config.scan.repo)
@@ -147,8 +172,10 @@ async function buildProjectConfigScanOptions(
           : {}),
     repoPath: resolveProjectConfigRelativePath(loadedProjectConfig, config.scan.repo),
     outputFormat: config.scan.output,
-    agent: config.runtime.agent,
-    model: config.runtime.model,
+    agent: config.runtime.scanAgent,
+    model: config.runtime.scanModel,
+    fixAgent: config.runtime.fixAgent,
+    fixModel: config.runtime.fixModel,
     scanScope: config.scan.scope,
     configPath: resolveProjectConfigRelativePath(loadedProjectConfig, config.runtime.configPath),
     runtimeMode: config.runtime.mode,

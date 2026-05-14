@@ -21,6 +21,9 @@
 - Docker mode runs the scan inside an ephemeral container with a clean
   filesystem view and a read-only repo mount.
 - Native mode remains the local default for fast iteration and lower setup cost.
+- Native mode must support both:
+  - read-only scan and recheck sessions
+  - exclusive edit-capable fix sessions triggered explicitly by the operator
 - Commands are executed through a broker that enforces allowlists and quotas.
 - All command input/output is logged and hashed for audit trails.
 - The runtime executes an assembled bundle of checks to avoid repeated setup.
@@ -64,7 +67,10 @@
 ## Broker responsibilities
 - Command allowlist and argument validation.
 - Resource limits (CPU, memory, wall-clock).
-- File access policies (read-only repo, scratch-only writes).
+- File access policies:
+  - read-only repo access for scan and recheck sessions
+  - controlled repository writes only for explicit fix sessions in native mode
+  - Docker review runs remain read-only in the first implementation
 - Structured logging and event emission.
 - Collect shared evidence for reuse across multiple checks.
 

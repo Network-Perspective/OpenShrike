@@ -159,6 +159,9 @@ export class OpenCodeRuntime {
     title: string;
     checkId?: string | undefined;
     workerId?: string | undefined;
+    allowEmptyText?: boolean | undefined;
+    requestTimeoutMs?: number | undefined;
+    completionTimeoutMs?: number | undefined;
   }): Promise<PromptResult> {
     const sessionResult = await withTimeoutSignal(
       OPENCODE_REQUEST_TIMEOUT_MS,
@@ -195,11 +198,13 @@ export class OpenCodeRuntime {
         providerID,
         modelID,
         title: options.title,
+        requestTimeoutMs: options.requestTimeoutMs ?? OPENCODE_REQUEST_TIMEOUT_MS,
+        completionTimeoutMs: options.completionTimeoutMs ?? OPENCODE_POLL_TIMEOUT_MS,
         promptLength: options.prompt.length,
         promptSha256: crypto.createHash('sha256').update(options.prompt).digest('hex').slice(0, 16)
       });
       const responseResult = await withTimeoutSignal(
-        OPENCODE_REQUEST_TIMEOUT_MS,
+        options.requestTimeoutMs ?? OPENCODE_REQUEST_TIMEOUT_MS,
         'send OpenCode prompt',
         signal =>
           this.client.session.prompt({
@@ -239,7 +244,12 @@ export class OpenCodeRuntime {
         inlineAssistantTextLength: text.length
       });
 
-      text = await this.waitForPromptCompletion(session.id, text);
+      text = await this.waitForPromptCompletion(
+        session.id,
+        text,
+        options.allowEmptyText ?? false,
+        options.completionTimeoutMs ?? OPENCODE_POLL_TIMEOUT_MS
+      );
 
       return {
         sessionId: session.id,
@@ -300,8 +310,12 @@ export class OpenCodeRuntime {
     this.logger?.write('runtime.closed');
   }
 
-  private async waitForPromptCompletion(sessionId: string, initialText: string): Promise<string> {
-    const timeoutMs = OPENCODE_POLL_TIMEOUT_MS;
+  private async waitForPromptCompletion(
+    sessionId: string,
+    initialText: string,
+    allowEmptyText: boolean,
+    timeoutMs: number
+  ): Promise<string> {
     const startedAt = Date.now();
     let attempt = 0;
     let latestText = initialText;
@@ -366,6 +380,10 @@ export class OpenCodeRuntime {
       if (completed) {
         if (latestText) {
           return latestText;
+        }
+
+        if (allowEmptyText) {
+          return '';
         }
 
         throw new Error('OpenCode completed the prompt without any assistant text output.');

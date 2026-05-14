@@ -3,6 +3,8 @@ import path from 'node:path';
 import {z} from 'zod';
 import {
   CONFIG_DIRECTORY_NAME,
+  DEFAULT_AGENT_NAME,
+  DEFAULT_FIX_AGENT_NAME,
   OUTPUT_VALUES,
   PROJECT_CONFIG_FILE_NAME,
   RUNTIME_MODE_VALUES,
@@ -37,8 +39,12 @@ const projectConfigSchema = z
     }).passthrough(),
     runtime: z.object({
       configPath: z.string().trim().min(1),
-      agent: z.string().trim().min(1),
+      agent: z.string().trim().min(1).optional(),
       model: z.string().trim().min(1).optional(),
+      scanAgent: z.string().trim().min(1).optional(),
+      scanModel: z.string().trim().min(1).optional(),
+      fixAgent: z.string().trim().min(1).optional(),
+      fixModel: z.string().trim().min(1).optional(),
       mode: z.enum(RUNTIME_MODE_VALUES),
       parallelism: projectParallelismSchema
     }).passthrough(),
@@ -137,12 +143,26 @@ export async function loadProjectConfigIfPresent(
 }
 
 export function parseProjectConfigContent(raw: string, configPath: string): LoadedProjectConfig {
-  const parsed = projectConfigSchema.parse(JSON.parse(raw)) as ShrikeProjectConfig;
+  const parsed = projectConfigSchema.parse(JSON.parse(raw)) as ShrikeProjectConfig & {
+    runtime: ShrikeProjectConfig['runtime'] & {
+      agent?: string | undefined;
+      model?: string | undefined;
+    };
+  };
 
   return {
     configPath,
     repoRoot: path.resolve(path.dirname(configPath), '..'),
-    config: parsed
+    config: {
+      ...parsed,
+      runtime: {
+        ...parsed.runtime,
+        scanAgent: parsed.runtime.scanAgent ?? parsed.runtime.agent ?? DEFAULT_AGENT_NAME,
+        scanModel: parsed.runtime.scanModel ?? parsed.runtime.model,
+        fixAgent: parsed.runtime.fixAgent ?? DEFAULT_FIX_AGENT_NAME,
+        fixModel: parsed.runtime.fixModel ?? parsed.runtime.scanModel ?? parsed.runtime.model
+      }
+    }
   };
 }
 

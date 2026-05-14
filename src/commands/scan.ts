@@ -11,9 +11,10 @@ import {
   resolveScanOutputFormat
 } from '../lib/cli-error.js';
 import {renderScanReportMarkdown} from '../lib/markdown.js';
+import {createSavedScanRequest, loadLastScanState, saveLastScanState} from '../lib/last-scan.js';
 import {resolveScanOptions} from '../lib/scan-options.js';
 import {runScan} from '../lib/scan.js';
-import type {ScanCommandOptions, ScanReport} from '../lib/types.js';
+import type {SavedScanRequest, ScanCommandOptions, ScanReport} from '../lib/types.js';
 import {runScanWithInk, ScanUiCancelledError} from '../ui/scan-app.js';
 
 export async function executeScanCommand(rawOptions: Partial<ScanCommandOptions>): Promise<number> {
@@ -22,9 +23,27 @@ export async function executeScanCommand(rawOptions: Partial<ScanCommandOptions>
     options = await resolveScanOptions(rawOptions);
     const shouldUseUi = options.ui && process.stderr.isTTY;
     let report: ScanReport;
+    let savedRequest: SavedScanRequest;
 
-    report = shouldUseUi ? await runScanWithInk(options) : await runScan(options);
-    if (options.emitBundlePath) {
+    if (options.lastScan) {
+      const loaded = await loadLastScanState(options.repoPath);
+      loaded.warnings.forEach(warning => {
+        process.stderr.write(`OpenShrike warning: ${warning}\n`);
+      });
+      savedRequest = loaded.state.request;
+      report = shouldUseUi
+        ? await runScanWithInk(options, {
+            initialReport: loaded.state.report,
+            savedRequest,
+            ...(loaded.state.scope ? {savedScope: loaded.state.scope} : {})
+          })
+        : loaded.state.report;
+    } else {
+      savedRequest = createSavedScanRequest(options);
+      report = shouldUseUi ? await runScanWithInk(options) : await runScan(options);
+    }
+
+    if (!options.lastScan && options.emitBundlePath) {
       const bundle = options.projectChecksDir
         ? await assembleBundleForProjectChecks(options.projectChecksDir, options.checkId)
         : options.policyId
@@ -33,6 +52,16 @@ export async function executeScanCommand(rawOptions: Partial<ScanCommandOptions>
       const outputPath = path.resolve(options.emitBundlePath);
       await fs.mkdir(path.dirname(outputPath), {recursive: true});
       await fs.writeFile(outputPath, `${bundle}\n`, 'utf8');
+    }
+
+    if (!options.lastScan) {
+      const saveWarnings = await saveLastScanState({
+        report,
+        request: savedRequest
+      });
+      saveWarnings.forEach(warning => {
+        process.stderr.write(`OpenShrike warning: ${warning}\n`);
+      });
     }
 
     if (options.outputFormat === 'markdown') {

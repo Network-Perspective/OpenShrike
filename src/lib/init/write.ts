@@ -8,6 +8,7 @@ import {
   CONFIG_DIRECTORY_NAME,
   CONFIG_FILE_NAME,
   DEFAULT_AGENT_NAME,
+  DEFAULT_FIX_AGENT_NAME,
   DEFAULT_OUTPUT,
   DEFAULT_PARALLELISM,
   DEFAULT_RUNTIME_MODE,
@@ -30,6 +31,7 @@ export interface InitWriteOptions {
   repoRoot: string;
   policyId: string;
   model?: string | undefined;
+  fixModel?: string | undefined;
   runtimeMode?: RuntimeMode | undefined;
   parallelism?: ParallelismValue | undefined;
   projectType: ProjectType;
@@ -72,6 +74,7 @@ export async function writeShrikeInitFiles(options: InitWriteOptions): Promise<I
     buildShrikeProjectConfig({
       policyId: options.policyId,
       model: options.model,
+      fixModel: options.fixModel,
       runtimeMode: options.runtimeMode ?? DEFAULT_RUNTIME_MODE,
       parallelism: options.parallelism ?? DEFAULT_PARALLELISM,
       projectType: options.projectType,
@@ -82,7 +85,10 @@ export async function writeShrikeInitFiles(options: InitWriteOptions): Promise<I
   );
   const runtimeConfig = mergeRuntimeConfig(
     existingRuntimeConfig,
-    buildDefaultOpencodeConfig(options.model)
+    buildDefaultOpencodeConfig({
+      model: options.model,
+      fixModel: options.fixModel
+    })
   );
   const readme = buildInitReadme({
     checksDirectory,
@@ -138,6 +144,7 @@ export async function writeShrikeInitFiles(options: InitWriteOptions): Promise<I
 export function buildShrikeProjectConfig(options: {
   policyId: string;
   model?: string | undefined;
+  fixModel?: string | undefined;
   runtimeMode: RuntimeMode;
   parallelism: ParallelismValue;
   projectType: ProjectType;
@@ -155,8 +162,10 @@ export function buildShrikeProjectConfig(options: {
     },
     runtime: {
       configPath: path.posix.join(CONFIG_DIRECTORY_NAME, CONFIG_FILE_NAME),
-      agent: DEFAULT_AGENT_NAME,
-      ...(options.model ? {model: options.model} : {}),
+      scanAgent: DEFAULT_AGENT_NAME,
+      ...(options.model ? {scanModel: options.model} : {}),
+      fixAgent: DEFAULT_FIX_AGENT_NAME,
+      ...(options.fixModel ?? options.model ? {fixModel: options.fixModel ?? options.model} : {}),
       mode: options.runtimeMode,
       parallelism: options.parallelism
     },
@@ -188,7 +197,7 @@ export function buildInitReadme(options?: {
     '',
     `- \`${checksLabel}/\` stores the project-local Markdown checks that Shrike executes.`,
     `- \`${projectConfigLabel}\` stores repo-local Shrike defaults such as the selected policy and scan settings.`,
-    `- \`${opencodeConfigLabel}\` is a Shrike-owned OpenCode overlay for read-only scans.`,
+    `- \`${opencodeConfigLabel}\` is a Shrike-owned OpenCode overlay with separate scan and fix agents.`,
     `- \`.gitignore\` keeps generated \`${ARTIFACTS_DIRECTORY_NAME}/\` files out of version control.`,
     '- User-global OpenCode config and credentials remain outside this repository.',
     '',
@@ -272,7 +281,10 @@ function mergeProjectConfig(
     : patch === 'model'
       ? {
           ...baseRuntime,
-          ...(projectConfig.runtime.model ? {model: projectConfig.runtime.model} : {})
+          scanAgent: projectConfig.runtime.scanAgent,
+          fixAgent: projectConfig.runtime.fixAgent,
+          ...(projectConfig.runtime.scanModel ? {scanModel: projectConfig.runtime.scanModel} : {}),
+          ...(projectConfig.runtime.fixModel ? {fixModel: projectConfig.runtime.fixModel} : {})
         }
       : patch === 'runtime'
         ? {
@@ -320,7 +332,16 @@ function mergeRuntimeConfig(
   const shrikeAgentConfig = {
     ...asJsonRecord(asJsonRecord(runtimeConfig.agent)?.[DEFAULT_AGENT_NAME]),
     ...asJsonRecord(existingAgentConfig[DEFAULT_AGENT_NAME]),
-    ...(typeof runtimeConfig.model === 'string' ? {model: runtimeConfig.model} : {})
+    ...(typeof runtimeConfig.agent?.[DEFAULT_AGENT_NAME]?.model === 'string'
+      ? {model: runtimeConfig.agent[DEFAULT_AGENT_NAME]?.model}
+      : {})
+  };
+  const shrikeFixAgentConfig = {
+    ...asJsonRecord(asJsonRecord(runtimeConfig.agent)?.[DEFAULT_FIX_AGENT_NAME]),
+    ...asJsonRecord(existingAgentConfig[DEFAULT_FIX_AGENT_NAME]),
+    ...(typeof runtimeConfig.agent?.[DEFAULT_FIX_AGENT_NAME]?.model === 'string'
+      ? {model: runtimeConfig.agent[DEFAULT_FIX_AGENT_NAME]?.model}
+      : {})
   };
 
   return {
@@ -332,7 +353,8 @@ function mergeRuntimeConfig(
       : {permission: runtimeConfig.permission}),
     agent: {
       ...existingAgentConfig,
-      [DEFAULT_AGENT_NAME]: shrikeAgentConfig
+      [DEFAULT_AGENT_NAME]: shrikeAgentConfig,
+      [DEFAULT_FIX_AGENT_NAME]: shrikeFixAgentConfig
     }
   } as Config;
 }
@@ -428,20 +450,25 @@ async function ensureConfigGitignore(gitignorePath: string): Promise<void> {
 
     throw error;
   });
-  const entry = `${ARTIFACTS_DIRECTORY_NAME}/`;
+  const entries = [
+    `${ARTIFACTS_DIRECTORY_NAME}/`,
+    'last-scan.json',
+    'last-scan.md'
+  ];
 
   if (existing !== null) {
-    const hasEntry = existing
-      .split('\n')
-      .map(line => line.trim())
-      .some(line => line === entry || line === `/${entry}` || line === ARTIFACTS_DIRECTORY_NAME || line === `/${ARTIFACTS_DIRECTORY_NAME}`);
-    if (hasEntry) {
+    const lines = existing.split('\n').map(line => line.trim());
+    const missingEntries = entries.filter(entry => {
+      const bare = entry.replace(/\/$/, '');
+      return !lines.some(line => line === entry || line === `/${entry}` || line === bare || line === `/${bare}`);
+    });
+    if (missingEntries.length === 0) {
       return;
     }
 
     const next = existing.trimEnd().length > 0
-      ? `${existing.trimEnd()}\n${entry}\n`
-      : `${entry}\n`;
+      ? `${existing.trimEnd()}\n${missingEntries.join('\n')}\n`
+      : `${missingEntries.join('\n')}\n`;
     await fs.writeFile(gitignorePath, next, 'utf8');
     return;
   }
@@ -450,7 +477,7 @@ async function ensureConfigGitignore(gitignorePath: string): Promise<void> {
     gitignorePath,
     [
       '# OpenShrike generated artifacts',
-      entry,
+      ...entries,
       ''
     ].join('\n'),
     'utf8'

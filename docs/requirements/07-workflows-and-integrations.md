@@ -1,10 +1,11 @@
 # Workflows and Integrations
 
-## Local developer workflow (MVP)
+## Local developer workflow
 - Run a scan against a repo or diff.
 - Assemble selected checks into an opencode skill for execution.
 - Produce a report and a machine-readable feedback file.
-- Review findings and act on them manually or feed to an external agent.
+- Review findings and act on them manually, fix them inside Shrike, or feed
+  them to an external agent.
 - Choose `--runtime native` for the fast local loop or `--runtime docker` to
   match the isolated worker path.
 
@@ -14,14 +15,14 @@
   local Docker runs.
 - Publish findings as PR comments or artifacts.
 
-## Agent feedback loop (Phase 2)
-- Export findings in a format that can be ingested by Codex, Claude Code, or
-  other agent frameworks.
-- Support "iterate until clean" workflows with retry limits and guardrails.
-- Define failure modes: loop detection, conflicting fixes, and gaming prevention.
-
-Note: MVP produces structured JSON output for external consumption but does not
-orchestrate the iteration loop itself. That is a Phase 2 feature.
+## Agent feedback loop
+- Support `Recheck` and `Fix` inside `shrike scan` for a selected check.
+- Support sequential `shrike fix` runs over all failing checks.
+- Export findings in a format that can still be ingested by Codex, Claude Code,
+  or other agent frameworks.
+- Support resume-from-state flows via `--last-scan`.
+- Define failure modes: stale results, conflicting edits, loop detection, and
+  gaming prevention.
 
 ## Integration surfaces
 - CLI for local and CI use.

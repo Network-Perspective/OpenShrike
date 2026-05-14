@@ -10,6 +10,7 @@ export type InitScreen =
   | 'opencode-discovery'
   | 'opencode-install'
   | 'model-selection'
+  | 'fix-model-choice'
   | 'policy-selection'
   | 'runtime-selection'
   | 'parallelism-selection'
@@ -21,10 +22,12 @@ export type ExistingInitAction = 'update' | 'replace' | 'exit';
 export type OpenCodeDiscoveryAction = 'use-discovered' | 'auth-login' | 'exit';
 export type OpenCodeInstallAction = 'install-curl' | 'install-npm' | 'install-brew' | 'back';
 export type SuccessAction = 'run-scan' | 'change-defaults' | 'exit';
-export type ChangeDefaultsAction = 'policy' | 'model' | 'runtime' | 'parallelism' | 'done';
+export type ChangeDefaultsAction = 'policy' | 'scan-model' | 'fix-model' | 'runtime' | 'parallelism' | 'done';
+export type FixModelChoiceAction = 'same-as-scan' | 'use-suggested' | 'choose-other' | 'back';
 
 export interface InitSelections {
   model?: string | undefined;
+  fixModel?: string | undefined;
   policyId: string;
   runtimeMode: RuntimeMode;
   parallelism: ParallelismValue;

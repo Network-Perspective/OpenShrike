@@ -20,6 +20,7 @@ import {
   resolveVerticalArrowAction,
   resolveEvidenceWindow,
   resolvePagedListNavigation,
+  resolveSummaryStatusLabel,
   resolveVisibleItemScrollOffset,
   syncBrowserState,
   toggleBrowserViewMode
@@ -174,6 +175,7 @@ describe('formatStatusMarker', () => {
     expect(formatStatusMarker('pass')).toBe('[v]');
     expect(formatStatusMarker('running', '⠋')).toBe('[⠋]');
     expect(formatStatusMarker('running', '⠏')).toBe('[⠏]');
+    expect(formatStatusMarker('fixing', '⠴')).toBe('[⠴]');
     expect(formatStatusMarker('pending')).toBe('[ ]');
   });
 });
@@ -284,6 +286,16 @@ describe('deriveProgressCounts', () => {
       inProgressCount: 0,
       pendingCount: 0
     });
+  });
+});
+
+describe('resolveSummaryStatusLabel', () => {
+  it('prefers action messages over the background progress label', () => {
+    expect(resolveSummaryStatusLabel('Scan complete', 'Rechecking check-a...')).toBe('Rechecking check-a...');
+  });
+
+  it('falls back to the progress label when there is no action message', () => {
+    expect(resolveSummaryStatusLabel('Scan complete', null)).toBe('Scan complete');
   });
 });
 

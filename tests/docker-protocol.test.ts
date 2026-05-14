@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 import {MAX_CHECK_EVIDENCE_ITEMS} from '../src/lib/constants.js';
 import {
   encodeDockerWireMessage,
+  parseDockerFixRequest,
   parseDockerScanRequest,
   parseScanReport,
   tryDecodeDockerWireMessage
@@ -56,6 +57,45 @@ describe('docker protocol', () => {
     expect(parsed).toMatchObject({
       kind: 'progress'
     });
+  });
+
+  it('parses a docker fix request envelope', () => {
+    const request = parseDockerFixRequest({
+      repoPath: '/workspace/repo',
+      projectChecksDir: '/workspace/repo/.openshrike/checks',
+      logPath: '/io/fix.log.jsonl',
+      request: {
+        checkId: 'check-a',
+        policyId: null,
+        projectChecksDir: '/workspace/repo/.openshrike/checks',
+        scanScope: 'full',
+        scanTarget: null,
+        runtimeMode: 'docker'
+      },
+      check: {
+        id: 'check-a',
+        version: '0.1.0',
+        status: 'fail',
+        confidence: 'HIGH',
+        evidence: ['README.md:1'],
+        rationale: 'broken',
+        remediation: ['fix it']
+      },
+      scope: {
+        kind: 'full',
+        label: 'full repository',
+        files: [],
+        isFullRepository: true
+      },
+      agent: 'shrike-fixer',
+      model: 'azure/gpt-5.4',
+      emulateOpencode: false
+    });
+
+    expect(request.repoPath).toBe('/workspace/repo');
+    expect(request.logPath).toBe('/io/fix.log.jsonl');
+    expect(request.request.runtimeMode).toBe('docker');
+    expect(request.check.id).toBe('check-a');
   });
 
   it('rejects malformed report payloads', () => {

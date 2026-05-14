@@ -12,6 +12,9 @@
 ## Phase 2 features
 - Isolated docker runtime
 - Multi-agent review: parallel reviewers to speed up execution
+- Interactive scan actions for recheck and single-check fix
+- Sequential batch fixing via `shrike fix`
+- Saved last-scan state for resume/recheck/fix flows
 
 ## Phase 3 features
 - Policy marketplace and sharing via repositories.
@@ -20,7 +23,8 @@
 - Cross-repo insights about recurring debt patterns.
 
 ## Out of scope (for now)
-- Cloud-hosted inference or automated code changes without human/agent review.
+- Cloud-hosted inference or unattended automated code changes without an
+  explicit operator action such as `Fix` in the UI or `shrike fix`.
 - Direct access to production credentials or deployments.
 
 ## Key feature descriptions
@@ -38,10 +42,15 @@ Agents can run CLI commands, but only in isolated environments with no access to
 secrets or external network unless explicitly allowed.
 The runtime is expected to be a wrapper over an existing agent system.
 
-### Structured output (MVP)
-Findings are serialized into structured JSON for external consumption by humans
-and agents (Codex, Claude Code, etc.).
+### Structured output
+Findings are serialized into structured JSON for human review, external
+consumption by agents (Codex, Claude Code, etc.), and Shrike's own saved-state
+resume/recheck/fix workflows.
+Shrike also writes a human-readable Markdown snapshot of the latest saved scan
+state for local review.
 
 ### Feedback loop iteration (Phase 2)
-Support "iterate until clean" workflows where an external agent consumes
-findings and re-runs checks until satisfied, with retry limits and guardrails.
+Support "iterate until clean" workflows where Shrike can recheck or fix one
+selected finding at a time, and where external agents can still consume
+exported findings if needed. See
+`docs/requirements/08-interactive-fix-loop-and-last-scan.md`.

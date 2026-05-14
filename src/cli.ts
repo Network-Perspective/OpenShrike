@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import {Command, CommanderError} from 'commander';
+import {executeFixCommand} from './commands/fix.js';
+import {executeInternalFixWorkerCommand} from './commands/fix-worker.js';
 import {executeInitCommand} from './commands/init.js';
 import {executeInternalScanWorkerCommand} from './commands/scan-worker.js';
 import {executeScanCommand} from './commands/scan.js';
@@ -47,10 +49,12 @@ program
   .option('--image <REF>', 'Docker image to use when --runtime docker is selected')
   .option('--artifacts-dir <PATH>', 'Directory for runtime artifacts such as report.json and logs')
   .option('--parallelism <N_OR_AUTO>', 'Run checks concurrently. Accepts an integer or auto.')
+  .option('--last-scan', 'Load the saved .openshrike/last-scan.json report instead of rescanning', false)
   .option('--no-ui', 'Disable the Ink live dashboard on stderr')
   .action(async (commandOptions: Record<string, unknown>) => {
     const rawOptions: Partial<ScanCommandOptions> = {
-      mockOpencode: Boolean(commandOptions.mockOpencode)
+      mockOpencode: Boolean(commandOptions.mockOpencode),
+      lastScan: Boolean(commandOptions.lastScan)
     };
 
     assignIfDefined(rawOptions, 'checkId', asOptionalString(commandOptions.check));
@@ -85,6 +89,59 @@ program
   });
 
 program
+  .command('fix')
+  .description('Fix failing checks one by one and recheck them.')
+  .option('--check <CHECK_ID>', 'Check identifier, e.g. csharp-rel-001-cancellation-tokens')
+  .option('--policy <POLICY_ID>', 'Policy identifier, e.g. csharp-baseline')
+  .option('--repo <PATH>', 'Repository path to scan')
+  .option('--output <FORMAT>', 'Output format: markdown or json')
+  .option('--fix-agent <NAME>', 'Optional OpenCode fix agent name')
+  .option('--fix-model <MODEL>', 'Optional fix model name in provider/model form')
+  .option(
+    '--scan-scope <SCOPE>',
+    'Scan scope: uncommitted, commit, branch, pr, full'
+  )
+  .option('--scan-target <TARGET>', 'Scope target: commit/range for commit, base branch for branch, diff spec for pr')
+  .option('--mock-opencode', 'Emulate OpenCode calls locally (2-5s/check, ~90% pass)', false)
+  .option('--config <PATH>', 'Path to the OpenCode runtime config', undefined)
+  .option('--log <PATH>', 'Write OpenCode/runtime debug logs as JSONL', undefined)
+  .option('--runtime <MODE>', 'Runtime mode: native or docker')
+  .option('--image <REF>', 'Docker image to use when --runtime docker is selected')
+  .option('--artifacts-dir <PATH>', 'Directory for runtime artifacts such as report.json and logs')
+  .option('--parallelism <N_OR_AUTO>', 'Run checks concurrently. Accepts an integer or auto.')
+  .option('--last-scan', 'Load the saved .openshrike/last-scan.json report instead of rescanning', false)
+  .action(async (commandOptions: Record<string, unknown>) => {
+    const rawOptions: Partial<ScanCommandOptions> = {
+      mockOpencode: Boolean(commandOptions.mockOpencode),
+      lastScan: Boolean(commandOptions.lastScan),
+      ui: false
+    };
+
+    assignIfDefined(rawOptions, 'checkId', asOptionalString(commandOptions.check));
+    assignIfDefined(rawOptions, 'policyId', asOptionalString(commandOptions.policy));
+    assignIfDefined(rawOptions, 'repoPath', asOptionalString(commandOptions.repo));
+    assignIfDefined(rawOptions, 'outputFormat', asOptionalString(commandOptions.output) as 'json' | 'markdown' | undefined);
+    assignIfDefined(rawOptions, 'fixAgent', asOptionalString(commandOptions.fixAgent));
+    assignIfDefined(rawOptions, 'fixModel', asOptionalString(commandOptions.fixModel));
+    assignIfDefined(rawOptions, 'scanScope', asOptionalString(commandOptions.scanScope) as
+      | 'uncommitted'
+      | 'commit'
+      | 'branch'
+      | 'pr'
+      | 'full'
+      | undefined);
+    assignIfDefined(rawOptions, 'scanTarget', asOptionalString(commandOptions.scanTarget));
+    assignIfDefined(rawOptions, 'configPath', asOptionalString(commandOptions.config));
+    assignIfDefined(rawOptions, 'logPath', asOptionalString(commandOptions.log));
+    assignIfDefined(rawOptions, 'runtimeMode', asOptionalString(commandOptions.runtime) as 'native' | 'docker' | undefined);
+    assignIfDefined(rawOptions, 'image', asOptionalString(commandOptions.image));
+    assignIfDefined(rawOptions, 'artifactsDir', asOptionalString(commandOptions.artifactsDir));
+    assignIfDefined(rawOptions, 'parallelism', parseParallelism(commandOptions.parallelism));
+
+    process.exitCode = await executeFixCommand(rawOptions);
+  });
+
+program
   .command('init')
   .description('Interactively initialize Shrike defaults in the local .openshrike directory.')
   .option('--force', 'Overwrite generated files if they already exist', false)
@@ -95,6 +152,16 @@ program
   });
 
 const internal = program.command('internal').description('Internal OpenShrike commands');
+
+internal
+  .command('fix-worker')
+  .description('Internal fix worker entry point.')
+  .requiredOption('--request <PATH>', 'Path to the worker request JSON')
+  .action(async (commandOptions: Record<string, unknown>) => {
+    process.exitCode = await executeInternalFixWorkerCommand({
+      requestPath: asOptionalString(commandOptions.request) ?? ''
+    });
+  });
 
 internal
   .command('scan-worker')

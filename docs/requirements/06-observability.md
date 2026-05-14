@@ -11,14 +11,17 @@
 - Resource usage (CPU, memory, wall-clock).
 - Review summary metrics (risk score, unresolved findings).
 
-## Analysis outputs (MVP)
+## Analysis outputs
 - Human-readable report (Markdown or HTML).
-- Machine-readable feedback (JSON) for external consumption.
+- Machine-readable feedback (JSON) for external consumption and internal
+  resume/recheck/fix workflows.
 - Optional policy gate for CI (fail on high-risk findings).
+- Saved last-scan state for resume, recheck, and fix workflows.
 
-Note: MVP is read-only analysis. The tool does not edit code or iterate on
-fixes. Structured JSON output can be consumed by external agents, but the
-feedback loop iteration is a Phase 2 feature.
+Note: Current implementation is read-only analysis. The planned interactive fix
+loop adds explicit, auditable edit sessions and automatic rechecks; the
+requirements for that flow live in
+`docs/requirements/08-interactive-fix-loop-and-last-scan.md`.
 
 ## Example feedback payload (conceptual)
 - Check ID and version, status, confidence level (HIGH/MEDIUM/LOW), evidence paths.
