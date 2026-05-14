@@ -1,0 +1,11 @@
+headline: "Code generation is cheap. Code review is the new bottleneck."
+points:
+  - title: "AI writes code faster than humans can review it"
+    description: "LLMs generate pull requests in minutes. Reviewing them thoroughly still takes hours. The bottleneck has shifted from writing code to understanding and verifying it."
+    icon: "hourglass"
+  - title: "Teams drown in review or switch to YOLO mode"
+    description: "Developers either spend their entire day reviewing AI-generated code, or they stop reading it altogether. Neither option is sustainable."
+    icon: "warning"
+  - title: "Existing tools don't solve the real problem"
+    description: "Linters catch syntax. Tests check behavior. But nobody is systematically verifying that AI-generated code follows your team's architectural decisions, security practices, and engineering standards."
+    icon: "gap"

@@ -1,0 +1,14 @@
+<section id="features" class="section section--muted">
+  <div class="container">
+    <h2 class="section__title">{{ site.data.features.headline }}</h2>
+    <div class="card-grid card-grid--3col">
+      {% for feature in site.data.features.items %}
+      <div class="card">
+        <div class="card__icon" data-icon="{{ feature.icon }}"></div>
+        <h3 class="card__title">{{ feature.title }}</h3>
+        <p class="card__text">{{ feature.description }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>

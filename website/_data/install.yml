@@ -1,0 +1,12 @@
+headline: "Get started in minutes"
+prereq: "Prerequisite: Node.js 22+"
+methods:
+  - name: "Linux / macOS"
+    language: "bash"
+    command: "curl -fsSL https://raw.githubusercontent.com/Network-Perspective/OpenShrike/main/install | bash"
+  - name: "Windows PowerShell"
+    language: "powershell"
+    command: "irm https://raw.githubusercontent.com/Network-Perspective/OpenShrike/main/install.ps1 | iex"
+quickstart:
+  - "shrike init"
+  - "shrike scan"

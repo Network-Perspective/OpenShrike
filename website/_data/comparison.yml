@@ -1,0 +1,39 @@
+headline: "How OpenShrike compares"
+competitors:
+  - name: "/review skill"
+    traits:
+      deterministic: false
+      open_source: "Varies"
+      runs_locally: true
+      byok: "Sometimes"
+      controlled_process: false
+    summary: "Limited, non-deterministic code review — highly dependent on the model chosen. You don't really know what is actually checked or verified during the review."
+  - name: "CodeRabbit"
+    traits:
+      deterministic: false
+      open_source: false
+      runs_locally: false
+      byok: false
+      controlled_process: false
+    summary: "Cloud-based (your code is sent to their servers), closed source, expensive, and you cannot use a model of your choice or a local LLM."
+  - name: "OpenShrike"
+    highlighted: true
+    traits:
+      deterministic: true
+      open_source: true
+      runs_locally: true
+      byok: true
+      controlled_process: true
+    summary: "Runs locally or in CI, open source, you control the review process, and you can use any LLM provider — including local models."
+
+dimensions:
+  - key: deterministic
+    label: "Predictable checks"
+  - key: open_source
+    label: "Open source"
+  - key: runs_locally
+    label: "Runs locally / CI"
+  - key: byok
+    label: "Bring your own key"
+  - key: controlled_process
+    label: "You control review process"

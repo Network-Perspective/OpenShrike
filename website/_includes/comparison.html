@@ -1,0 +1,48 @@
+<section id="compare" class="section">
+  <div class="container">
+    <h2 class="section__title">{{ site.data.comparison.headline }}</h2>
+
+    <div class="comparison-table-wrap">
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th></th>
+            {% for competitor in site.data.comparison.competitors %}
+            <th {% if competitor.highlighted %}class="highlighted"{% endif %}>
+              {{ competitor.name }}
+            </th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for dim in site.data.comparison.dimensions %}
+          <tr>
+            <td class="comparison-table__label">{{ dim.label }}</td>
+            {% for competitor in site.data.comparison.competitors %}
+            {% assign val = competitor.traits[dim.key] %}
+            <td {% if competitor.highlighted %}class="highlighted"{% endif %}>
+              {% if val == true %}
+                <span class="check yes" aria-label="Yes">&#10003;</span>
+              {% elsif val == false %}
+                <span class="check no" aria-label="No">&#10007;</span>
+              {% else %}
+                <span class="check partial">{{ val }}</span>
+              {% endif %}
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card-grid card-grid--3col comparison-summaries">
+      {% for competitor in site.data.comparison.competitors %}
+      <div class="card {% if competitor.highlighted %}card--highlighted{% endif %}">
+        <h3 class="card__title">{{ competitor.name }}</h3>
+        <p class="card__text">{{ competitor.summary }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>

@@ -1,0 +1,12 @@
+title: OpenShrike
+description: Turn engineering best practices into tests your team can run and enforce.
+url: "https://network-perspective.github.io"
+baseurl: "/OpenShrike"
+
+markdown: kramdown
+permalink: pretty
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - README.md

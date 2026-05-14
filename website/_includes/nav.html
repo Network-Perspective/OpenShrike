@@ -1,0 +1,21 @@
+<header class="site-header">
+  <nav class="container nav">
+    <a href="{{ '/' | relative_url }}" class="nav__logo">
+      <img src="{{ '/assets/images/openshrike-logo.png' | relative_url }}" alt="OpenShrike" class="nav__logo-img">
+      <span class="nav__logo-text">OpenShrike</span>
+    </a>
+    <button class="nav__toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav__links">
+      {% for item in site.data.navigation %}
+      <li>
+        <a href="{{ item.anchor | default: item.url }}"
+           {% if item.external %}target="_blank" rel="noopener"{% endif %}>
+          {{ item.title }}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </nav>
+</header>

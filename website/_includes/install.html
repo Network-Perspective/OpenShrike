@@ -1,0 +1,27 @@
+<section id="install" class="section section--muted">
+  <div class="container">
+    <h2 class="section__title">{{ site.data.install.headline }}</h2>
+    <p class="section__lead">{{ site.data.install.prereq }}</p>
+
+    <div class="install-methods">
+      {% for method in site.data.install.methods %}
+      <div class="install-block">
+        <h3 class="install-block__label">{{ method.name }}</h3>
+        <div class="code-wrapper">
+          <pre class="install-block__code"><code>{{ method.command }}</code></pre>
+          <button class="copy-btn" aria-label="Copy to clipboard">Copy</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="install-quickstart">
+      <h3>Then initialize and scan within your project folder:</h3>
+      <div class="code-wrapper">
+        <pre class="install-block__code"><code>{% for cmd in site.data.install.quickstart %}{{ cmd }}
+{% endfor %}</code></pre>
+        <button class="copy-btn" aria-label="Copy to clipboard">Copy</button>
+      </div>
+    </div>
+  </div>
+</section>

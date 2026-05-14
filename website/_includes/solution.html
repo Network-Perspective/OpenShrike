@@ -1,0 +1,14 @@
+<section id="solution" class="section">
+  <div class="container">
+    <h2 class="section__title">{{ site.data.solution.headline }}</h2>
+    <p class="section__lead">{{ site.data.solution.description }}</p>
+    <div class="card-grid card-grid--2col">
+      {% for point in site.data.solution.points %}
+      <div class="card">
+        <h3 class="card__title">{{ point.title }}</h3>
+        <p class="card__text">{{ point.description }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>

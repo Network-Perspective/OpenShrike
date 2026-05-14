@@ -1,0 +1,11 @@
+headline: "A third option: predictable, automated code review"
+description: "OpenShrike gives you semi-deterministic checks and an automated code review process. Instead of reviewing everything line by line, it brings your focus to the aspects that actually need human attention."
+points:
+  - title: "Requirements as Markdown"
+    description: "Architectural requirements live in your repo as Markdown documents. They are versioned, reviewable, and evolve with your project — no external dashboards or config languages."
+  - title: "Automated enforcement"
+    description: "OpenShrike materializes your requirements into checks and enforces them automatically on every PR. You know exactly what is being verified every time."
+  - title: "Focus on what matters"
+    description: "Not every line needs a human eye. OpenShrike highlights the parts that actually need review, so developers spend time where it counts."
+  # - title: "Lower intelligence bar"
+  #   description: "A simple /review command in a coding harness gives you a non-deterministic, model-dependent review. OpenShrike encodes what to check as structured requirements, so even smaller, cheaper models produce meaningful, repeatable reviews."

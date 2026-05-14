@@ -1,0 +1,14 @@
+<section id="problem" class="section section--muted">
+  <div class="container">
+    <h2 class="section__title">{{ site.data.problem.headline }}</h2>
+    <div class="card-grid">
+      {% for point in site.data.problem.points %}
+      <div class="card">
+        <div class="card__icon" data-icon="{{ point.icon }}"></div>
+        <h3 class="card__title">{{ point.title }}</h3>
+        <p class="card__text">{{ point.description }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
