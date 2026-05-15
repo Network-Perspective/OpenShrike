@@ -1,37 +1,58 @@
-# OpenShrike
-
-Turn engineering best practices into tests your team can run and enforce.
-
 ![OpenShrike logo](docs/openshrike-logo.png)
 
-OpenShrike is a security-first, self-hosted implementation of a new kind of
-test: best-practice tests.
+<div align="center">
+  <a href="https://github.com/Network-Perspective/OpenShrike/releases/latest"><img src="https://img.shields.io/github/v/release/Network-Perspective/OpenShrike?style=for-the-badge&color=20B2AA" alt="Latest release"></a>
+  <a href="https://github.com/Network-Perspective/OpenShrike/actions/workflows/release-bundles.yml"><img src="https://img.shields.io/github/actions/workflow/status/Network-Perspective/OpenShrike/release-bundles.yml?style=for-the-badge&label=build" alt="Build status"></a>
+  <a href="https://github.com/OpenHands/OpenHands/blob/main/LICENSE"><img src="https://img.shields.io/badge/LICENSE-MIT-20B2AA?style=for-the-badge" alt="MIT License"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-22%2B-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js 22+"></a>
+  <a href="https://discord.gg/4MKThAVsy2"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
 
-It is built for the gap between linters and unit tests. Linters catch style and
-syntax. Unit tests check behavior. OpenShrike checks whether a change follows
-the engineering practices your team already relies on in production:
-architectural boundaries, test discipline, input validation, timeouts, secrets
-handling, observability, API safety, and similar review standards.
+  <!-- Keep these links. Translations will automatically update with the README. -->
+  <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=de">Deutsch</a> | 
+  <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=es">Español</a> | 
+  <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=fr">français</a> | 
+  <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=ja">日本語</a> | 
+  <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=ko">한국어</a> | 
+  <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=pt">Português</a> | 
+  <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=ru">Русский</a> | 
+  <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=zh">中文</a>
+</div>
 
-Those standards ship as versioned Markdown checks and policies in
-[best_practices/](best_practices/). `shrike init` seeds the selected policy
-into repo-local Markdown files under `.openshrike/checks/`, so the checks that
-actually run live in the project, can be reviewed in code review, and can be
-edited or extended by maintainers. OpenShrike executes those project-local
-checks with OpenCode and produces findings with evidence, rationale, and
-remediation.
+## Turn engineering best practices into automated, predictable code reviews.  
+
+Code generation is cheap. Code review is the new bottleneck. LLMs produce pull
+requests in minutes; reviewing them thoroughly still takes hours. Teams either
+drown in review or switch to YOLO mode — and existing tooling does not close
+the gap. Linters catch syntax. Unit tests check behavior. OpenShrike goal is
+systematicall verify that a change follows the architectural decisions,
+security practices, and engineering standards set by your team.
+
+OpenShrike is a security-first, self-hosted code review tool that fills that
+gap. Your standards live in the repo as versioned Markdown checks and policies
+in [best_practices/](best_practices/). `shrike init` seeds the selected policy
+into repo-local Markdown under `.openshrike/checks/`, so the checks that
+actually run can be reviewed in code review and edited or extended by
+maintainers. OpenShrike then executes those project-local checks with OpenCode
+and produces findings with evidence, rationale, and remediation — locally or
+in CI, against the LLM provider of your choice.
 
 ![scan screenshot](docs/scan-screenshot.png)
 
 ## Why OpenShrike
 
-- Turn tribal knowledge, review comments, and design standards into concrete,
-  repeatable checks.
-- Tailor policies to the project instead of forcing a one-size-fits-all rule
-  set.
-- Focus on high-signal engineering risks, not formatting noise.
-- Run the same review locally and in CI.
-- Keep execution self-hosted with `native` and `docker` runtimes.
+- **Predictable checks.** You know exactly what is verified on every PR, not
+  whatever a free-form `/review` prompt decided to look at this time.
+- **Requirements as Markdown.** Standards live in the repo, versioned and
+  reviewable — no proprietary DSL, no external dashboard.
+- **Beyond linters and tests.** Enforce architectural boundaries, test
+  discipline, boundary validation, secret hygiene, timeouts and cancellation,
+  observability, and API safety.
+- **Auto-fix with agents.** `shrike fix` spawns an agent to repair failing
+  checks before a PR reaches a human reviewer.
+- **BYOK.** Bring your own key and model — OpenAI, Anthropic, Bedrock, Azure,
+  Ollama, LMStudio, and anything else OpenCode supports.
+- **Self-hosted.** Runs locally or in CI with `native` and `docker` runtimes.
+  Your code does not leave your infrastructure.
 
 ## Install
 
@@ -161,6 +182,28 @@ Common behavior:
   `.openshrike/opencode.json`.
 - `--mock-opencode` exercises the scan path without live OpenCode calls.
 - `--no-ui` disables the live terminal dashboard on stderr.
+
+### `shrike fix`
+
+Fix failing checks one by one and recheck them. Useful for closing out the long
+tail of mechanical violations before a human review.
+
+```bash
+shrike fix \
+  [--check <CHECK_ID> | --policy <POLICY_ID>] \
+  [--repo <PATH>] \
+  [--fix-agent <NAME>] \
+  [--fix-model <PROVIDER/MODEL>] \
+  [--scan-scope uncommitted|commit|branch|pr|full] \
+  [--scan-target <TARGET>] \
+  [--runtime native|docker] \
+  [--last-scan]
+```
+
+- `--last-scan` reuses the saved `.openshrike/last-scan.json` report instead of
+  rescanning first.
+- `--fix-agent` and `--fix-model` override the OpenCode agent and model used
+  for the repair pass; scan options behave the same as `shrike scan`.
 
 ## Examples
 
