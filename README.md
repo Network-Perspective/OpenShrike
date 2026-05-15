@@ -293,16 +293,3 @@ commit named `chore(release): vX.Y.Z`, and creates an annotated `vX.Y.Z` tag.
 Use `scripts/create-release.sh minor`, `major`, or an explicit version to
 override the default patch bump.
 
-## Documentation Map
-
-- [Vision and scope](docs/requirements/01-project-vision.md)
-- [Feature scope and phases](docs/requirements/02-feature-scope.md)
-- [Security model](docs/requirements/03-security-model.md)
-- [Agent runtime and isolation](docs/requirements/04-agent-runtime.md)
-- [Best practices library](docs/requirements/05-best-practices-library.md)
-- [Observability and feedback loop](docs/requirements/06-observability.md)
-- [Workflows and integrations](docs/requirements/07-workflows-and-integrations.md)
-- [MVP implementation notes](docs/implementation/01-mvp-csharp-rel-001-implementation.md)
-- [Fixture and branch workflow](docs/implementation/02-testscsharp-fixture-and-branches.md)
-- [Phase 2 runtime and parallel plan](docs/implementation/03-phase-2-docker-runtime-and-multi-agent-plan.md)
-- [Install and release distribution](docs/implementation/05-install-and-release-distribution.md)
