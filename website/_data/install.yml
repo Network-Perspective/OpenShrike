@@ -1,5 +1,5 @@
 headline: "Get started in minutes"
-prereq: "Prerequisite: Node.js 22+"
+prereq: 'Prerequisite: <a href="https://nodejs.org/en/download">Node.js 22+</a>'
 methods:
   - name: "Linux / macOS"
     language: "bash"

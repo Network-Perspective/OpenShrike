@@ -1,11 +1,13 @@
 ![OpenShrike logo](docs/openshrike-logo.png)
 
 <div align="center">
+  <a href="https://network-perspective.github.io/OpenShrike/"><img src="https://img.shields.io/badge/Website-OpenShrike-20B2AA?style=for-the-badge&logo=githubpages&logoColor=white" alt="Website"></a>
+  <a href="https://discord.gg/4MKThAVsy2"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://github.com/Network-Perspective/OpenShrike/releases/latest"><img src="https://img.shields.io/github/v/release/Network-Perspective/OpenShrike?style=for-the-badge&color=20B2AA" alt="Latest release"></a>
   <a href="https://github.com/Network-Perspective/OpenShrike/actions/workflows/release-bundles.yml"><img src="https://img.shields.io/github/actions/workflow/status/Network-Perspective/OpenShrike/release-bundles.yml?style=for-the-badge&label=build" alt="Build status"></a>
   <a href="https://github.com/OpenHands/OpenHands/blob/main/LICENSE"><img src="https://img.shields.io/badge/LICENSE-MIT-20B2AA?style=for-the-badge" alt="MIT License"></a>
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-22%2B-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js 22+"></a>
-  <a href="https://discord.gg/4MKThAVsy2"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+  
 
   <!-- Keep these links. Translations will automatically update with the README. -->
   <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=de">Deutsch</a> | 
@@ -56,7 +58,7 @@ in CI, against the LLM provider of your choice.
 
 ## Install
 
-Prerequisite: Node.js 22+.
+Prerequisite: [Node.js 22+](https://nodejs.org/en/download).
 
 Install the latest GitHub release:
 
@@ -93,7 +95,7 @@ shrike scan
 
 ## Install From Source
 
-Prerequisite: Node.js 22+.
+Prerequisite: [Node.js 22+](https://nodejs.org/en/download).
 
 ```bash
 npm install
