@@ -232,21 +232,56 @@ describe('createNativeScanSession', () => {
     });
     const completion = session.start();
 
-    await updates.waitFor(snapshot => {
-      expect(snapshot.runningCheckIds).toEqual(['check-a']);
-      expect(session.getSnapshot().runningCheckIds).toEqual(['check-a']);
-      const savedReport = session.getPersistableReport();
-      expect(savedReport?.summary.total_checks).toBe(2);
-      expect(savedReport?.checks).toEqual(expect.arrayContaining([
-        expect.objectContaining({id: 'check-a', status: 'unknown'}),
-        expect.objectContaining({id: 'check-b', status: 'unknown'})
-      ]));
-      return true;
-    });
+    const runningSnapshot = await updates.waitFor(
+      snapshot => snapshot.runningCheckIds.includes('check-a')
+    );
+    expect(runningSnapshot.runningCheckIds).toEqual(['check-a']);
+    expect(session.getSnapshot().runningCheckIds).toEqual(['check-a']);
+    const savedReport = session.getPersistableReport();
+    expect(savedReport?.summary.total_checks).toBe(2);
+    expect(savedReport?.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({id: 'check-a', status: 'unknown'}),
+      expect.objectContaining({id: 'check-b', status: 'unknown'})
+    ]));
 
     firstCheck.resolve(makeResult('check-a', 'fail'));
 
     await completion;
+    await session.close();
+  });
+
+  it('fails early with a clear message when uncommitted scope has no changes', async () => {
+    mockResolvePolicyDefinition.mockResolvedValue({
+      id: 'policy-a',
+      version: '2026-05-12',
+      checkIds: ['check-a', 'check-b']
+    });
+    mockResolveScanScope.mockResolvedValue({
+      kind: 'uncommitted',
+      label: 'uncommitted changes',
+      files: [],
+      isFullRepository: false
+    });
+
+    const updates = createSnapshotUpdates();
+    const session = createNativeScanSession(makeOptions({scanScope: 'uncommitted'}), undefined, {
+      onUpdate: updates.onUpdate
+    });
+
+    await expect(session.start()).rejects.toMatchObject({
+      code: 'NO_CHANGES_IN_SCOPE',
+      message: 'There are no uncommitted changes in the current folder.'
+    });
+
+    const snapshot = await updates.waitFor(
+      nextSnapshot => nextSnapshot.statusLabel === 'There are no uncommitted changes in the current folder'
+    );
+    expect(snapshot.isPrepared).toBe(true);
+    expect(snapshot.isScanComplete).toBe(false);
+    expect(snapshot.runningCheckIds).toEqual([]);
+    expect(mockEvaluateCheck).not.toHaveBeenCalled();
+    expect(mockLoadRuntimeConfig).not.toHaveBeenCalled();
+
     await session.close();
   });
 

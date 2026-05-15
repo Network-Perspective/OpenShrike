@@ -104,6 +104,42 @@ describe('runScan', () => {
     expect(mockEvaluateCheck).not.toHaveBeenCalled();
   });
 
+  it('fails early with a clear message when uncommitted scope has no changes', async () => {
+    const repoRoot = await makeRepoRoot();
+    mockResolvePolicyDefinition.mockResolvedValue({
+      id: 'typescript-baseline',
+      version: '2026-03-23',
+      checkIds: ['check-a', 'check-b']
+    });
+    mockResolveScanScope.mockResolvedValue(
+      makeScope({
+        kind: 'uncommitted',
+        label: 'uncommitted changes',
+        files: [],
+        isFullRepository: false
+      })
+    );
+
+    const progress: ScanProgressEvent[] = [];
+    await expect(runScan(
+      makeOptions(repoRoot, {
+        policyId: 'typescript-baseline',
+        scanScope: 'uncommitted',
+        mockOpencode: true
+      }),
+      {
+        onProgress: event => progress.push(event)
+      }
+    )).rejects.toMatchObject({
+      code: 'NO_CHANGES_IN_SCOPE',
+      message: 'There are no uncommitted changes in the current folder.'
+    });
+
+    expect(progress.map(event => event.type)).toEqual(['scope-resolved', 'no-changes-in-scope']);
+    expect(progress.at(-1)?.statusLabel).toBe('There are no uncommitted changes in the current folder');
+    expect(mockEvaluateCheck).not.toHaveBeenCalled();
+  });
+
   it('runs checks and emits progress for a normal scan', async () => {
     const repoRoot = await makeRepoRoot();
     const runtime = {

@@ -21,6 +21,7 @@ import {
   resolveEvidenceWindow,
   resolvePagedListNavigation,
   resolveSummaryStatusLabel,
+  syncActionStateWithSessionSnapshot,
   resolveVisibleItemScrollOffset,
   syncBrowserState,
   toggleBrowserViewMode
@@ -276,6 +277,18 @@ describe('deriveProgressCounts', () => {
     });
   });
 
+  it('counts unique running checks when optimistic action state overlaps session state', () => {
+    expect(deriveProgressCounts({
+      isScanComplete: false,
+      totalChecks: 10,
+      completedCount: 4,
+      runningCheckIds: ['check-a', 'check-a', 'check-b']
+    })).toEqual({
+      inProgressCount: 2,
+      pendingCount: 4
+    });
+  });
+
   it('clears unfinished counts after the scan completes', () => {
     expect(deriveProgressCounts({
       isScanComplete: true,
@@ -296,6 +309,38 @@ describe('resolveSummaryStatusLabel', () => {
 
   it('falls back to the progress label when there is no action message', () => {
     expect(resolveSummaryStatusLabel('Scan complete', null)).toBe('Scan complete');
+  });
+});
+
+describe('syncActionStateWithSessionSnapshot', () => {
+  it('does not copy background session workers into optimistic action state', () => {
+    expect(syncActionStateWithSessionSnapshot({
+      runningCheckIds: [],
+      fixingCheckIds: [],
+      message: null
+    }, {
+      runningCheckIds: ['check-a', 'check-b', 'check-c', 'check-d'],
+      fixingCheckId: null
+    })).toEqual({
+      runningCheckIds: [],
+      fixingCheckIds: [],
+      message: null
+    });
+  });
+
+  it('clears optimistic action markers once the session acknowledges the same check', () => {
+    expect(syncActionStateWithSessionSnapshot({
+      runningCheckIds: ['check-a'],
+      fixingCheckIds: ['check-b'],
+      message: 'Working...'
+    }, {
+      runningCheckIds: ['check-a'],
+      fixingCheckId: 'check-b'
+    })).toEqual({
+      runningCheckIds: [],
+      fixingCheckIds: ['check-b'],
+      message: 'Working...'
+    });
   });
 });
 

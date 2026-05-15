@@ -48,6 +48,7 @@ import type {
   ScanProgressEvent,
   ScanProgressEventType,
   ScanReport,
+  ScanScopeContext,
   ScanRuntimeEvent
 } from './types.js';
 
@@ -399,6 +400,13 @@ export function createNativeScanSession(
       detailLines = [];
       isPrepared = true;
       emitUpdate();
+
+      const noChangesError = createNoChangesInScopeCliError(scopeContext);
+      if (noChangesError) {
+        statusLabel = describeNoChangesInScope(scopeContext);
+        emitUpdate();
+        throw noChangesError;
+      }
 
       if (!scopeContext.isFullRepository && scopeContext.files.length === 0) {
         for (const checkId of checkOrder) {
@@ -900,6 +908,12 @@ export async function runNativeScan(
 
     const effectiveParallelism = resolveEffectiveParallelism(options.parallelism, checkIds.length);
 
+    const noChangesError = createNoChangesInScopeCliError(scopeContext);
+    if (noChangesError) {
+      emitProgress(logger, hooks, 'no-changes-in-scope', scopeContext, progressState, checkIds, null, null, null, null);
+      throw noChangesError;
+    }
+
     if (!scopeContext.isFullRepository && scopeContext.files.length === 0) {
       emitProgress(logger, hooks, 'no-changes-in-scope', scopeContext, progressState, checkIds, null, null, null, null);
       const checks = checkIds.map(createNoChangesResult);
@@ -1081,6 +1095,14 @@ async function runDockerScan(
   const repoStats = await fs.stat(repoFullPath).catch(() => null);
   if (!repoStats?.isDirectory()) {
     throw new Error(`Repository path not found: ${repoFullPath}`);
+  }
+
+  if (options.scanScope === 'uncommitted') {
+    const scopeContext = await resolveScanScope(repoFullPath, options.scanScope, options.scanTarget);
+    const noChangesError = createNoChangesInScopeCliError(scopeContext);
+    if (noChangesError) {
+      throw noChangesError;
+    }
   }
 
   const agentName = options.agent?.trim() || DEFAULT_AGENT_NAME;
@@ -2049,7 +2071,7 @@ function emitProgress(
   const statusLabel = type === 'scope-resolved'
     ? 'Scope resolved'
     : type === 'no-changes-in-scope'
-      ? 'No files matched the selected scope'
+      ? describeNoChangesInScope(scopeContext)
       : type === 'check-started'
         ? (checkId ? `Running ${checkId}` : 'Running check')
         : checkId && checkStatus
@@ -2092,6 +2114,20 @@ function countChecks(
   }
 
   return count;
+}
+
+function describeNoChangesInScope(scopeContext: ScanScopeContext): string {
+  return scopeContext.kind === 'uncommitted'
+    ? 'There are no uncommitted changes in the current folder'
+    : 'No files matched the selected scope';
+}
+
+function createNoChangesInScopeCliError(scopeContext: ScanScopeContext): CliError | null {
+  if (scopeContext.isFullRepository || scopeContext.files.length > 0 || scopeContext.kind !== 'uncommitted') {
+    return null;
+  }
+
+  return new CliError('NO_CHANGES_IN_SCOPE', `${describeNoChangesInScope(scopeContext)}.`);
 }
 
 function buildReport(options: {

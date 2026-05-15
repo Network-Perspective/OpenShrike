@@ -1661,22 +1661,34 @@ function applySessionSnapshot(
     resultsByCheckId: {...snapshot.resultsByCheckId}
   });
   setters.setReport(snapshot.report);
-  setters.setActionState(previous => ({
-    ...previous,
-    runningCheckIds: dedupeActionCheckIds([
-      ...snapshot.runningCheckIds,
-      ...previous.runningCheckIds.filter(checkId =>
-        checkId !== snapshot.fixingCheckId && !snapshot.runningCheckIds.includes(checkId)
-      )
-    ]),
-    fixingCheckIds: snapshot.fixingCheckId
-      ? [snapshot.fixingCheckId]
-      : previous.fixingCheckIds.filter(checkId => !snapshot.runningCheckIds.includes(checkId))
-  }));
+  setters.setActionState(previous => syncActionStateWithSessionSnapshot(previous, snapshot));
 }
 
 function dedupeActionCheckIds(checkIds: string[]): string[] {
   return [...new Set(checkIds)];
+}
+
+export function syncActionStateWithSessionSnapshot(
+  previous: ActionState,
+  snapshot: Pick<ScanSessionSnapshot, 'runningCheckIds' | 'fixingCheckId'>
+): ActionState {
+  const acknowledgedCheckIds = new Set([
+    ...snapshot.runningCheckIds,
+    ...(snapshot.fixingCheckId ? [snapshot.fixingCheckId] : [])
+  ]);
+
+  return {
+    ...previous,
+    // Keep only optimistic actions that the session has not taken ownership of yet.
+    runningCheckIds: dedupeActionCheckIds(previous.runningCheckIds.filter(checkId =>
+      !acknowledgedCheckIds.has(checkId)
+    )),
+    fixingCheckIds: snapshot.fixingCheckId
+      ? [snapshot.fixingCheckId]
+      : dedupeActionCheckIds(previous.fixingCheckIds.filter(checkId =>
+        !acknowledgedCheckIds.has(checkId)
+      ))
+  };
 }
 
 export function resolveSummaryStatusLabel(
@@ -2208,7 +2220,7 @@ export function deriveProgressCounts(options: {
     };
   }
 
-  const inProgressCount = options.runningCheckIds.length;
+  const inProgressCount = new Set(options.runningCheckIds).size;
   const pendingCount = Math.max(0, options.totalChecks - options.completedCount - inProgressCount);
 
   return {
