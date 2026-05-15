@@ -1,6 +1,6 @@
 {
   "name": "openshrike",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "description": "Security-first agentic code reviewer and best-practice auditor built on OpenCode.",
   "type": "module",
