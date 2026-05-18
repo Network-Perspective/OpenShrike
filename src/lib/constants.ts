@@ -8,6 +8,7 @@ export const DEFAULT_SCAN_SCOPE = 'uncommitted';
 export const DEFAULT_RUNTIME_MODE = 'native';
 export const DEFAULT_PARALLELISM = 'auto';
 export const DEFAULT_DOCKER_IMAGE = 'openshrike-runtime:dev';
+export const DEFAULT_PULL_REQUEST_BASE_BRANCH_NAMES = ['dev', 'develop', 'main', 'master'] as const;
 
 export const CONFIG_DIRECTORY_NAME = '.openshrike';
 export const ARTIFACTS_DIRECTORY_NAME = 'artifacts';

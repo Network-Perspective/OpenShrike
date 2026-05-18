@@ -14,7 +14,7 @@ Implemented:
 - Human-readable markdown output (`--output markdown`).
 - Bundle emission (`--emit-bundle <path>`).
 - Scope-aware scans: `uncommitted` (default), `commit`, `branch`, `pr`, `full`.
-- Scope target selection via `--scan-target`.
+- Scope target selection via `--target`.
 - Read-only mutation guardrail for repository files during agent execution.
 - Spectre.Console progress UI with scope and per-check progress updates.
 
@@ -40,7 +40,8 @@ Not implemented:
    - `uncommitted` (default): changed tracked/untracked files in working tree.
    - `commit`: files changed in a commit or commit range.
    - `branch`: files changed in `<base>...HEAD`.
-   - `pr`: files changed in supplied diff spec (default `origin/main...HEAD`).
+   - `pr`: files changed in supplied diff spec (default discovered base branch
+     diff such as `develop...HEAD` or `origin/main...HEAD`).
    - `full`: entire repository.
 4. OpenShrike builds an agent prompt with:
    - check definition markdown,
@@ -57,9 +58,9 @@ Not implemented:
 ```bash
 shrike scan \
   (--check csharp-rel-001-cancellation-tokens | --policy csharp-baseline) \
-  --repo <path> \
-  [--scan-scope uncommitted|commit|branch|pr|full] \
-  [--scan-target <target>] \
+  --path <path> \
+  [--scope uncommitted|commit|branch|pr|full] \
+  [--target <target>] \
   [--output json|markdown] \
   [--emit-bundle <path>] \
   [--agent <agent>] \
@@ -117,8 +118,8 @@ Run first check via agent:
 ```bash
 shrike scan \
   --check csharp-rel-001-cancellation-tokens \
-  --repo ../OpenShrike.TestsCsharp \
-  --scan-scope full \
+  --path ../OpenShrike.TestsCsharp \
+  --scope full \
   --output json
 ```
 
@@ -127,7 +128,7 @@ Run policy scan on uncommitted changes:
 ```bash
 shrike scan \
   --policy csharp-baseline \
-  --repo ../OpenShrike.TestsCsharp
+  --path ../OpenShrike.TestsCsharp
 ```
 
 Run PR-style scan and emit markdown:
@@ -135,9 +136,9 @@ Run PR-style scan and emit markdown:
 ```bash
 shrike scan \
   --policy csharp-baseline \
-  --repo ../OpenShrike.TestsCsharp \
-  --scan-scope pr \
-  --scan-target origin/main...HEAD \
+  --path ../OpenShrike.TestsCsharp \
+  --scope pr \
+  --target develop...HEAD \
   --output markdown
 ```
 

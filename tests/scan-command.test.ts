@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {CliError} from '../src/lib/cli-error.js';
 import type {ScanCommandOptions} from '../src/lib/types.js';
 
 const mockResolveScanOptions = vi.fn();
@@ -59,6 +60,7 @@ beforeEach(() => {
   mockRunScanWithInk.mockReset();
   mockLoadLastScanState.mockReset();
   mockSaveLastScanState.mockReset();
+  mockSaveLastScanState.mockResolvedValue([]);
   writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 });
 
@@ -122,6 +124,88 @@ describe('executeScanCommand', () => {
     expect(writeSpy).toHaveBeenCalledOnce();
     expect(String(writeSpy.mock.calls[0]?.[0])).toContain('"error"');
     expect(String(writeSpy.mock.calls[0]?.[0])).toContain('"code": "SCAN_FAILED"');
+  });
+
+  it('reruns a bare no-changes scan as full when the user confirms the fallback prompt', async () => {
+    const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-scan-command-full-fallback-'));
+    tempDirectories.push(repoRoot);
+    mockResolveScanOptions.mockResolvedValue(makeOptions(repoRoot, {
+      checkId: 'check-a',
+      scanScope: 'uncommitted'
+    }));
+    mockRunScan
+      .mockRejectedValueOnce(
+        new CliError('NO_CHANGES_IN_SCOPE', 'There are no uncommitted changes in the current folder.')
+      )
+      .mockResolvedValueOnce(makeReport(repoRoot));
+
+    const confirmFullScanFallback = vi.fn().mockResolvedValue(true);
+    const stdoutTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+    const stdinTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+    setTty(process.stdout, true);
+    setTty(process.stdin, true);
+
+    try {
+      const exitCode = await executeScanCommand(
+        {repoPath: repoRoot},
+        {
+          promptForFullScanWhenScopeEmpty: true,
+          confirmFullScanFallback
+        }
+      );
+
+      expect(exitCode).toBe(0);
+      expect(confirmFullScanFallback).toHaveBeenCalledOnce();
+      expect(mockRunScan).toHaveBeenCalledTimes(2);
+      expect(mockRunScan.mock.calls[0]?.[0]).toMatchObject({
+        scanScope: 'uncommitted'
+      });
+      expect(mockRunScan.mock.calls[1]?.[0]).toMatchObject({
+        scanScope: 'full',
+        scanTarget: undefined
+      });
+      expect(String(writeSpy.mock.calls.at(-1)?.[0])).toContain('# report');
+    } finally {
+      restoreTty(process.stdout, stdoutTtyDescriptor);
+      restoreTty(process.stdin, stdinTtyDescriptor);
+    }
+  });
+
+  it('exits cleanly when the user declines the full scan fallback prompt', async () => {
+    const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-scan-command-skip-fallback-'));
+    tempDirectories.push(repoRoot);
+    mockResolveScanOptions.mockResolvedValue(makeOptions(repoRoot, {
+      checkId: 'check-a',
+      scanScope: 'uncommitted'
+    }));
+    mockRunScan.mockRejectedValueOnce(
+      new CliError('NO_CHANGES_IN_SCOPE', 'There are no uncommitted changes in the current folder.')
+    );
+
+    const confirmFullScanFallback = vi.fn().mockResolvedValue(false);
+    const stdoutTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+    const stdinTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+    setTty(process.stdout, true);
+    setTty(process.stdin, true);
+
+    try {
+      const exitCode = await executeScanCommand(
+        {repoPath: repoRoot},
+        {
+          promptForFullScanWhenScopeEmpty: true,
+          confirmFullScanFallback
+        }
+      );
+
+      expect(exitCode).toBe(0);
+      expect(confirmFullScanFallback).toHaveBeenCalledOnce();
+      expect(mockRunScan).toHaveBeenCalledOnce();
+      expect(writeSpy).toHaveBeenCalledOnce();
+      expect(writeSpy).toHaveBeenCalledWith('Skipped scan: there are no uncommitted changes in the current folder.\n');
+    } finally {
+      restoreTty(process.stdout, stdoutTtyDescriptor);
+      restoreTty(process.stdin, stdinTtyDescriptor);
+    }
   });
 
   it('does not rewrite last-scan state when rendering a saved report', async () => {
@@ -209,4 +293,48 @@ function makeOptions(repoPath: string, overrides: Partial<ScanCommandOptions>): 
     ui: false,
     ...overrides
   };
+}
+
+function makeReport(repoPath: string) {
+  return {
+    bundle_id: 'check-a',
+    policy_version: '2026-05-18',
+    repo: {path: repoPath},
+    summary: {
+      total_checks: 1,
+      passed: 1,
+      failed: 0,
+      unknown: 0
+    },
+    checks: [
+      {
+        id: 'check-a',
+        version: '0.1.0',
+        status: 'pass',
+        confidence: 'HIGH',
+        evidence: [],
+        rationale: 'ok',
+        remediation: []
+      }
+    ]
+  };
+}
+
+function setTty(stream: NodeJS.WriteStream | NodeJS.ReadStream, value: boolean): void {
+  Object.defineProperty(stream, 'isTTY', {
+    configurable: true,
+    value
+  });
+}
+
+function restoreTty(
+  stream: NodeJS.WriteStream | NodeJS.ReadStream,
+  descriptor: PropertyDescriptor | undefined
+): void {
+  if (descriptor) {
+    Object.defineProperty(stream, 'isTTY', descriptor);
+    return;
+  }
+
+  delete (stream as {isTTY?: boolean}).isTTY;
 }

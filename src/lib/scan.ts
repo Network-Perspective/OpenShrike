@@ -41,6 +41,7 @@ import {type RuntimeEventEnvelope, OpenCodeRuntime} from './runtime.js';
 import {resolveScanScope} from './scope.js';
 import type {
   CheckResult,
+  ParallelismValue,
   RuntimeMode,
   SavedScanRequest,
   SavedScanScope,
@@ -2041,9 +2042,13 @@ function normalizeRelativePath(value: string): string {
   return value.trim().replaceAll(path.sep, '/').replace(/^\.\/+/, '').replace(/\/+$/, '');
 }
 
-function resolveEffectiveParallelism(requested: number | 'auto', checkCount: number): number {
+function resolveEffectiveParallelism(requested: number | 'auto' | 'full', checkCount: number): number {
   if (checkCount <= 1) {
     return Math.max(1, checkCount);
+  }
+
+  if (requested === 'full') {
+    return checkCount;
   }
 
   if (requested === 'auto') {
@@ -2136,7 +2141,7 @@ function buildReport(options: {
   repoPath: string;
   checks: CheckResult[];
   runtimeMode: RuntimeMode;
-  requestedParallelism: number | 'auto';
+  requestedParallelism: ParallelismValue;
   effectiveParallelism: number;
   artifactsDir: string | null;
 }): ScanReport {
@@ -2174,7 +2179,7 @@ function createNoChangesResult(checkId: string): CheckResult {
     rationale: 'No files matched the selected scan scope.',
     remediation: [
       'Choose a scope that includes changed files.',
-      "Use '--scan-scope full' to evaluate the full repository."
+      "Use '--scope full' to evaluate the full repository."
     ]
   };
 }
@@ -2313,7 +2318,7 @@ function createInconclusiveResult(
     rationale: rationaleParts.join('\n\n'),
     remediation: [
       'Review the check output and rerun the scan.',
-      "If the check keeps returning out-of-scope evidence, retry with a broader scope such as '--scan-scope full'."
+      "If the check keeps returning out-of-scope evidence, retry with a broader scope such as '--scope full'."
     ]
   };
 }

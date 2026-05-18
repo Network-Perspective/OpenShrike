@@ -840,6 +840,7 @@ function buildParallelismOptions(current: ParallelismValue): InitScreenOption<st
   const values = [
     formatParallelism(current),
     'auto',
+    'full',
     '1',
     '2',
     '4',
@@ -858,6 +859,8 @@ function buildParallelismOptions(current: ParallelismValue): InitScreenOption<st
     label: value,
     detail: value === 'auto'
       ? 'scale automatically'
+      : value === 'full'
+        ? 'run one worker per check'
       : value === '1'
         ? 'run checks sequentially'
         : `run up to ${value} checks at once`
@@ -865,7 +868,11 @@ function buildParallelismOptions(current: ParallelismValue): InitScreenOption<st
 }
 
 function parseParallelism(value: string): ParallelismValue {
-  return value === 'auto' ? 'auto' : Number.parseInt(value, 10);
+  if (value === 'auto' || value === 'full') {
+    return value;
+  }
+
+  return Number.parseInt(value, 10);
 }
 
 function formatParallelism(value: ParallelismValue): string {

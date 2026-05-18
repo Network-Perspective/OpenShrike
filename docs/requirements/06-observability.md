@@ -35,7 +35,7 @@ requirements for that flow live in
   "repo": {
     "url": "git@github.com:org/repo.git",
     "ref": "refs/heads/feature-branch",
-    "diff": "origin/main...HEAD"
+    "diff": "develop...HEAD"
   },
   "summary": {
     "total_checks": 42,

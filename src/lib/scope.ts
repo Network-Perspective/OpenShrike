@@ -1,5 +1,7 @@
+import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import {
+  DEFAULT_PULL_REQUEST_BASE_BRANCH_NAMES,
   MAX_SCOPE_EVIDENCE_OUTPUT_LINES,
   SCOPE_VALUES
 } from './constants.js';
@@ -20,6 +22,18 @@ export function parseScanScopeKind(value: string): ScanScopeKind | null {
   return (SCOPE_VALUES as readonly string[]).includes(normalized)
     ? (normalized as ScanScopeKind)
     : null;
+}
+
+export async function discoverDefaultPullRequestTarget(repoPath: string): Promise<string | null> {
+  return await discoverDefaultPullRequestTargetWithLookup(repoPath, async candidate => {
+    return await gitReferenceExists(repoPath, candidate);
+  });
+}
+
+export function discoverDefaultPullRequestTargetSync(repoPath: string): string | null {
+  return discoverDefaultPullRequestTargetWithLookupSync(repoPath, candidate => {
+    return gitReferenceExistsSync(repoPath, candidate);
+  });
 }
 
 export async function resolveScanScope(
@@ -81,7 +95,7 @@ async function resolveUncommitted(repoPath: string): Promise<ScanScopeContext> {
 
 async function resolveCommit(repoPath: string, target?: string): Promise<ScanScopeContext> {
   if (!target) {
-    throw new Error("Scan scope 'commit' requires '--scan-target <COMMIT_OR_RANGE>'.");
+    throw new Error("Scope 'commit' requires '--target <COMMIT_OR_RANGE>'.");
   }
 
   const diffSpec = target.includes('..') ? target : `${target}^!`;
@@ -102,11 +116,12 @@ async function resolveCommit(repoPath: string, target?: string): Promise<ScanSco
 }
 
 async function resolveBranch(repoPath: string, target?: string): Promise<ScanScopeContext> {
-  if (!target) {
-    throw new Error("Scan scope 'branch' requires '--scan-target <BASE_BRANCH>'.");
+  const resolvedTarget = target?.trim() || await discoverDefaultPullRequestTarget(repoPath);
+  if (!resolvedTarget) {
+    throw new Error("Scope 'branch' requires '--target <BASE_BRANCH>' because no default branch target could be discovered.");
   }
 
-  const diffSpec = `${target}...HEAD`;
+  const diffSpec = resolvedTarget.includes('..') ? resolvedTarget : `${resolvedTarget}...HEAD`;
   const files = await resolveFilesFromDiff(repoPath, diffSpec);
   const diffCapture = await captureGitCommand(
     repoPath,
@@ -124,7 +139,11 @@ async function resolveBranch(repoPath: string, target?: string): Promise<ScanSco
 }
 
 async function resolvePullRequest(repoPath: string, target?: string): Promise<ScanScopeContext> {
-  const diffSpec = target?.trim() || 'origin/main...HEAD';
+  const diffSpec = target?.trim() || await discoverDefaultPullRequestTarget(repoPath);
+  if (!diffSpec) {
+    throw new Error("Scope 'pr' requires '--target <DIFF_SPEC>' because no default base branch could be discovered.");
+  }
+
   const files = await resolveFilesFromDiff(repoPath, diffSpec);
   const diffCapture = await captureGitCommand(
     repoPath,
@@ -193,6 +212,75 @@ function isGitOwnershipProtectionError(message: string): boolean {
   const normalized = message.toLowerCase();
   return normalized.includes('detected dubious ownership')
     || normalized.includes('safe.directory');
+}
+
+function buildDefaultPullRequestBaseRefCandidates(): string[] {
+  return DEFAULT_PULL_REQUEST_BASE_BRANCH_NAMES.flatMap(branchName => [
+    `origin/${branchName}`,
+    branchName
+  ]);
+}
+
+async function discoverDefaultPullRequestTargetWithLookup(
+  repoPath: string,
+  lookup: (candidate: string) => Promise<boolean>
+): Promise<string | null> {
+  try {
+    await runGit(repoPath, ['rev-parse', '--is-inside-work-tree']);
+  } catch {
+    return null;
+  }
+
+  for (const candidate of buildDefaultPullRequestBaseRefCandidates()) {
+    if (await lookup(candidate)) {
+      return `${candidate}...HEAD`;
+    }
+  }
+
+  return null;
+}
+
+function discoverDefaultPullRequestTargetWithLookupSync(
+  repoPath: string,
+  lookup: (candidate: string) => boolean
+): string | null {
+  try {
+    execFileSync('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree'], {
+      encoding: 'utf8',
+      stdio: 'pipe'
+    });
+  } catch {
+    return null;
+  }
+
+  for (const candidate of buildDefaultPullRequestBaseRefCandidates()) {
+    if (lookup(candidate)) {
+      return `${candidate}...HEAD`;
+    }
+  }
+
+  return null;
+}
+
+async function gitReferenceExists(repoPath: string, reference: string): Promise<boolean> {
+  try {
+    await runGit(repoPath, ['rev-parse', '--verify', '--quiet', reference]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function gitReferenceExistsSync(repoPath: string, reference: string): boolean {
+  try {
+    execFileSync('git', ['-C', repoPath, 'rev-parse', '--verify', '--quiet', reference], {
+      encoding: 'utf8',
+      stdio: 'pipe'
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function buildDiffArgs(diffSpec: string): string[] {

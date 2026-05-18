@@ -56,7 +56,23 @@ describe('validateScanOptions', () => {
         parallelism: 1,
         ui: false
       })
-    ).toThrow(/scan-target/i);
+    ).toThrow(/--target/i);
+  });
+
+  it('allows branch scope without an explicit target so runtime scope discovery can apply the default', () => {
+    const result = validateScanOptions({
+      checkId: 'csharp-rel-001-cancellation-tokens',
+      repoPath: '.',
+      outputFormat: 'json',
+      scanScope: 'branch',
+      mockOpencode: false,
+      runtimeMode: 'native',
+      parallelism: 1,
+      ui: false
+    });
+
+    expect(result.scanScope).toBe('branch');
+    expect(result.scanTarget).toBeUndefined();
   });
 
   it('accepts valid policy input', () => {
@@ -77,6 +93,21 @@ describe('validateScanOptions', () => {
     expect(result.logPath).toBe('logs/opencode.jsonl');
     expect(result.runtimeMode).toBe('docker');
     expect(result.parallelism).toBe('auto');
+  });
+
+  it('accepts full parallelism', () => {
+    const result = validateScanOptions({
+      policyId: 'csharp-baseline',
+      repoPath: '.',
+      outputFormat: 'markdown',
+      scanScope: 'full',
+      mockOpencode: true,
+      runtimeMode: 'native',
+      parallelism: 'full',
+      ui: false
+    });
+
+    expect(result.parallelism).toBe('full');
   });
 
   it('accepts project-local checks input without a policy id', () => {

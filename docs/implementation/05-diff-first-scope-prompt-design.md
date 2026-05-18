@@ -230,7 +230,8 @@ git -C <repo> --no-pager diff --no-color --no-ext-diff --find-renames --submodul
 git -C <repo> --no-pager diff --no-color --no-ext-diff --find-renames --submodule=short --relative <diffSpec>
 ```
 
-This matches the current `origin/main...HEAD` default model.
+This matches the current discovered-base-branch default model, for example
+`develop...HEAD` or `origin/main...HEAD`.
 
 ### 3. Keep the scoped file allowlist
 
@@ -281,7 +282,7 @@ You are executing a single OpenShrike best-practice check against repository pat
 
 Check id: bp-arch-003-composition-root-owns-wiring
 
-Review scope: pull request diff origin/main...HEAD.
+Review scope: pull request diff develop...HEAD.
 
 Scoped file allowlist (18):
 - src/cli.ts
@@ -303,7 +304,7 @@ If you need exact current line numbers, you may open files from the scoped file 
 
 Scope capture 1:
 Command:
-git -C /repo --no-pager diff --no-color --no-ext-diff --find-renames --submodule=short --relative origin/main...HEAD
+git -C /repo --no-pager diff --no-color --no-ext-diff --find-renames --submodule=short --relative develop...HEAD
 Output:
 <raw diff output here>
 ```

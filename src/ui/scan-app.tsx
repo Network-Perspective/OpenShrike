@@ -2398,7 +2398,7 @@ function formatDuration(durationMs: number): string {
   return `${(durationMs / 1000).toFixed(1)}s`;
 }
 
-function formatRequestedParallelism(value: number | 'auto'): string {
+function formatRequestedParallelism(value: number | 'auto' | 'full'): string {
   return typeof value === 'number' ? String(value) : value;
 }
 

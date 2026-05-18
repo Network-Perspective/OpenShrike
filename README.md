@@ -16,7 +16,6 @@
   <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=ja">日本語</a> | 
   <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=ko">한국어</a> | 
   <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=pt">Português</a> | 
-  <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=ru">Русский</a> | 
   <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=zh">中文</a>
 </div>
 
@@ -89,7 +88,9 @@ shrike scan
   `.openshrike/checks/`.
 - `shrike scan` uses those saved defaults automatically and reads the
   Markdown checks from `.openshrike/checks/`. By default it scans
-  uncommitted changes in the current repository.
+  uncommitted changes in the current repository. If there are no uncommitted
+  changes, plain `shrike scan` asks whether it should run a full-repository
+  scan instead.
 - Re-run `shrike init` when you want to seed checks from a different policy
   or change saved model, runtime mode, or parallelism defaults.
 
@@ -124,66 +125,36 @@ systems safe, maintainable, observable, and reliable.
 
 ## Command Reference
 
+Each command has a `--help` flag with the full option list. The examples below
+cover the common cases.
+
 ### `shrike init`
 
-Interactive setup for the local `.openshrike/` directory.
+Interactively initialize Shrike defaults in the local `.openshrike` directory.
 
 ```bash
-shrike init [--force]
+shrike init           # first-time setup
+shrike init --force   # re-seed and overwrite existing files
+shrike init --help    # full reference
 ```
-
-- `--force`: prefer replacing generated setup when initialization already
-  exists.
 
 ### `shrike scan`
 
-After `shrike init`, a plain `shrike scan` uses saved defaults from
-`.openshrike/project.json` and executes the Markdown checks in
-`.openshrike/checks/`. Without saved defaults, `scan` requires exactly one of
-`--check` or `--policy`.
+Run a check or policy bundle against a repository. After `shrike init`, a plain
+`shrike scan` uses saved defaults from `.openshrike/project.json` and executes
+the Markdown checks in `.openshrike/checks/`.
 
 ```bash
-shrike scan \
-  [--check <CHECK_ID> | --policy <POLICY_ID>] \
-  [--repo <PATH>] \
-  [--output json|markdown] \
-  [--agent <NAME>] \
-  [--model <PROVIDER/MODEL>] \
-  [--emit-bundle <PATH>] \
-  [--scan-scope uncommitted|commit|branch|pr|full] \
-  [--scan-target <TARGET>] \
-  [--mock-opencode] \
-  [--config <PATH>] \
-  [--log <PATH>] \
-  [--runtime native|docker] \
-  [--image <REF>] \
-  [--artifacts-dir <PATH>] \
-  [--parallelism <N|auto>] \
-  [--no-ui]
+shrike scan                          # use saved defaults on uncommitted changes
+shrike scan --scope branch \
+  --target main                      # scan the current branch vs. main
+shrike scan --scope pr \
+  --target develop...HEAD            # PR-style diff scan
+shrike scan --scope full             # scan the whole repository
+shrike scan --policy csharp-baseline # run a specific policy
+shrike scan --runtime docker         # run in an ephemeral container
+shrike scan --help                   # full reference
 ```
-
-Common behavior:
-
-- `--repo .`, `--output markdown`, `--scan-scope uncommitted`, `--runtime native`,
-  and `--parallelism auto` are the default values when not overridden by saved
-  project settings.
-- `commit` requires `--scan-target <COMMIT_OR_RANGE>`.
-- `branch` requires `--scan-target <BASE_BRANCH>` and compares
-  `<BASE_BRANCH>...HEAD`.
-- `pr` uses `--scan-target <DIFF_SPEC>` or defaults to `origin/main...HEAD`.
-- `full` scans the whole repository.
-- `--runtime docker` runs an ephemeral worker container.
-- If Docker is selected without `--image`, OpenShrike uses
-  `openshrike-runtime:dev` and builds it from
-  `docker/openshrike-runtime.Dockerfile` when needed.
-- `--artifacts-dir` controls where runtime artifacts such as `report.json` and
-  logs are written.
-- In Docker mode, OpenShrike forwards only env vars explicitly referenced by
-  the selected OpenCode config (`provider.*.env`, `${VAR}`, or `{env:VAR}`).
-  Native/Docker parity depends on declaring required env vars in
-  `.openshrike/opencode.json`.
-- `--mock-opencode` exercises the scan path without live OpenCode calls.
-- `--no-ui` disables the live terminal dashboard on stderr.
 
 ### `shrike fix`
 
@@ -191,57 +162,11 @@ Fix failing checks one by one and recheck them. Useful for closing out the long
 tail of mechanical violations before a human review.
 
 ```bash
-shrike fix \
-  [--check <CHECK_ID> | --policy <POLICY_ID>] \
-  [--repo <PATH>] \
-  [--fix-agent <NAME>] \
-  [--fix-model <PROVIDER/MODEL>] \
-  [--scan-scope uncommitted|commit|branch|pr|full] \
-  [--scan-target <TARGET>] \
-  [--runtime native|docker] \
-  [--last-scan]
-```
-
-- `--last-scan` reuses the saved `.openshrike/last-scan.json` report instead of
-  rescanning first.
-- `--fix-agent` and `--fix-model` override the OpenCode agent and model used
-  for the repair pass; scan options behave the same as `shrike scan`.
-
-## Examples
-
-Use saved defaults:
-
-```bash
-shrike scan
-```
-
-Add or customize checks by editing Markdown files in `.openshrike/checks/`.
-
-Run a specific policy without saved defaults:
-
-```bash
-shrike scan --policy typescript-baseline --repo .
-```
-
-Run a single check against a full repository:
-
-```bash
-shrike scan \
-  --check csharp-rel-001-cancellation-tokens \
-  --repo ../OpenShrike.TestsCsharp \
-  --scan-scope full
-```
-
-Run a PR-style scan in Docker:
-
-```bash
-shrike scan \
-  --policy csharp-baseline \
-  --repo . \
-  --scan-scope pr \
-  --scan-target origin/main...HEAD \
-  --runtime docker \
-  --output json
+shrike fix                # fix using saved defaults
+shrike fix --last-scan    # reuse .openshrike/last-scan.json instead of rescanning
+shrike fix --scope branch \
+  --target main           # fix changes on the current branch vs. main
+shrike fix --help         # full reference
 ```
 
 ## Output And Exit Codes
@@ -255,7 +180,7 @@ shrike scan \
 ## Development
 
 ```bash
-npm run dev -- scan --policy csharp-baseline --repo .
+npm run dev -- scan --policy csharp-baseline --path .
 npm run build
 npm run typecheck
 npm test
@@ -277,19 +202,4 @@ Install from the published framework bundle:
 ```bash
 scripts/install-local.sh --source .artifacts/publish/framework
 ```
-
-Tagging a release with `v*` also triggers `.github/workflows/release-bundles.yml`
-to build GitHub release archives for the supported Linux, macOS, and Windows
-targets.
-
-Prepare a release locally so only `git push` remains:
-
-```bash
-scripts/create-release.sh
-```
-
-That script bumps the patch version, stages all current changes, creates a
-commit named `chore(release): vX.Y.Z`, and creates an annotated `vX.Y.Z` tag.
-Use `scripts/create-release.sh minor`, `major`, or an explicit version to
-override the default patch bump.
 

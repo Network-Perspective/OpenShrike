@@ -1,6 +1,6 @@
 export type OutputFormat = 'json' | 'markdown';
 export type RuntimeMode = 'native' | 'docker';
-export type ParallelismValue = number | 'auto';
+export type ParallelismValue = number | 'auto' | 'full';
 export type ProjectType =
   | 'typescript'
   | 'javascript'

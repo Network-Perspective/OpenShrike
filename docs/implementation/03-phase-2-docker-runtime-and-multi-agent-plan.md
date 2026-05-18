@@ -10,7 +10,7 @@ This document plans the Phase 2 features listed in `docs/requirements/02-feature
 Implementation status:
 - `--runtime native|docker` is implemented.
 - Docker runs use `shrike internal scan-worker` inside an ephemeral container.
-- Parallel check workers are implemented via `--parallelism <N|auto>`.
+- Parallel check workers are implemented via `--parallelism <N|auto|full>`.
 - The CLI/runtime path can stream worker progress and OpenCode events back from
   Docker workers.
 
@@ -86,15 +86,15 @@ Proposed future CLI examples:
 ```bash
 shrike scan \
   --policy csharp-baseline \
-  --repo . \
+  --path . \
   --runtime docker \
 ```
 
 ```bash
 shrike scan \
   --check csharp-rel-001-cancellation-tokens \
-  --repo ../OpenShrike.TestsCsharp \
-  --scan-scope full \
+  --path ../OpenShrike.TestsCsharp \
+  --scope full \
   --runtime docker \
   --image ghcr.io/openshrike/runtime:2026.03
 ```
@@ -185,14 +185,14 @@ Proposed future CLI examples:
 ```bash
 shrike scan \
   --policy csharp-baseline \
-  --repo . \
+  --path . \
   --runtime native
 ```
 
 ```bash
 shrike scan \
   --policy csharp-baseline \
-  --repo . \
+  --path . \
   --runtime docker \
   --artifacts-dir .openshrike/artifacts/latest
 ```
@@ -218,9 +218,9 @@ Example:
 ```bash
 shrike scan \
   --policy csharp-baseline \
-  --repo . \
-  --scan-scope pr \
-  --scan-target origin/main...HEAD \
+  --path . \
+  --scope pr \
+  --target develop...HEAD \
   --runtime docker \
   --artifacts-dir artifacts/shrike
 ```
@@ -253,14 +253,14 @@ Proposed future CLI examples:
 ```bash
 shrike scan \
   --policy csharp-baseline \
-  --repo . \
+  --path . \
   --parallelism 4
 ```
 
 ```bash
 shrike scan \
   --policy csharp-baseline \
-  --repo . \
+  --path . \
   --runtime docker \
   --parallelism auto
 ```
@@ -281,7 +281,7 @@ Recommended scheduler behavior:
 
 ### Concurrency control
 Recommended behavior:
-- Support `--parallelism <N>`
+- Support `--parallelism <N|auto|full>`
 - Add jittered backoff for 429 or transient provider errors
 - Emit a warning when requested parallelism is above a safe configured ceiling
 
@@ -334,7 +334,7 @@ Example local parity run:
 ```bash
 shrike scan \
   --policy csharp-baseline \
-  --repo . \
+  --path . \
   --runtime docker \
   --parallelism 2
 ```

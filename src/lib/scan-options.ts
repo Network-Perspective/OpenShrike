@@ -20,6 +20,7 @@ import type {ScanCommandOptions} from './types.js';
 
 const parallelismSchema = z.union([
   z.literal('auto'),
+  z.literal('full'),
   z.coerce.number().int().min(1)
 ]);
 
@@ -77,7 +78,7 @@ const scanOptionsSchema = z
       if (hasConflictingSelection) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: '`--last-scan` cannot be combined with explicit selection or scope-target flags.'
+          message: '`--last-scan` cannot be combined with explicit selection or `--target`.'
         });
       }
 
@@ -106,16 +107,10 @@ const scanOptionsSchema = z
     if (value.scanScope === 'commit' && !value.scanTarget) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Scan scope 'commit' requires '--scan-target <COMMIT_OR_RANGE>'."
+        message: "Scope 'commit' requires '--target <COMMIT_OR_RANGE>'."
       });
     }
 
-    if (value.scanScope === 'branch' && !value.scanTarget) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Scan scope 'branch' requires '--scan-target <BASE_BRANCH>'."
-      });
-    }
   });
 
 export function validateScanOptions(input: unknown): ScanCommandOptions {

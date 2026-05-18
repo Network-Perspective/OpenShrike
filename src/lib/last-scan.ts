@@ -50,7 +50,7 @@ const savedScanStateSchema = z.object({
     }),
     execution: z.object({
       runtime_mode: z.enum(['native', 'docker']),
-      requested_parallelism: z.union([z.number().int().min(1), z.literal('auto')]),
+      requested_parallelism: z.union([z.number().int().min(1), z.literal('auto'), z.literal('full')]),
       effective_parallelism: z.number().int().min(0),
       artifacts_dir: z.string().nullable()
     }).optional(),

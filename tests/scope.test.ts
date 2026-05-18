@@ -4,7 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 import {MAX_SCOPE_EVIDENCE_OUTPUT_LINES} from '../src/lib/constants.js';
-import {parseScanScopeKind, resolveScanScope} from '../src/lib/scope.js';
+import {
+  discoverDefaultPullRequestTarget,
+  discoverDefaultPullRequestTargetSync,
+  parseScanScopeKind,
+  resolveScanScope
+} from '../src/lib/scope.js';
 
 const tempRoots: string[] = [];
 
@@ -73,6 +78,45 @@ describe('resolveScanScope', () => {
     expect(scope.scopeEvidence?.mode).toBe('omitted');
     expect(scope.scopeEvidence?.commands.every(command => command.output === '')).toBe(true);
   });
+
+  it('prefers develop over main when discovering the default pull request target', async () => {
+    const repoRoot = await makeRepoRoot();
+
+    await fs.writeFile(path.join(repoRoot, 'README.md'), 'base\n', 'utf8');
+    git(repoRoot, ['add', 'README.md']);
+    git(repoRoot, ['commit', '-m', 'initial']);
+    git(repoRoot, ['checkout', '-b', 'develop']);
+    git(repoRoot, ['checkout', '-b', 'feature/test']);
+    await fs.writeFile(path.join(repoRoot, 'README.md'), 'feature\n', 'utf8');
+    git(repoRoot, ['add', 'README.md']);
+    git(repoRoot, ['commit', '-m', 'feature']);
+
+    await expect(discoverDefaultPullRequestTarget(repoRoot)).resolves.toBe('develop...HEAD');
+    expect(discoverDefaultPullRequestTargetSync(repoRoot)).toBe('develop...HEAD');
+
+    const scope = await resolveScanScope(repoRoot, 'pr');
+
+    expect(scope.label).toBe('pull request diff develop...HEAD');
+    expect(scope.files).toEqual(['README.md']);
+  });
+
+  it('uses the discovered default target for branch scope when no explicit target is provided', async () => {
+    const repoRoot = await makeRepoRoot();
+
+    await fs.writeFile(path.join(repoRoot, 'README.md'), 'base\n', 'utf8');
+    git(repoRoot, ['add', 'README.md']);
+    git(repoRoot, ['commit', '-m', 'initial']);
+    git(repoRoot, ['checkout', '-b', 'develop']);
+    git(repoRoot, ['checkout', '-b', 'feature/test']);
+    await fs.writeFile(path.join(repoRoot, 'README.md'), 'feature\n', 'utf8');
+    git(repoRoot, ['add', 'README.md']);
+    git(repoRoot, ['commit', '-m', 'feature']);
+
+    const scope = await resolveScanScope(repoRoot, 'branch');
+
+    expect(scope.label).toBe('branch diff develop...HEAD');
+    expect(scope.files).toEqual(['README.md']);
+  });
 });
 
 async function makeRepoRoot(): Promise<string> {
@@ -86,6 +130,7 @@ async function makeRepoRoot(): Promise<string> {
 
 function git(repoPath: string, args: string[]): string {
   return execFileSync('git', ['-C', repoPath, ...args], {
-    encoding: 'utf8'
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe']
   });
 }

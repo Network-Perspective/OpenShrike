@@ -102,7 +102,7 @@ Remediation: Move values to environment configuration or secrets management.
 - Create or identify test fixtures: a known-good repo/snippet and a known-bad
   repo/snippet for the check.
 - Run the check in isolation against both fixtures using the CLI:
-  `shrike scan --check <check-id> --repo ./test-fixtures/<fixture>`
+  `shrike scan --check <check-id> --path ./test-fixtures/<fixture>`
 - Verify the output JSON: the check should pass on the good fixture and fail
   on the bad fixture with appropriate confidence and evidence.
 - For static-strategy checks, verify that the embedded CLI commands produce

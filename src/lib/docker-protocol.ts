@@ -17,7 +17,7 @@ import type {
 const checkStatusSchema = z.enum(['pass', 'fail', 'unknown']);
 const confidenceSchema = z.enum(['HIGH', 'MEDIUM', 'LOW']);
 const runtimeModeSchema = z.enum(RUNTIME_MODE_VALUES);
-const parallelismSchema = z.union([z.literal('auto'), z.number().int().min(1)]);
+const parallelismSchema = z.union([z.literal('auto'), z.literal('full'), z.number().int().min(1)]);
 
 const serializedRuntimeEventSchema = z.object({
   type: z.string().min(1),

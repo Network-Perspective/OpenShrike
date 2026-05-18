@@ -26,7 +26,7 @@ export function normalizeCliError(error: unknown): CliError {
     return new CliError('INVALID_ARGUMENTS', message);
   }
 
-  if (/exactly one|scan-target|required option|missing (required )?argument|unknown (command|option)|too many arguments|argument .+ is invalid/i.test(message)) {
+  if (/exactly one|--target|cannot be combined|required option|missing (required )?argument|unknown (command|option)|too many arguments|argument .+ is invalid/i.test(message)) {
     return new CliError('INVALID_ARGUMENTS', message);
   }
 
@@ -101,7 +101,9 @@ export async function resolveCliOutputFormatFromArgv(argv: string[]): Promise<Ou
     return explicitOutput;
   }
 
-  return await resolveProjectOutputFormat(readOptionValue(argv.slice(3), '--repo'));
+  return await resolveProjectOutputFormat(
+    readOptionValue(argv.slice(3), '--path', '--repo')
+  );
 }
 
 function normalizeCliErrorMessage(error: unknown): string {
@@ -210,19 +212,21 @@ async function resolveProjectOutputFormat(repoPath?: string): Promise<OutputForm
   }
 }
 
-function readOptionValue(argv: string[], optionName: string): string | undefined {
+function readOptionValue(argv: string[], ...optionNames: string[]): string | undefined {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (!token) {
       continue;
     }
 
-    if (token === optionName) {
-      return argv[index + 1];
-    }
+    for (const optionName of optionNames) {
+      if (token === optionName) {
+        return argv[index + 1];
+      }
 
-    if (token.startsWith(`${optionName}=`)) {
-      return token.slice(optionName.length + 1);
+      if (token.startsWith(`${optionName}=`)) {
+        return token.slice(optionName.length + 1);
+      }
     }
   }
 

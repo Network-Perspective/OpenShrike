@@ -14,6 +14,7 @@ import type {ShrikeProjectConfig} from './types.js';
 
 const projectParallelismSchema = z.union([
   z.literal('auto'),
+  z.literal('full'),
   z.coerce.number().int().min(1)
 ]);
 

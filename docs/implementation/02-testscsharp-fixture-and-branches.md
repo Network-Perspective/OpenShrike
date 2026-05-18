@@ -57,7 +57,7 @@ Pass branch run:
 git -C ../OpenShrike.TestsCsharp checkout csharp-rel-001-pass
 dotnet run --project src/OpenShrike.Cli -- scan \
   --check csharp-rel-001-cancellation-tokens \
-  --repo ../OpenShrike.TestsCsharp \
+  --path ../OpenShrike.TestsCsharp \
   --output json
 ```
 
@@ -72,7 +72,7 @@ Fail branch run:
 git -C ../OpenShrike.TestsCsharp checkout csharp-rel-001-fail
 dotnet run --project src/OpenShrike.Cli -- scan \
   --check csharp-rel-001-cancellation-tokens \
-  --repo ../OpenShrike.TestsCsharp \
+  --path ../OpenShrike.TestsCsharp \
   --output json
 ```
 
