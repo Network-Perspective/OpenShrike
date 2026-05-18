@@ -508,6 +508,10 @@ export async function removeTempPaths(paths: readonly string[]): Promise<void> {
   ));
 }
 
+export function runFixtureGit(repoRoot: string, args: string[]): void {
+  git(repoRoot, args);
+}
+
 async function createFakeOpencodeInstallation(options: {
   models: string[];
   promptPlans?: FakeOpencodePromptPlan[] | undefined;

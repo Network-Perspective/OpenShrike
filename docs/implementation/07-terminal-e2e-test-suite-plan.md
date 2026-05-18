@@ -2,7 +2,7 @@
 
 Date: 2026-05-18
 
-Status: proposed
+Status: phases 1-4 implemented, phase 5 proposed
 
 ## Goals
 
@@ -294,14 +294,133 @@ This phase does not need the mock AI endpoint for prompt verification because
 
 ### Phase 5: regression and edge cases
 
-Expand coverage with:
+This phase should harden the native PTY lane that now exists, not widen the
+command surface further. Reuse the current `tests/e2e/support/*` helpers and
+add only the smallest missing fixture and artifact utilities needed for
+failure-path coverage.
 
-- interrupted scan,
-- missing provider env var,
-- no changes in scope,
-- multiple checks with parallelism greater than 1,
-- prompt content regression snapshots,
-- artifact and log capture on failure.
+Ship Phase 5 in six slices:
+
+#### 5.1 Interrupted scan
+
+Add a PTY cancellation test that:
+
+- queues a delayed mock provider response so the scan stays visibly in
+  progress,
+- waits for the dashboard to show a running state,
+- sends `Esc`, confirms exit with `y` or `Enter` on `Yes`,
+- asserts the process exits with code `130`,
+- asserts no final Markdown report is printed after cancellation,
+- asserts the mock server saw no more than the already-started request,
+- asserts the PTY closes without hanging.
+
+This verifies the user-abort path separately from the normal "scan complete,
+dismiss UI, print report" flow already covered in Phase 1.
+
+#### 5.2 Missing provider env var
+
+Add startup-failure E2Es that:
+
+- remove the required provider env var from the fixture,
+- run `shrike scan --no-ui --output json` for machine-readable assertions,
+- keep one markdown-rendered variant for the default CLI error path if the
+  extra runtime cost stays acceptable,
+- assert exit code `1`,
+- assert the rendered error reports `MISSING_ENVIRONMENT`,
+- assert the output includes config path, selected model, and missing env var
+  name,
+- assert the mock provider receives zero requests.
+
+This should prove the terminal lane preserves the actionable setup guidance
+already covered in unit tests, instead of silently downgrading startup failures
+into inconclusive check results.
+
+#### 5.3 No changes in scope
+
+Add explicit terminal coverage for both no-change branches:
+
+- clean `uncommitted` scope should fail fast with `NO_CHANGES_IN_SCOPE`,
+- empty non-full scopes such as `branch` should return an all-`unknown` report
+  instead of failing hard,
+- both variants should assert zero provider requests and no lingering UI state.
+
+The `uncommitted` case matters most because it is the default local flow. Add
+the non-fatal empty-scope variant immediately after that so both user-visible
+branches are covered end to end.
+
+#### 5.4 Multiple checks with parallelism greater than 1
+
+Add a multi-check fixture that:
+
+- creates at least three project-local checks,
+- runs `shrike scan --parallelism 2` or `3`,
+- scripts mock responses with staggered delays so completion order differs from
+  check enumeration order,
+- asserts the final summary counts and per-check statuses are correct,
+- asserts every captured request maps back to the expected check id and prompt
+  body,
+- adds one log-enabled variant that verifies worker-oriented JSONL entries are
+  present when `--log` is used.
+
+Start with a headless assertion path for determinism, then add one TUI smoke
+variant if the first parallel test stays stable.
+
+#### 5.5 Prompt content regression snapshots
+
+Add prompt regression coverage for a small set of canonical flows:
+
+- single-check `scan`,
+- multi-check `scan` with parallelism greater than 1,
+- optionally `fix` once the scan prompt shape is stable.
+
+Snapshot rules:
+
+- snapshot normalized prompt text, not the full HTTP request body,
+- scrub temp paths, absolute repo roots, ports, and other fixture-specific
+  values,
+- keep targeted semantic assertions next to the snapshot so failures stay
+  understandable,
+- prefer checked-in `.md` or `.txt` golden files over large inline snapshots.
+
+The current string-fragment assertions should remain, but snapshots should
+catch broader prompt drift that is easy to miss when only a few substrings are
+checked.
+
+#### 5.6 Artifact and log capture on failure
+
+Extend the harness so a failing E2E can preserve:
+
+- raw PTY transcript,
+- normalized visible screen text,
+- captured mock AI requests,
+- JSONL runtime log when `--log` is enabled,
+- `.openshrike/artifacts` contents when present,
+- temp repo and temp home paths.
+
+Recommended behavior:
+
+- write artifacts under a stable temp directory per test,
+- print the artifact directory in the failing assertion message,
+- keep successful runs self-cleaning by default,
+- allow an opt-in env flag to preserve artifacts for successful local runs.
+
+Expected helper additions:
+
+- `tests/e2e/support/test-env.ts`: add fixtures for clean-repo, missing-env,
+  and multi-check scenarios,
+- `tests/e2e/support/mock-ai-server.ts`: reuse existing per-response `delayMs`
+  support for cancellation and staggered parallel responses,
+- `tests/e2e/support/failure-artifacts.ts`: add one small utility that writes
+  transcript, screen, requests, logs, and copied artifact directories on
+  failure.
+
+Phase 5 is complete when:
+
+- terminal E2Es cover cancellation, startup failure, empty-scope behavior, and
+  parallel multi-check scans,
+- prompt regressions are reviewable as normalized golden diffs,
+- a failing CI run leaves enough artifacts to debug without reproducing the
+  failure locally first.
 
 ## Why not make Docker E2E phase 1
 

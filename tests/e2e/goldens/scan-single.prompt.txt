@@ -1,0 +1,62 @@
+You are executing a best-practice check against repository path: <repo>
+
+Check id: e2e-scan-001
+Review scope: uncommitted changes.
+
+Scoped file allowlist (1):
+- src/auth.ts
+
+Best-practive check definition markdown:
+---
+# E2E-SCAN-001: Validate auth token export
+
+Ensure the changed auth module still exports `validateAuthToken` and that
+the function returns a boolean value after the current edits.
+
+If the changed file no longer exports `validateAuthToken`, fail the check.
+
+---
+
+Follow the check definition exactly. Inspect only the allowed review scope and collect direct evidence.
+Return ONLY one JSON object with this schema:
+{
+  "id": "e2e-scan-001",
+  "version": "0.1.0",
+  "status": "pass|fail|unknown",
+  "confidence": "HIGH|MEDIUM|LOW",
+  "evidence": ["relative/path:line"],
+  "rationale": "short explanation grounded in evidence",
+  "remediation": ["action 1", "action 2"]
+}
+
+Rules:
+- Output raw JSON only. No markdown fences.
+- Use repo-relative evidence paths.
+- Keep evidence to at most 20 items.
+- Keep remediation to at most 20 items.
+- If scope is not full repository, evidence paths MUST come from the scoped file allowlist above.
+- If the relevant evidence is outside the scoped file allowlist, return status="unknown".
+- Do not cite or mention out-of-scope file paths in evidence, rationale, or remediation.
+- Treat the captured scope evidence at the end of this prompt as authoritative for scope discovery.
+- Do not rerun `git status`, `git diff`, `git show`, or `git log` to redefine scope. Use the scoped file allowlist and attached scope capture instead.
+- status=unknown only when the check is not applicable or evidence is insufficient.
+
+Authoritative scope evidence:
+The commands below were already executed by OpenShrike to define this review scope.
+Reuse this captured output instead of rerunning git scope-discovery commands.
+If you need exact current line numbers, you may open files from the scoped file allowlist only.
+
+Scope capture 1: Tracked changes relative to HEAD
+Command:
+git -C <repo> --no-pager diff --no-color --no-ext-diff --find-renames --submodule=short --relative HEAD
+Output:
+diff --git a/src/auth.ts b/src/auth.ts
+index 0c634dc..b213603 100644
+--- a/src/auth.ts
++++ b/src/auth.ts
+@@ -1,3 +1,4 @@
+ export function validateAuthToken(token: string): boolean {
+-  return token.length > 0;
++  const normalized = token.trim();
++  return normalized.length > 0;
+ }

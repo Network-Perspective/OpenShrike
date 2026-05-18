@@ -16,9 +16,17 @@ interface QueuedTextResponse {
   delayMs: number;
 }
 
+interface MatchedTextResponse extends QueuedTextResponse {
+  match:
+    | string
+    | RegExp
+    | ((request: MockAiRequest) => boolean);
+}
+
 export class MockAiServer {
   readonly requests: MockAiRequest[] = [];
   private readonly queuedResponses: QueuedTextResponse[] = [];
+  private readonly matchedResponses: MatchedTextResponse[] = [];
   private readonly server: http.Server;
   private responseCount = 0;
   baseUrl = '';
@@ -47,7 +55,7 @@ export class MockAiServer {
         return;
       }
 
-      const nextResponse = this.queuedResponses.shift();
+      const nextResponse = this.shiftNextResponse(normalizedRequest);
       if (!nextResponse) {
         response.writeHead(500, {'content-type': 'application/json'});
         response.end(JSON.stringify({
@@ -124,6 +132,22 @@ export class MockAiServer {
     });
   }
 
+  enqueueMatchedTextResponse(
+    match: MatchedTextResponse['match'],
+    text: string,
+    options?: {
+      statusCode?: number;
+      delayMs?: number;
+    }
+  ): void {
+    this.matchedResponses.push({
+      match,
+      text,
+      statusCode: options?.statusCode ?? 200,
+      delayMs: options?.delayMs ?? 0
+    });
+  }
+
   async close(): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       this.server.close(error => {
@@ -135,6 +159,26 @@ export class MockAiServer {
         resolve();
       });
     });
+  }
+
+  private shiftNextResponse(request: MockAiRequest): QueuedTextResponse | undefined {
+    const matchedIndex = this.matchedResponses.findIndex(candidate => {
+      if (typeof candidate.match === 'string') {
+        return request.promptText.includes(candidate.match);
+      }
+
+      if (candidate.match instanceof RegExp) {
+        return candidate.match.test(request.promptText);
+      }
+
+      return candidate.match(request);
+    });
+
+    if (matchedIndex >= 0) {
+      return this.matchedResponses.splice(matchedIndex, 1)[0];
+    }
+
+    return this.queuedResponses.shift();
   }
 }
 
