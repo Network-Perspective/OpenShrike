@@ -1,3 +1,4 @@
+import {execFileSync} from 'node:child_process';
 import type {ScanReport} from '../../src/lib/types.js';
 import {describe, expect, it} from 'vitest';
 import {MockAiServer, type MockAiRequest} from './support/mock-ai-server.js';
@@ -255,6 +256,82 @@ describe('scan terminal e2e', () => {
       }
     }
   });
+
+  it('offers clean-repo fallback targets and scans the last commit when selected', async () => {
+    const mockServer = await MockAiServer.start();
+    let fixture: Phase1ScanFixture | null = null;
+    let session: TerminalSession | null = null;
+
+    try {
+      fixture = await createPhase1ScanFixture({
+        mockProviderBaseUrl: `${mockServer.baseUrl}/v1`
+      });
+      mockServer.enqueueTextResponse(buildCheckResultText(fixture, {
+        status: 'pass',
+        confidence: 'HIGH',
+        rationale: 'The last commit still exports validateAuthToken and returns a boolean.',
+        remediation: ['No action required.']
+      }));
+
+      git(fixture.repoRoot, ['add', fixture.changedFilePath]);
+      git(fixture.repoRoot, ['commit', '-m', 'record clean change']);
+
+      session = TerminalSession.spawn({
+        command: fixture.commandPath,
+        args: ['scan'],
+        cwd: fixture.repoRoot,
+        env: fixture.env,
+        cols: 120,
+        rows: 40
+      });
+
+      await session.waitForText('No Uncommitted Changes', {
+        source: 'screen',
+        timeoutMs: 30_000
+      });
+      await session.waitForText('1. Scan last commit', {
+        source: 'screen',
+        timeoutMs: 5_000
+      });
+
+      session.press('enter');
+
+      await session.waitForText('Scan complete', {
+        source: 'screen',
+        timeoutMs: 60_000
+      });
+      await session.waitForIdleFrame({
+        idleMs: 300,
+        timeoutMs: 10_000
+      });
+
+      session.press('escape');
+
+      await session.waitForText('# OpenShrike Scan Report', {
+        source: 'raw',
+        timeoutMs: 30_000
+      });
+
+      const exit = await session.waitForExit(30_000);
+      expect(exit.exitCode).toBe(0);
+      expect(mockServer.requests).toHaveLength(1);
+      expect(mockServer.requests[0]?.promptText).toContain('Commit diff for HEAD');
+      expect(mockServer.requests[0]?.promptText).toContain(`- ${fixture.changedFilePath}`);
+      expect(mockServer.requests[0]?.promptText).toContain('+  const normalized = token.trim();');
+
+      const rawOutput = session.rawOutput();
+      expect(rawOutput).toContain('# OpenShrike Scan Report');
+      expect(rawOutput).toContain(`### \`${fixture.checkId}\``);
+      expect(rawOutput).toContain('- Status: `pass`');
+      expect(rawOutput).toContain('- Confidence: `HIGH`');
+    } finally {
+      await session?.close();
+      await mockServer.close();
+      if (fixture) {
+        await removeTempPaths(fixture.tempPaths);
+      }
+    }
+  });
 });
 
 function buildCheckResultText(
@@ -309,4 +386,11 @@ function extractJsonValue<T>(rawOutput: string): T {
   }
 
   return JSON.parse(rawOutput.slice(start, end + 1)) as T;
+}
+
+function git(repoPath: string, args: string[]): string {
+  return execFileSync('git', ['-C', repoPath, ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
 }

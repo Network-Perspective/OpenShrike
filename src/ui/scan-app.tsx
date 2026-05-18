@@ -4,6 +4,14 @@ import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, render, useApp, useInput, useStdout} from 'ink';
 import {ScrollView, type ScrollViewRef} from 'ink-scroll-view';
 import {readCheckTitle} from '../lib/checks.js';
+import {CliError} from '../lib/cli-error.js';
+import {
+  buildEmptyScopeFallbackOptions,
+  resolveDefaultEmptyScopeFallbackAction,
+  type EmptyScopeFallbackAction,
+  type EmptyScopeFallbackContext,
+  type EmptyScopeFallbackOption
+} from '../lib/empty-scope-fallback.js';
 import {fixAndRecheckCheck, recheckSingleCheck, updateReportCheck} from '../lib/fix.js';
 import {createSavedScanRequest, saveLastScanState} from '../lib/last-scan.js';
 import {createNativeScanSession, runScan, type ScanSessionSnapshot} from '../lib/scan.js';
@@ -20,9 +28,20 @@ import type {
 
 type SectionViewMode = 'detail' | 'list';
 type CheckDisplayStatus = CheckStatus | 'pending' | 'running' | 'fixing';
-type ExitConfirmationChoice = 'yes' | 'no';
+type ConfirmationChoice = 'yes' | 'no';
+type ConfirmationDialogKind = 'exit';
 export type EscapeKeyAction = 'dismiss-exit-confirm' | 'back-to-list' | 'prompt-exit-confirm' | 'exit';
 export type VerticalArrowAction = 'scroll' | 'navigate';
+
+interface ConfirmationDialogState {
+  kind: ConfirmationDialogKind;
+  selectedChoice: ConfirmationChoice;
+}
+
+interface EmptyScopeFallbackDialogState {
+  selectedIndex: number;
+  context: EmptyScopeFallbackContext;
+}
 
 export interface DisplayCheck {
   id: string;
@@ -153,13 +172,27 @@ export class ScanUiCancelledError extends Error {
   }
 }
 
+export class ScanUiEmptyScopeFallbackSelectionError extends Error {
+  readonly action: EmptyScopeFallbackAction;
+
+  constructor(action: EmptyScopeFallbackAction) {
+    super(`Selected empty-scope fallback action: ${action}.`);
+    this.name = 'ScanUiEmptyScopeFallbackSelectionError';
+    this.action = action;
+  }
+}
+
 export function runScanWithInk(
   options: ScanCommandOptions,
   initialState?: {
     initialReport: ScanReport;
     savedRequest: SavedScanRequest;
     savedScope?: SavedScanScope;
-  }
+  },
+  behavior: {
+    allowEmptyScopeFallbackPrompt?: boolean;
+    emptyScopeFallbackContext?: EmptyScopeFallbackContext;
+  } = {}
 ): Promise<ScanReport> {
   return new Promise<ScanReport>((resolve, reject) => {
     let finalReport: ScanReport | null = null;
@@ -175,9 +208,14 @@ export function runScanWithInk(
         onCancel={() => {
           finalError = new ScanUiCancelledError();
         }}
+        onSelectEmptyScopeFallback={action => {
+          finalError = new ScanUiEmptyScopeFallbackSelectionError(action);
+        }}
         onError={error => {
           finalError = error;
         }}
+        allowEmptyScopeFallbackPrompt={Boolean(behavior.allowEmptyScopeFallbackPrompt)}
+        emptyScopeFallbackContext={behavior.emptyScopeFallbackContext ?? {defaultBranchTarget: null}}
       />,
       {
         stdout: process.stderr,
@@ -215,7 +253,10 @@ function ScanApp(props: {
   };
   onDone: (report: ScanReport) => void;
   onCancel: () => void;
+  onSelectEmptyScopeFallback: (action: EmptyScopeFallbackAction) => void;
   onError: (error: Error) => void;
+  allowEmptyScopeFallbackPrompt: boolean;
+  emptyScopeFallbackContext: EmptyScopeFallbackContext;
 }) {
   const {exit} = useApp();
   const {stdout} = useStdout();
@@ -237,8 +278,8 @@ function ScanApp(props: {
   const [browser, setBrowser] = useState<BrowserState>(createInitialBrowserState(props.initialState?.initialReport ?? null));
   const [checkTitles, setCheckTitles] = useState<Record<string, string>>({});
   const [showHelp, setShowHelp] = useState(false);
-  const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const [exitConfirmChoice, setExitConfirmChoice] = useState<ExitConfirmationChoice>('no');
+  const [confirmationDialog, setConfirmationDialog] = useState<ConfirmationDialogState | null>(null);
+  const [emptyScopeFallbackDialog, setEmptyScopeFallbackDialog] = useState<EmptyScopeFallbackDialogState | null>(null);
   const [exitAfterDismiss, setExitAfterDismiss] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [actionState, setActionState] = useState<ActionState>({
@@ -287,8 +328,10 @@ function ScanApp(props: {
   const parallelismLabel = report?.execution
     ? String(report.execution.effective_parallelism)
     : formatRequestedParallelism(props.options.parallelism);
+  const showExitConfirm = confirmationDialog?.kind === 'exit';
   const footerText = buildFooterText({
-    showExitConfirm,
+    confirmationDialogKind: confirmationDialog?.kind ?? null,
+    showEmptyScopeFallbackDialog: emptyScopeFallbackDialog !== null,
     showHelp,
     viewMode: browser.viewMode,
     reportReady
@@ -309,8 +352,31 @@ function ScanApp(props: {
   };
 
   const dismissExitConfirm = () => {
-    setShowExitConfirm(false);
-    setExitConfirmChoice('no');
+    setConfirmationDialog(previous => previous?.kind === 'exit' ? null : previous);
+  };
+
+  const selectEmptyScopeFallback = (action: EmptyScopeFallbackAction) => {
+    props.onSelectEmptyScopeFallback(action);
+    exit();
+  };
+
+  const setConfirmationChoice = (selectedChoice: ConfirmationChoice) => {
+    setConfirmationDialog(previous => previous ? {
+      ...previous,
+      selectedChoice
+    } : previous);
+  };
+
+  const acceptConfirmationDialog = () => {
+    if (confirmationDialog?.kind === 'exit') {
+      confirmCancelExit();
+    }
+  };
+
+  const declineConfirmationDialog = () => {
+    if (confirmationDialog?.kind === 'exit') {
+      dismissExitConfirm();
+    }
   };
 
   const confirmCancelExit = () => {
@@ -323,6 +389,34 @@ function ScanApp(props: {
       ...previous,
       message
     }));
+  };
+
+  const handleScanError = (error: unknown) => {
+    const scanError = error instanceof Error ? error : new Error(String(error));
+
+    if (props.allowEmptyScopeFallbackPrompt && isNoChangesInScopeError(scanError)) {
+      finishedAtRef.current ??= Date.now();
+      setElapsedMs(finishedAtRef.current - startedAtRef.current);
+      setProgress(previous => ({
+        ...previous,
+        runningCheckIds: [],
+        statusLabel: 'No uncommitted changes detected',
+        detailLines: []
+      }));
+      setActionState({
+        runningCheckIds: [],
+        fixingCheckIds: [],
+        message: null
+      });
+      setEmptyScopeFallbackDialog({
+        selectedIndex: resolveDefaultEmptyScopeFallbackOptionIndex(props.emptyScopeFallbackContext),
+        context: props.emptyScopeFallbackContext
+      });
+      return;
+    }
+
+    props.onError(scanError);
+    exit();
   };
 
   const performRecheck = () => {
@@ -547,34 +641,76 @@ function ScanApp(props: {
       ? detailScrollRef.current
       : listScrollRef.current;
 
-    if (showExitConfirm) {
+    if (emptyScopeFallbackDialog) {
+      const options = buildEmptyScopeFallbackOptions(emptyScopeFallbackDialog.context);
       const normalizedInput = input.toLowerCase();
 
-      if (key.escape || normalizedInput === 'n') {
-        dismissExitConfirm();
+      if (key.escape) {
+        selectEmptyScopeFallback('skip');
         return;
       }
 
-      if (normalizedInput === 'y') {
-        confirmCancelExit();
+      if (normalizedInput.length === 1 && /[1-4]/u.test(normalizedInput)) {
+        const selectedIndex = Number.parseInt(normalizedInput, 10) - 1;
+        const selectedOption = options[selectedIndex];
+        if (selectedOption) {
+          selectEmptyScopeFallback(selectedOption.action);
+        }
         return;
       }
 
       if (key.leftArrow || key.upArrow) {
-        setExitConfirmChoice('yes');
+        setEmptyScopeFallbackDialog(previous => previous ? {
+          ...previous,
+          selectedIndex: moveWrappingIndex(previous.selectedIndex, options.length, -1)
+        } : previous);
         return;
       }
 
       if (key.rightArrow || key.downArrow) {
-        setExitConfirmChoice('no');
+        setEmptyScopeFallbackDialog(previous => previous ? {
+          ...previous,
+          selectedIndex: moveWrappingIndex(previous.selectedIndex, options.length, 1)
+        } : previous);
         return;
       }
 
       if (key.return) {
-        if (exitConfirmChoice === 'yes') {
-          confirmCancelExit();
+        const selectedOption = options[clampSelectableIndex(emptyScopeFallbackDialog.selectedIndex, options.length)];
+        selectEmptyScopeFallback(selectedOption?.action ?? 'skip');
+      }
+
+      return;
+    }
+
+    if (confirmationDialog) {
+      const normalizedInput = input.toLowerCase();
+
+      if (key.escape || normalizedInput === 'n') {
+        declineConfirmationDialog();
+        return;
+      }
+
+      if (normalizedInput === 'y') {
+        acceptConfirmationDialog();
+        return;
+      }
+
+      if (key.leftArrow || key.upArrow) {
+        setConfirmationChoice('yes');
+        return;
+      }
+
+      if (key.rightArrow || key.downArrow) {
+        setConfirmationChoice('no');
+        return;
+      }
+
+      if (key.return) {
+        if (confirmationDialog.selectedChoice === 'yes') {
+          acceptConfirmationDialog();
         } else {
-          dismissExitConfirm();
+          declineConfirmationDialog();
         }
       }
 
@@ -601,8 +737,10 @@ function ScanApp(props: {
       }
 
       if (escapeAction === 'prompt-exit-confirm') {
-        setShowExitConfirm(true);
-        setExitConfirmChoice('no');
+        setConfirmationDialog({
+          kind: 'exit',
+          selectedChoice: 'no'
+        });
         return;
       }
 
@@ -825,8 +963,7 @@ function ScanApp(props: {
             return;
           }
 
-          props.onError(error instanceof Error ? error : new Error(String(error)));
-          exit();
+          handleScanError(error);
         }
       );
 
@@ -887,8 +1024,7 @@ function ScanApp(props: {
           return;
         }
 
-        props.onError(error instanceof Error ? error : new Error(String(error)));
-        exit();
+        handleScanError(error);
       }
     })();
 
@@ -950,7 +1086,8 @@ function ScanApp(props: {
       return;
     }
 
-    dismissExitConfirm();
+    setConfirmationDialog(previous => previous?.kind === 'exit' ? null : previous);
+    setEmptyScopeFallbackDialog(null);
     setExitAfterDismiss(false);
   }, [report]);
 
@@ -1077,15 +1214,22 @@ function ScanApp(props: {
             </Box>
           )}
         </Box>
-        <Box marginTop={1}>
+      <Box marginTop={1}>
           <Text color="gray">{footerText}</Text>
         </Box>
       </Box>
-      {showExitConfirm ? (
-        <ExitConfirmationDialog
+      {emptyScopeFallbackDialog ? (
+        <EmptyScopeFallbackDialog
           terminalWidth={terminalWidth}
           terminalHeight={terminalHeight}
-          selectedChoice={exitConfirmChoice}
+          dialog={emptyScopeFallbackDialog}
+        />
+      ) : null}
+      {confirmationDialog ? (
+        <ConfirmationDialog
+          terminalWidth={terminalWidth}
+          terminalHeight={terminalHeight}
+          selectedChoice={confirmationDialog.selectedChoice}
         />
       ) : null}
     </Box>
@@ -1210,10 +1354,10 @@ function CheckListModule(props: CheckListModuleProps) {
   );
 }
 
-function ExitConfirmationDialog(props: {
+function ConfirmationDialog(props: {
   terminalWidth: number;
   terminalHeight: number;
-  selectedChoice: ExitConfirmationChoice;
+  selectedChoice: ConfirmationChoice;
 }) {
   const dialogWidth = Math.min(
     props.terminalWidth,
@@ -1259,6 +1403,79 @@ function ConfirmChoice(props: {label: string; isSelected: boolean}) {
     <Text color="black" backgroundColor="whiteBright">{` ${props.label} `}</Text>
   ) : (
     <Text color="gray">{` ${props.label} `}</Text>
+  );
+}
+
+function EmptyScopeFallbackDialog(props: {
+  terminalWidth: number;
+  terminalHeight: number;
+  dialog: EmptyScopeFallbackDialogState;
+}) {
+  const dialogWidth = Math.min(
+    props.terminalWidth,
+    Math.max(32, Math.min(props.terminalWidth - 4, 84))
+  );
+  const options = buildEmptyScopeFallbackOptions(props.dialog.context);
+  const selectedIndex = clampSelectableIndex(props.dialog.selectedIndex, options.length);
+
+  return (
+    <Box
+      position="absolute"
+      width={props.terminalWidth}
+      height={props.terminalHeight}
+      justifyContent="center"
+      alignItems="center"
+      backgroundColor="black"
+    >
+      <Box width={dialogWidth} flexDirection="column" backgroundColor="black">
+        <Module borderColor="cyanBright">
+          <Text color="cyanBright" bold>
+            No Uncommitted Changes
+          </Text>
+
+          <Box marginTop={1} flexDirection="column">
+            <Text>There are no uncommitted changes in the current folder.</Text>
+            <Text>Choose what to scan next.</Text>
+          </Box>
+
+          <Box marginTop={1} flexDirection="column">
+            {options.map((option, index) => (
+              <EmptyScopeFallbackOptionRow
+                key={option.action}
+                option={option}
+                index={index}
+                isSelected={selectedIndex === index}
+              />
+            ))}
+          </Box>
+
+          <Box marginTop={1}>
+            <Text color="gray">1-4 or Up / Down to select. Enter to confirm. Esc to skip.</Text>
+          </Box>
+        </Module>
+      </Box>
+    </Box>
+  );
+}
+
+function EmptyScopeFallbackOptionRow(props: {
+  option: EmptyScopeFallbackOption;
+  index: number;
+  isSelected: boolean;
+}) {
+  return (
+    <Box flexDirection="column" marginTop={props.index === 0 ? 0 : 1}>
+      <Box flexDirection="row" flexWrap="wrap">
+        <Text color={props.isSelected ? 'cyanBright' : 'gray'}>{props.isSelected ? '>' : ' '}</Text>
+        <Text> </Text>
+        <Text color={props.isSelected ? 'whiteBright' : 'gray'} bold={props.isSelected}>
+          {`${props.index + 1}. ${props.option.label}`}
+        </Text>
+      </Box>
+      <Box marginLeft={4}>
+        <Text color="gray">{props.option.detail}</Text>
+      </Box>
+    </Box>
   );
 }
 
@@ -2332,6 +2549,32 @@ function clampSelectedIndex(index: number, itemCount: number): number {
   return Math.max(0, Math.min(itemCount - 1, index));
 }
 
+function clampSelectableIndex(index: number, itemCount: number): number {
+  if (itemCount <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(itemCount - 1, index));
+}
+
+function moveWrappingIndex(index: number, itemCount: number, direction: -1 | 1): number {
+  if (itemCount <= 0) {
+    return 0;
+  }
+
+  const currentIndex = clampSelectableIndex(index, itemCount);
+  return direction < 0
+    ? (currentIndex <= 0 ? itemCount - 1 : currentIndex - 1)
+    : (currentIndex >= itemCount - 1 ? 0 : currentIndex + 1);
+}
+
+function resolveDefaultEmptyScopeFallbackOptionIndex(context: EmptyScopeFallbackContext): number {
+  const options = buildEmptyScopeFallbackOptions(context);
+  const defaultAction = resolveDefaultEmptyScopeFallbackAction();
+  const selectedIndex = options.findIndex(option => option.action === defaultAction);
+  return selectedIndex >= 0 ? selectedIndex : 0;
+}
+
 function clampOffset(offset: number, bottomOffset: number): number {
   return Math.max(0, Math.min(bottomOffset, offset));
 }
@@ -2370,13 +2613,18 @@ export function resolveVerticalArrowAction(options: {
 }
 
 function buildFooterText(options: {
-  showExitConfirm: boolean;
+  confirmationDialogKind: ConfirmationDialogKind | null;
+  showEmptyScopeFallbackDialog: boolean;
   showHelp: boolean;
   viewMode: SectionViewMode;
   reportReady: boolean;
 }): string {
-  if (options.showExitConfirm) {
+  if (options.confirmationDialogKind === 'exit') {
     return '[ESC] Stay | [ARROWS] Select | [ENTER] Confirm';
+  }
+
+  if (options.showEmptyScopeFallbackDialog) {
+    return '[ESC] Skip scan | [UP/DOWN] Select | [ENTER] Confirm';
   }
 
   if (options.showHelp) {
@@ -2396,6 +2644,10 @@ function buildFooterText(options: {
 
 function formatDuration(durationMs: number): string {
   return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+function isNoChangesInScopeError(error: unknown): boolean {
+  return error instanceof CliError && error.code === 'NO_CHANGES_IN_SCOPE';
 }
 
 function formatRequestedParallelism(value: number | 'auto' | 'full'): string {
