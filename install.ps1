@@ -13,6 +13,7 @@ $App = 'openshrike'
 $Repo = if ($env:OPENSHRIKE_REPO) { $env:OPENSHRIKE_REPO } else { 'Network-Perspective/OpenShrike' }
 $DefaultBranch = if ($env:OPENSHRIKE_DEFAULT_BRANCH) { $env:OPENSHRIKE_DEFAULT_BRANCH } else { 'main' }
 $ReleasesDir = Join-Path $InstallDir 'releases'
+$NodeDownloadUrl = 'https://nodejs.org/en/download'
 
 function Write-Info {
   param([string]$Message)
@@ -51,7 +52,7 @@ function Download-File {
 
 function Ensure-NodeRuntime {
   if (-not (Test-Command 'node')) {
-    Fail 'OpenShrike requires Node.js 22 or newer.'
+    Fail "OpenShrike requires Node.js 22 or newer. Install it from $NodeDownloadUrl."
   }
 
   $nodeVersion = (& node -p "process.versions.node").Trim()

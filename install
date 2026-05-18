@@ -4,6 +4,7 @@ set -euo pipefail
 APP="openshrike"
 REPO="${OPENSHRIKE_REPO:-Network-Perspective/OpenShrike}"
 DEFAULT_BRANCH="${OPENSHRIKE_DEFAULT_BRANCH:-main}"
+NODE_DOWNLOAD_URL="https://nodejs.org/en/download"
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
   MUTED=$'\033[0;2m'
@@ -167,7 +168,7 @@ fetch_text() {
 
 ensure_node_runtime() {
   if ! has_command node; then
-    fail "OpenShrike requires Node.js 22 or newer."
+    fail "OpenShrike requires Node.js 22 or newer. Install it from ${NODE_DOWNLOAD_URL}."
   fi
 
   local node_major
