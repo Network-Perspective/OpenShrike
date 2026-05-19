@@ -8,5 +8,9 @@ methods:
     language: "powershell"
     command: "irm https://raw.githubusercontent.com/Network-Perspective/OpenShrike/main/install.ps1 | iex"
 quickstart:
-  - "shrike init"
-  - "shrike scan"
+  - command: "shrike init"
+    description: "Interactive setup, configures your AI provider, lets you choose default policies:"
+  - command: "shrike scan"
+    description: "Runs the checks:"
+  - command: "shrike fix"
+    description: "Scan and fix failing checks:"

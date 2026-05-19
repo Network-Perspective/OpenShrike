@@ -1,0 +1,24 @@
+<section id="demo" class="section">
+  <div class="container">
+    <h2 class="section__title">See it in action</h2>
+    <p class="section__lead">A recorded scan run, with two violations autofixed with a single command.</p>
+
+    <div class="asciinema-wrapper">
+      <div id="asciinema-demo"></div>
+    </div>
+  </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/asciinema-player@3.10.0/dist/bundle/asciinema-player.min.js"></script>
+<script>
+  AsciinemaPlayer.create(
+    "{{ '/assets/fix.cast' | relative_url }}",
+    document.getElementById('asciinema-demo'),
+    {
+      fit: 'width',
+      theme: 'asciinema',
+      idleTimeLimit: 2,
+      poster: 'npt:0:01'
+    }
+  );
+</script>

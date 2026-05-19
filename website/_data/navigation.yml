@@ -8,6 +8,8 @@
   anchor: "#compare"
 - title: Install
   anchor: "#install"
+- title: Demo
+  anchor: "#demo"
 - title: GitHub
   url: "https://github.com/Network-Perspective/OpenShrike"
   external: true

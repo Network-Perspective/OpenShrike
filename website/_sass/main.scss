@@ -415,6 +415,46 @@ img { max-width: 100%; height: auto; }
   margin-top: 0.75rem;
 }
 
+.quickstart-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.quickstart-step .install-block__code {
+  padding: 0.625rem 1rem;
+}
+
+.quickstart-step__desc {
+  margin: 0.5rem 0 0;
+  font-size: 0.9375rem;
+  color: var(--color-text-dim);
+  line-height: 1.55;
+}
+
+.quickstart-step__desc code {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.85em;
+  color: var(--color-heading);
+}
+
+/* ── Asciinema demo ──────────────────────────────────────── */
+
+.asciinema-wrapper {
+  max-width: 960px;
+  margin: 0 auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #000;
+}
+
 /* ── Footer ──────────────────────────────────────────────── */
 
 .site-footer {

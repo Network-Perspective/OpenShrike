@@ -16,12 +16,18 @@
     </div>
 
     <div class="install-quickstart">
-      <h3>Then initialize and scan within your project folder:</h3>
-      <div class="code-wrapper">
-        <pre class="install-block__code"><code>{% for cmd in site.data.install.quickstart %}{{ cmd }}
-{% endfor %}</code></pre>
-        <button class="copy-btn" aria-label="Copy to clipboard">Copy</button>
-      </div>
+      <h2 class="section__title">Setup your project</h2>
+      <ul class="quickstart-list">
+        {% for step in site.data.install.quickstart %}
+        <li class="quickstart-step">
+          <p class="quickstart-step__desc">{{ step.description }}</p>
+          <div class="code-wrapper">
+            <pre class="install-block__code"><code>{{ step.command }}</code></pre>
+            <button class="copy-btn" aria-label="Copy to clipboard">Copy</button>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
     </div>
   </div>
 </section>
