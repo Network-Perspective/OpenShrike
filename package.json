@@ -2,17 +2,214 @@
   "name": "openshrike",
   "version": "0.2.9",
   "private": true,
+  "publisher": "openshrike-local",
+  "displayName": "OpenShrike",
   "description": "Security-first agentic code reviewer and best-practice auditor built on OpenCode.",
+  "main": "./dist/vscode/extension.cjs",
+  "icon": "docs/openshrike-logo.png",
   "type": "module",
   "bin": {
     "shrike": "./dist/cli.js"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "vscode": "^1.101.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "openshrike",
+          "title": "OpenShrike",
+          "icon": "media/openshrike-activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "openshrike": [
+        {
+          "id": "openshrike.summary",
+          "name": "Summary",
+          "type": "webview"
+        },
+        {
+          "id": "openshrike.checks",
+          "name": "Checks",
+          "contextualTitle": "Checks"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "openshrike.runInitInTerminal",
+        "category": "OpenShrike",
+        "title": "Run Init In Terminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "openshrike.runScan",
+        "category": "OpenShrike",
+        "title": "Run Scan",
+        "icon": "$(play)"
+      },
+      {
+        "command": "openshrike.runScanWithOverrides",
+        "category": "OpenShrike",
+        "title": "Run Scan With Overrides",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "openshrike.cancelScan",
+        "category": "OpenShrike",
+        "title": "Cancel Scan",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "openshrike.loadLastScan",
+        "category": "OpenShrike",
+        "title": "Load Last Scan",
+        "icon": "$(history)"
+      },
+      {
+        "command": "openshrike.openCheckMarkdown",
+        "category": "OpenShrike",
+        "title": "Open Check Markdown",
+        "icon": "$(book)"
+      },
+      {
+        "command": "openshrike.openEvidence",
+        "category": "OpenShrike",
+        "title": "Open Evidence",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "openshrike.recheckFinding",
+        "category": "OpenShrike",
+        "title": "Recheck",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "openshrike.fixFinding",
+        "category": "OpenShrike",
+        "title": "Fix",
+        "icon": "$(wrench)"
+      },
+      {
+        "command": "openshrike.editFinding",
+        "category": "OpenShrike",
+        "title": "Edit",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "openshrike.openLastScan",
+        "category": "OpenShrike",
+        "title": "Open Last Scan Snapshot",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "openshrike.showOutput",
+        "category": "OpenShrike",
+        "title": "Show Output",
+        "icon": "$(output)"
+      },
+      {
+        "command": "openshrike.sortChecksById",
+        "category": "OpenShrike",
+        "title": "Sort Checks By ID",
+        "icon": "$(symbol-numeric)"
+      },
+      {
+        "command": "openshrike.sortChecksByStatus",
+        "category": "OpenShrike",
+        "title": "Sort Checks By Status",
+        "icon": "$(warning)"
+      },
+      {
+        "command": "openshrike.sortChecksByName",
+        "category": "OpenShrike",
+        "title": "Sort Checks By Name",
+        "icon": "$(symbol-string)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "openshrike.runScan",
+          "when": "view == openshrike.summary",
+          "group": "navigation@1"
+        },
+        {
+          "command": "openshrike.loadLastScan",
+          "when": "view == openshrike.summary",
+          "group": "navigation@2"
+        },
+        {
+          "command": "openshrike.showOutput",
+          "when": "view == openshrike.summary",
+          "group": "navigation@3"
+        },
+        {
+          "command": "openshrike.sortChecksById",
+          "when": "view == openshrike.checks",
+          "group": "navigation@1"
+        },
+        {
+          "command": "openshrike.sortChecksByStatus",
+          "when": "view == openshrike.checks",
+          "group": "navigation@2"
+        },
+        {
+          "command": "openshrike.sortChecksByName",
+          "when": "view == openshrike.checks",
+          "group": "navigation@3"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "openshrike.editFinding",
+          "when": "openshrike.detailEditorActive",
+          "group": "navigation@1"
+        },
+        {
+          "command": "openshrike.recheckFinding",
+          "when": "openshrike.detailEditorActive",
+          "group": "navigation@2"
+        },
+        {
+          "command": "openshrike.fixFinding",
+          "when": "openshrike.detailEditorActive",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "openshrike.openCheckMarkdown",
+          "when": "view == openshrike.checks && viewItem == finding",
+          "group": "inline"
+        },
+        {
+          "command": "openshrike.openEvidence",
+          "when": "view == openshrike.checks && viewItem == finding",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
-    "build": "tsup src/cli.ts --format esm --target node22 --clean",
+    "build": "npm run build:cli && npm run build:extension",
+    "build:cli": "tsup --config tsup.cli.config.ts",
+    "build:extension": "tsup --config tsup.extension.config.ts",
     "dev": "tsx src/cli.ts",
+    "dev:extension": "tsup --config tsup.extension.config.ts --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
@@ -33,6 +230,7 @@
     "@lydell/node-pty": "^1.2.0-beta.12",
     "@types/node": "^24.5.2",
     "@types/react": "^19.2.2",
+    "@types/vscode": "^1.101.0",
     "@xterm/headless": "^6.0.0",
     "tsup": "^8.5.0",
     "tsx": "^4.20.5",
