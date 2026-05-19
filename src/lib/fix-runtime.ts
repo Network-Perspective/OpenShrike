@@ -4,6 +4,7 @@ import {
   OPENCODE_FIX_REQUEST_TIMEOUT_MS
 } from './constants.js';
 import {type OpenCodeRuntime} from './runtime.js';
+import {loadFixSystemPrompt} from './system-prompts.js';
 import type {CheckResult, SavedScanRequest, ScanScopeContext} from './types.js';
 
 export async function runFixForCheck(options: {
@@ -35,9 +36,11 @@ export async function runFixForCheck(options: {
     request: options.request,
     scopeContext: options.scopeContext
   });
+  const systemPrompt = await loadFixSystemPrompt();
 
   await options.runtime.runPrompt({
     prompt,
+    system: systemPrompt,
     agent: options.agent,
     model: options.model,
     title: `${options.check.id} fix`,

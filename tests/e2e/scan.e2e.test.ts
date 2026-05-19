@@ -1,17 +1,71 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {resolveFromToolRoot} from '../../src/lib/project-root.js';
 import type {ScanReport} from '../../src/lib/types.js';
 import {describe, expect, it} from 'vitest';
 import {MockAiServer, type MockAiRequest} from './support/mock-ai-server.js';
 import {TerminalSession} from './support/terminal-session.js';
 import {
+  createPhase1ScanFakeOpencodeFixture,
   createPhase1ScanFixture,
   removeTempPaths,
   runFixtureGit,
+  type Phase1ScanFakeOpencodeFixture,
   type Phase1ScanFixture
 } from './support/test-env.js';
 
 describe('scan terminal e2e', () => {
+  it('sends the custom scan system prompt when invoking OpenCode', async () => {
+    let fixture: Phase1ScanFakeOpencodeFixture | null = null;
+    let session: TerminalSession | null = null;
+
+    try {
+      fixture = await createPhase1ScanFakeOpencodeFixture();
+
+      session = TerminalSession.spawn({
+        command: fixture.commandPath,
+        args: ['scan', '--no-ui', '--output', 'json'],
+        cwd: fixture.repoRoot,
+        env: fixture.env,
+        cols: 120,
+        rows: 40
+      });
+
+      await session.waitForText('"bundle_id"', {
+        source: 'raw',
+        timeoutMs: 60_000
+      });
+
+      const exit = await session.waitForExit(30_000);
+      expect(exit.exitCode).toBe(0);
+
+      const promptLog = await readRecordJsonLines(fixture.fakeOpencodeLogPath);
+      const promptEntries = promptLog.filter(
+        (entry): entry is {
+          type: 'session.prompt';
+          title: string;
+          promptText: string;
+          body: {
+            system?: string;
+          };
+        } => entry.type === 'session.prompt'
+      );
+      expect(promptEntries).toHaveLength(1);
+
+      const expectedSystemPrompt = (
+        await fs.readFile(resolveFromToolRoot('prompts', 'scan-system.md'), 'utf8')
+      ).trim();
+      expect(promptEntries[0]?.title).toBe(fixture.checkId);
+      expect(promptEntries[0]?.body.system).toBe(expectedSystemPrompt);
+      expect(promptEntries[0]?.promptText).toContain(`Check id: ${fixture.checkId}`);
+    } finally {
+      await session?.close();
+      if (fixture) {
+        await removeTempPaths(fixture.tempPaths);
+      }
+    }
+  });
+
   it('runs shrike scan in a PTY and captures the outbound prompt', async () => {
     const mockServer = await MockAiServer.start();
     let fixture: Phase1ScanFixture | null = null;
@@ -651,8 +705,10 @@ describe('scan terminal e2e', () => {
       expect(mockServer.requests).toHaveLength(3);
 
       const report = extractJsonReport(session.rawOutput());
-      expect(report.execution.requested_parallelism).toBe(2);
-      expect(report.execution.effective_parallelism).toBe(2);
+      expect(report.execution).toMatchObject({
+        requested_parallelism: 2,
+        effective_parallelism: 2
+      });
       expect(report.summary).toEqual({
         total_checks: 3,
         passed: 2,
@@ -722,7 +778,7 @@ function buildCheckResultText(
     status: 'pass' | 'fail' | 'unknown';
     confidence: 'HIGH' | 'MEDIUM' | 'LOW';
     rationale: string;
-    remediation: string[];
+    remediation: readonly string[];
   }
 ): string {
   return buildCheckResultTextForCheck({
@@ -739,9 +795,9 @@ function buildCheckResultTextForCheck(options: {
   checkId: string;
   status: 'pass' | 'fail' | 'unknown';
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
-  evidence: string[];
+  evidence: readonly string[];
   rationale: string;
-  remediation: string[];
+  remediation: readonly string[];
 }): string {
   return JSON.stringify({
     id: options.checkId,
@@ -835,6 +891,15 @@ async function readJsonLines(filePath: string): Promise<Array<{kind: string; dat
     .map(line => line.trim())
     .filter(Boolean)
     .map(line => JSON.parse(line) as {kind: string; data: unknown});
+}
+
+async function readRecordJsonLines(filePath: string): Promise<Array<Record<string, unknown>>> {
+  const raw = await fs.readFile(filePath, 'utf8');
+  return raw
+    .split(/\r?\n/u)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => JSON.parse(line) as Record<string, unknown>);
 }
 
 const PARALLEL_CHECK_FIXTURES = [

@@ -25,6 +25,10 @@ export interface Phase1ScanFixture {
   tempPaths: string[];
 }
 
+export interface Phase1ScanFakeOpencodeFixture extends Phase1ScanFixture {
+  fakeOpencodeLogPath: string;
+}
+
 export interface Phase3FixFixture {
   repoRoot: string;
   homeRoot: string;
@@ -213,6 +217,44 @@ export async function createPhase1ScanFixture(options: {
       FORCE_COLOR: '0'
     },
     tempPaths: [repoRoot, homeRoot]
+  };
+}
+
+export async function createPhase1ScanFakeOpencodeFixture(): Promise<Phase1ScanFakeOpencodeFixture> {
+  const fixture = await createPhase1ScanFixture({
+    mockProviderBaseUrl: 'http://127.0.0.1:1/v1'
+  });
+  const fakeOpencode = await createFakeOpencodeInstallation({
+    models: ['openai/gpt-4o-mini'],
+    promptPlans: [
+      {
+        title: fixture.checkId,
+        promptIncludes: [
+          `Check id: ${fixture.checkId}`,
+          'Scoped file allowlist (1):',
+          `- ${fixture.changedFilePath}`
+        ],
+        responseText: JSON.stringify({
+          id: fixture.checkId,
+          version: '0.1.0',
+          status: 'pass',
+          confidence: 'HIGH',
+          evidence: [`${fixture.changedFilePath}:1`],
+          rationale: 'The changed auth module still exports validateAuthToken and returns a boolean.',
+          remediation: ['No action required.']
+        }, null, 2)
+      }
+    ]
+  });
+
+  return {
+    ...fixture,
+    fakeOpencodeLogPath: fakeOpencode.logPath,
+    env: {
+      ...fixture.env,
+      ...fakeOpencode.env
+    },
+    tempPaths: [...fixture.tempPaths, fakeOpencode.binRoot]
   };
 }
 

@@ -154,6 +154,7 @@ export class OpenCodeRuntime {
 
   async runPrompt(options: {
     prompt: string;
+    system?: string | undefined;
     agent: string;
     model: string;
     title: string;
@@ -220,6 +221,7 @@ export class OpenCodeRuntime {
                 providerID,
                 modelID
               },
+              ...(options.system !== undefined ? {system: options.system} : {}),
               parts: [
                 {
                   type: 'text',

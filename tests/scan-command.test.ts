@@ -62,6 +62,7 @@ const {executeScanCommand} = await import('../src/commands/scan.js');
 
 const tempDirectories: string[] = [];
 let writeSpy: ReturnType<typeof vi.spyOn>;
+let stderrSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   mockResolveScanOptions.mockReset();
@@ -71,10 +72,12 @@ beforeEach(() => {
   mockSaveLastScanState.mockReset();
   mockSaveLastScanState.mockResolvedValue([]);
   writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 });
 
 afterEach(async () => {
   writeSpy.mockRestore();
+  stderrSpy.mockRestore();
   await Promise.all(
     tempDirectories.splice(0).map(directory =>
       fs.rm(directory, {recursive: true, force: true})
@@ -484,7 +487,6 @@ describe('executeScanCommand', () => {
       warnings: ['stale report']
     });
 
-    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const exitCode = await executeScanCommand({
       repoPath: repoRoot,
       lastScan: true
@@ -494,7 +496,6 @@ describe('executeScanCommand', () => {
     expect(mockRunScan).not.toHaveBeenCalled();
     expect(mockSaveLastScanState).not.toHaveBeenCalled();
     expect(stderrSpy).toHaveBeenCalledWith('OpenShrike warning: stale report\n');
-    stderrSpy.mockRestore();
   });
 });
 

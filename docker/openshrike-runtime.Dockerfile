@@ -10,6 +10,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY tsconfig.json vitest.config.ts ./
+COPY prompts ./prompts
 COPY src ./src
 COPY best_practices ./best_practices
 COPY docs ./docs

@@ -7,6 +7,7 @@ import {
   MAX_SCOPE_EVIDENCE_OUTPUT_LINES
 } from './constants.js';
 import {OpenCodeRuntime} from './runtime.js';
+import {loadScanSystemPrompt} from './system-prompts.js';
 import type {
   CheckResult,
   Confidence,
@@ -70,8 +71,10 @@ export async function evaluateCheck(options: EvaluateCheckOptions): Promise<Chec
     checksDirectory: options.projectChecksDir
   });
   const prompt = buildPrompt(options.checkId, definition, options.repoPath, options.scopeContext);
+  const systemPrompt = await loadScanSystemPrompt();
   const responseText = await options.runtime.runPrompt({
     prompt,
+    system: systemPrompt,
     agent: options.agent,
     model: options.model,
     title: options.checkId,

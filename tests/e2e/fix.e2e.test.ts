@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {resolveFromToolRoot} from '../../src/lib/project-root.js';
 import type {ScanReport} from '../../src/lib/types.js';
 import {describe, expect, it} from 'vitest';
 import {TerminalSession} from './support/terminal-session.js';
@@ -68,16 +69,24 @@ describe('fix terminal e2e', () => {
           title: string;
           promptText: string;
           model: {providerID: string; modelID: string};
+          body: {system?: string};
         } => entry.type === 'session.prompt'
       );
       expect(promptEntries).toHaveLength(2);
 
       const [fixPrompt, recheckPrompt] = promptEntries;
+      const expectedFixSystemPrompt = (
+        await fs.readFile(resolveFromToolRoot('prompts', 'fix-system.md'), 'utf8')
+      ).trim();
+      const expectedScanSystemPrompt = (
+        await fs.readFile(resolveFromToolRoot('prompts', 'scan-system.md'), 'utf8')
+      ).trim();
       expect(fixPrompt?.title).toBe(`${fixture.checkId} fix`);
       expect(fixPrompt?.model).toEqual({
         providerID: 'openai',
         modelID: 'gpt-4o-mini'
       });
+      expect(fixPrompt?.body.system).toBe(expectedFixSystemPrompt);
       expect(fixPrompt?.promptText).toContain('You are fixing one OpenShrike finding in repository path:');
       expect(fixPrompt?.promptText).toContain(`Check id: ${fixture.checkId}`);
       expect(fixPrompt?.promptText).toContain(fixture.checkDefinition);
@@ -91,6 +100,7 @@ describe('fix terminal e2e', () => {
         providerID: 'openai',
         modelID: 'gpt-4o-mini'
       });
+      expect(recheckPrompt?.body.system).toBe(expectedScanSystemPrompt);
       expect(recheckPrompt?.promptText).toContain(`Check id: ${fixture.checkId}`);
       expect(recheckPrompt?.promptText).toContain(fixture.checkDefinition);
       expect(recheckPrompt?.promptText).toContain('Scoped file allowlist (1):');
