@@ -102,21 +102,24 @@ describe('runInitCommand', () => {
         return {type: 'submit', value: 'use-suggested'};
       },
       spec => {
-        expect(spec.prompt).toBe('Select default policy');
+        expect(spec.prompt).toBe('Select default policies');
+        expect(spec.selectionMode).toBe('multiple');
         expect(spec.options[0]?.value).toBe('typescript-baseline');
+        expect(spec.initialValues).toEqual(['typescript-baseline']);
         expect(spec.noteLines).toEqual([
           '',
+          'Press Space to toggle policies, then Enter to confirm.',
           'Other defaults are written automatically:',
           'native • uncommitted • auto • markdown'
         ]);
-        return {type: 'submit', value: 'typescript-baseline'};
+        return {type: 'submit', values: ['typescript-baseline', 'python-baseline']};
       },
       spec => {
         expect(spec.prompt).toBe('Setup complete');
         expect(spec.summaryItems).toEqual([
           {label: 'Scan model', value: 'azure/gpt-5.4-mini'},
           {label: 'Fix model', value: 'azure/gpt-5.4'},
-          {label: 'Default policy', value: 'typescript-baseline'},
+          {label: 'Policies', value: 'typescript-baseline, python-baseline'},
           {label: 'Runtime mode', value: 'native'}
         ]);
         return {type: 'submit', value: 'run-scan'};
@@ -150,6 +153,10 @@ describe('runInitCommand', () => {
     expect(projectConfig.config.init.projectType).toBe('typescript');
     expect(projectConfig.config.init.opencodeSetup).toBe('existing-config');
     expect(projectConfig.config.init.seedPolicyId).toBe('typescript-baseline');
+    expect(projectConfig.config.init.seedPolicyIds).toEqual([
+      'typescript-baseline',
+      'python-baseline'
+    ]);
     expect(projectConfig.config.init.detectedFrom).toHaveLength(3);
     expect(projectConfig.config.init.detectedFrom).toEqual(expect.arrayContaining([
       'package.json',
@@ -175,8 +182,15 @@ describe('runInitCommand', () => {
       artifactsDir: null
     });
     expect(result.projectConfig?.init.seedPolicyId).toBe('typescript-baseline');
+    expect(result.projectConfig?.init.seedPolicyIds).toEqual([
+      'typescript-baseline',
+      'python-baseline'
+    ]);
     await expect(fs.readdir(path.join(repoRoot, '.openshrike', 'checks'))).resolves.toContain(
       'typescript-arch-001-external-data-not-cast-to-trusted-types.md'
+    );
+    await expect(fs.readdir(path.join(repoRoot, '.openshrike', 'checks'))).resolves.toContain(
+      'python-rel-001-http-clients-have-timeouts.md'
     );
     expect(runtimeConfig.config.model).toBe('azure/gpt-5.4-mini');
     expect(runtimeConfig.config.agent?.['shrike-checker']?.model).toBe('azure/gpt-5.4-mini');
@@ -241,15 +255,16 @@ describe('runInitCommand', () => {
         return {type: 'submit', value: 'same-as-scan'};
       },
       spec => {
-        expect(spec.prompt).toBe('Select default policy');
-        return {type: 'submit', value: 'typescript-baseline'};
+        expect(spec.prompt).toBe('Select default policies');
+        expect(spec.selectionMode).toBe('multiple');
+        return {type: 'submit', values: ['typescript-baseline']};
       },
       spec => {
         expect(spec.prompt).toBe('Setup complete');
         expect(spec.summaryItems).toEqual([
           {label: 'Scan model', value: 'openai/gpt-5.1-mini'},
           {label: 'Fix model', value: 'openai/gpt-5.1-mini'},
-          {label: 'Default policy', value: 'typescript-baseline'},
+          {label: 'Policies', value: 'typescript-baseline'},
           {label: 'Runtime mode', value: 'native'}
         ]);
         return {type: 'submit', value: 'exit'};
@@ -290,7 +305,7 @@ describe('runInitCommand', () => {
 
     await writeShrikeInitFiles({
       repoRoot,
-      policyId: 'typescript-baseline',
+      policyIds: ['typescript-baseline'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -329,7 +344,7 @@ describe('runInitCommand', () => {
         expect(spec.prompt).toBe('Project is already initialized');
         expect(spec.initialValue).toBe('update');
         expect(spec.summaryItems).toEqual([
-          {label: 'policy', value: 'typescript-baseline'},
+          {label: 'policies', value: 'typescript-baseline'},
           {label: 'scan model', value: 'azure/gpt-5.4-mini'},
           {label: 'fix model', value: 'azure/gpt-5.4-mini'}
         ]);
@@ -361,7 +376,7 @@ describe('runInitCommand', () => {
         expect(spec.summaryItems).toEqual([
           {label: 'Scan model', value: 'azure/gpt-5.4-mini'},
           {label: 'Fix model', value: 'azure/gpt-5.4-mini'},
-          {label: 'Default policy', value: 'typescript-baseline'},
+          {label: 'Policies', value: 'typescript-baseline'},
           {label: 'Runtime mode', value: 'docker'}
         ]);
         return {type: 'submit', value: 'exit'};
@@ -384,6 +399,7 @@ describe('runInitCommand', () => {
     expect(projectConfig.config.runtime.fixModel).toBe('azure/gpt-5.4-mini');
     expect(projectConfig.config.scan.defaultId).toBe('.openshrike/checks');
     expect(projectConfig.config.init.seedPolicyId).toBe('typescript-baseline');
+    expect(projectConfig.config.init.seedPolicyIds).toEqual(['typescript-baseline']);
     expect(projectConfig.config.init.detectedFrom).toEqual(['package.json', 'tsconfig.json']);
     expect(await fs.readFile(opencodeConfigPath, 'utf8')).toBe(originalOpencodeConfig);
   });
@@ -399,7 +415,7 @@ describe('runInitCommand', () => {
 
     await writeShrikeInitFiles({
       repoRoot,
-      policyId: 'typescript-baseline',
+      policyIds: ['typescript-baseline'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -529,8 +545,9 @@ describe('runInitCommand', () => {
         return {type: 'submit', value: 'same-as-scan'};
       },
       spec => {
-        expect(spec.prompt).toBe('Select default policy');
-        return {type: 'submit', value: 'typescript-baseline'};
+        expect(spec.prompt).toBe('Select default policies');
+        expect(spec.selectionMode).toBe('multiple');
+        return {type: 'submit', values: ['typescript-baseline']};
       },
       spec => {
         expect(spec.prompt).toBe('Setup complete');

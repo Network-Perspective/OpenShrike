@@ -28,7 +28,7 @@ export type FixModelChoiceAction = 'same-as-scan' | 'use-suggested' | 'choose-ot
 export interface InitSelections {
   model?: string | undefined;
   fixModel?: string | undefined;
-  policyId: string;
+  policyIds: string[];
   runtimeMode: RuntimeMode;
   parallelism: ParallelismValue;
   projectType: ProjectType;

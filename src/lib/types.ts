@@ -155,6 +155,7 @@ export interface ShrikeProjectConfig {
     detectedFrom: string[];
     opencodeSetup: 'existing-config' | 'auth-login';
     seedPolicyId?: string | undefined;
+    seedPolicyIds?: string[] | undefined;
   };
   runtime: {
     configPath: string;

@@ -26,6 +26,8 @@ export interface InitScreenOption<T extends string> {
   searchText?: string | undefined;
 }
 
+export type InitScreenSelectionMode = 'single' | 'multiple';
+
 export interface InitScreenSpec<T extends string> {
   title?: string;
   prompt: string;
@@ -35,6 +37,9 @@ export interface InitScreenSpec<T extends string> {
   noteLines?: string[];
   options: InitScreenOption<T>[];
   initialValue?: T | undefined;
+  initialValues?: T[] | undefined;
+  selectionMode?: InitScreenSelectionMode | undefined;
+  minSelections?: number | undefined;
   searchable?: boolean | undefined;
   searchLabel?: string | undefined;
   allowBack?: boolean | undefined;
@@ -44,6 +49,7 @@ export interface InitScreenSpec<T extends string> {
 
 export type InitScreenResult<T extends string> =
   | {type: 'submit'; value: T}
+  | {type: 'submit'; values: T[]}
   | {type: 'back'};
 
 export interface InitHistoryItem {
@@ -146,10 +152,17 @@ function InitScreenView<T extends string>(props: {
 }) {
   const [query, setQuery] = useState('');
   const [navigation, setNavigation] = useState<OptionNavigationState>(() =>
-    createInitialOptionNavigation(props.spec.options, props.spec.initialValue)
+    createInitialOptionNavigation(props.spec.options, resolveInitialNavigationValue(props.spec))
+  );
+  const [selectedValues, setSelectedValues] = useState<T[]>(() =>
+    createInitialSelectedValues(props.spec)
   );
   const [showHelp, setShowHelp] = useState(false);
   const [isSettled, setIsSettled] = useState(false);
+  const selectionMode = props.spec.selectionMode ?? 'single';
+  const minSelections = selectionMode === 'multiple'
+    ? Math.max(0, props.spec.minSelections ?? 1)
+    : 0;
 
   const filteredOptions = getFilteredOptions(props.spec.options, query, Boolean(props.spec.searchable));
   const effectiveNavigation = resolveOptionNavigation(navigation, filteredOptions.length);
@@ -183,6 +196,14 @@ function InitScreenView<T extends string>(props: {
       return;
     }
 
+    if (selectionMode === 'multiple' && input === ' ' && filteredOptions.length > 0) {
+      const toggledValue = filteredOptions[effectiveIndex]!.value;
+      setSelectedValues(previous =>
+        toggleSelectedValues(previous, toggledValue, props.spec.options, minSelections)
+      );
+      return;
+    }
+
     if (props.spec.searchable && isBackspace(input, key)) {
       setQuery(previous => previous.slice(0, -1));
       return;
@@ -203,6 +224,20 @@ function InitScreenView<T extends string>(props: {
       return;
     }
 
+    if (key.return && selectionMode === 'multiple') {
+      const orderedSelection = orderSelectedValues(props.spec.options, selectedValues);
+      if (orderedSelection.length < minSelections) {
+        return;
+      }
+
+      setIsSettled(true);
+      props.onResolve({
+        type: 'submit',
+        values: orderedSelection
+      });
+      return;
+    }
+
     if (key.return && filteredOptions.length > 0) {
       setIsSettled(true);
       props.onResolve({
@@ -219,6 +254,7 @@ function InitScreenView<T extends string>(props: {
       query={query}
       showHelp={showHelp}
       filteredOptions={filteredOptions}
+      selectedValues={selectedValues}
       effectiveIndex={effectiveIndex}
       visibleStart={effectiveNavigation.visibleStart}
     />
@@ -231,6 +267,7 @@ export function InitScreenLayout<T extends string>(props: {
   query: string;
   showHelp: boolean;
   filteredOptions: InitScreenOption<T>[];
+  selectedValues: T[];
   effectiveIndex: number;
   visibleStart: number;
 }) {
@@ -279,7 +316,9 @@ export function InitScreenLayout<T extends string>(props: {
             items={visibleWindow.options.map((option, index) => ({
               label: option.label,
               detail: option.detail,
-              selected: visibleWindow.start + index === props.effectiveIndex
+              active: visibleWindow.start + index === props.effectiveIndex,
+              checked: props.selectedValues.includes(option.value),
+              selectionMode: props.spec.selectionMode
             }))}
             railTone={choiceRailTone}
           />
@@ -329,7 +368,11 @@ function renderTextLines(
 }
 
 function buildHintBar<T extends string>(spec: InitScreenSpec<T>): string[] {
-  const hints = ['↑/↓ to select', 'Enter: confirm'];
+  const hints = ['↑/↓ to select'];
+  if (spec.selectionMode === 'multiple') {
+    hints.push('Space: toggle');
+  }
+  hints.push('Enter: confirm');
 
   if (spec.searchable) {
     hints.push('Type: to search');
@@ -388,6 +431,60 @@ function createInitialOptionNavigation<T extends string>(
     selectedIndex,
     visibleStart: resolveInitialVisibleStart(selectedIndex, options.length)
   };
+}
+
+function resolveInitialNavigationValue<T extends string>(spec: InitScreenSpec<T>): T | undefined {
+  if (spec.selectionMode === 'multiple') {
+    return spec.initialValues?.[0] ?? spec.initialValue;
+  }
+
+  return spec.initialValue;
+}
+
+function createInitialSelectedValues<T extends string>(spec: InitScreenSpec<T>): T[] {
+  const ordered = orderSelectedValues(
+    spec.options,
+    spec.selectionMode === 'multiple'
+      ? spec.initialValues ?? (spec.initialValue ? [spec.initialValue] : [])
+      : spec.initialValue
+        ? [spec.initialValue]
+        : []
+  );
+
+  if (spec.selectionMode === 'multiple' && ordered.length === 0 && (spec.minSelections ?? 1) > 0) {
+    return spec.options[0] ? [spec.options[0].value] : [];
+  }
+
+  return ordered;
+}
+
+function orderSelectedValues<T extends string>(
+  options: InitScreenOption<T>[],
+  selectedValues: T[]
+): T[] {
+  const available = new Set(options.map(option => option.value));
+  const selected = new Set(selectedValues.filter(value => available.has(value)));
+
+  return options
+    .map(option => option.value)
+    .filter(value => selected.has(value));
+}
+
+function toggleSelectedValues<T extends string>(
+  selectedValues: T[],
+  value: T,
+  options: InitScreenOption<T>[],
+  minSelections: number
+): T[] {
+  if (selectedValues.includes(value)) {
+    if (selectedValues.length <= minSelections) {
+      return selectedValues;
+    }
+
+    return selectedValues.filter(candidate => candidate !== value);
+  }
+
+  return orderSelectedValues(options, [...selectedValues, value]);
 }
 
 export function moveOptionNavigation(

@@ -56,7 +56,7 @@ describe('init terminal e2e', () => {
       });
       session.press('enter');
 
-      await session.waitForText('Select default policy', {
+      await session.waitForText('Select default policies', {
         source: 'screen',
         timeoutMs: 30_000
       });
@@ -101,6 +101,7 @@ describe('init terminal e2e', () => {
 
       expect(projectConfig.config.init.opencodeSetup).toBe('existing-config');
       expect(projectConfig.config.init.seedPolicyId).toBe(fixture.expectedPolicyId);
+      expect(projectConfig.config.init.seedPolicyIds).toEqual([fixture.expectedPolicyId]);
       expect(projectConfig.config.runtime.scanModel).toBe(fixture.selectedScanModel);
       expect(projectConfig.config.runtime.fixModel).toBe(fixture.selectedFixModel);
       expect(projectConfig.config.runtime.mode).toBe('native');

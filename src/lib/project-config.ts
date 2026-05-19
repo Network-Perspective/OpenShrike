@@ -36,7 +36,8 @@ const projectConfigSchema = z
       ]),
       detectedFrom: z.array(z.string().trim().min(1)).default([]),
       opencodeSetup: z.enum(['existing-config', 'auth-login']),
-      seedPolicyId: z.string().trim().min(1).optional()
+      seedPolicyId: z.string().trim().min(1).optional(),
+      seedPolicyIds: z.array(z.string().trim().min(1)).min(1).optional()
     }).passthrough(),
     runtime: z.object({
       configPath: z.string().trim().min(1),

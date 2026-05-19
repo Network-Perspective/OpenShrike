@@ -12,7 +12,9 @@ export interface SummaryItem {
 export interface SelectListItem {
   label: string;
   detail?: string | undefined;
-  selected: boolean;
+  active: boolean;
+  checked?: boolean | undefined;
+  selectionMode?: 'single' | 'multiple' | undefined;
 }
 
 export interface HistoryStep {
@@ -132,19 +134,41 @@ export function SelectList(props: {
     <>
       {props.items.map(item => (
         <DialogLine key={item.label} railTone={props.railTone}>
-          <Box>
-            <Text color={item.selected ? initTheme.selected : initTheme.secondary}>
-              {item.selected ? '●' : '○'}
-            </Text>
-            <Text>  </Text>
-            <Text color={item.selected ? initTheme.primary : initTheme.secondary}>{item.label}</Text>
-            {item.detail ? (
-              <>
-                <Text color={initTheme.secondary}>  </Text>
-                <Text color={initTheme.secondary}>{item.detail}</Text>
-              </>
-            ) : null}
-          </Box>
+          {item.selectionMode === 'multiple' ? (
+            <Box>
+              <Text color={item.active ? initTheme.selected : initTheme.secondary}>
+                {item.active ? '›' : ' '}
+              </Text>
+              <Text> </Text>
+              <Text color={item.checked ? initTheme.selected : initTheme.secondary}>
+                {item.checked ? '[x]' : '[ ]'}
+              </Text>
+              <Text>  </Text>
+              <Text color={item.active ? initTheme.primary : item.checked ? initTheme.selected : initTheme.secondary}>
+                {item.label}
+              </Text>
+              {item.detail ? (
+                <>
+                  <Text color={initTheme.secondary}>  </Text>
+                  <Text color={initTheme.secondary}>{item.detail}</Text>
+                </>
+              ) : null}
+            </Box>
+          ) : (
+            <Box>
+              <Text color={item.active ? initTheme.selected : initTheme.secondary}>
+                {item.active ? '●' : '○'}
+              </Text>
+              <Text>  </Text>
+              <Text color={item.active ? initTheme.primary : initTheme.secondary}>{item.label}</Text>
+              {item.detail ? (
+                <>
+                  <Text color={initTheme.secondary}>  </Text>
+                  <Text color={initTheme.secondary}>{item.detail}</Text>
+                </>
+              ) : null}
+            </Box>
+          )}
         </DialogLine>
       ))}
     </>

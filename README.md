@@ -30,8 +30,8 @@ security practices, and engineering standards set by your team.
 
 OpenShrike is a security-first, self-hosted code review tool that fills that
 gap. Your standards live in the repo as versioned Markdown checks and policies
-in [best_practices/](best_practices/). `shrike init` seeds the selected policy
-into repo-local Markdown under `.openshrike/checks/`, so the checks that
+in [best_practices/](best_practices/). `shrike init` seeds the selected
+policies into repo-local Markdown under `.openshrike/checks/`, so the checks that
 actually run can be reviewed in code review and edited or extended by
 maintainers. OpenShrike then executes those project-local checks with OpenCode
 and produces findings with evidence, rationale, and remediation — locally or
@@ -91,7 +91,7 @@ shrike scan
   uncommitted changes in the current repository. If there are no uncommitted
   changes, plain `shrike scan` asks whether it should run a full-repository
   scan instead.
-- Re-run `shrike init` when you want to seed checks from a different policy
+- Re-run `shrike init` when you want to seed checks from different policies
   or change saved model, runtime mode, or parallelism defaults.
 
 ## Install From Source
@@ -202,4 +202,3 @@ Install from the published framework bundle:
 ```bash
 scripts/install-local.sh --source .artifacts/publish/framework
 ```
-

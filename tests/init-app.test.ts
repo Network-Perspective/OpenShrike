@@ -40,6 +40,7 @@ describe('init ui layout', () => {
         query: '',
         showHelp: false,
         filteredOptions: spec.options,
+        selectedValues: [],
         effectiveIndex: 0,
         visibleStart: 0
       }),
@@ -71,6 +72,7 @@ describe('init ui layout', () => {
         query: '',
         showHelp: false,
         filteredOptions: spec.options,
+        selectedValues: [],
         effectiveIndex: 0,
         visibleStart: 0
       }),
@@ -82,6 +84,34 @@ describe('init ui layout', () => {
     expect(output).not.toContain('model-10');
     expect(output).not.toContain('model-11');
     expect(output).toContain('Showing 1-10 of 12');
+  });
+
+  it('renders checkbox selections for multi-select screens', () => {
+    const spec: InitScreenSpec<'typescript-baseline' | 'python-baseline'> = {
+      prompt: 'Select default policies',
+      options: [
+        {value: 'typescript-baseline', label: 'typescript-baseline'},
+        {value: 'python-baseline', label: 'python-baseline'}
+      ],
+      selectionMode: 'multiple'
+    };
+
+    const output = stripAnsi(renderToString(
+      React.createElement(InitScreenLayout, {
+        spec,
+        history: [],
+        query: '',
+        showHelp: false,
+        filteredOptions: spec.options,
+        selectedValues: ['typescript-baseline'],
+        effectiveIndex: 1,
+        visibleStart: 0
+      }),
+      {columns: 120}
+    ));
+
+    expect(output).toContain('[x]  typescript-baseline');
+    expect(output).toContain('› [ ]  python-baseline');
   });
 
   it('scrolls the visible window when moving past the bottom edge', () => {

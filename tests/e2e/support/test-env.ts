@@ -120,7 +120,7 @@ export async function createPhase1ScanFixture(options: {
   ]);
 
   const projectConfig = buildShrikeProjectConfig({
-    policyId: 'typescript-baseline',
+    policyIds: ['typescript-baseline'],
     model: 'openai/gpt-4o-mini',
     fixModel: 'openai/gpt-4o-mini',
     runtimeMode: 'native',
@@ -292,7 +292,7 @@ export async function createPhase3FixFixture(): Promise<Phase3FixFixture> {
   ]);
 
   const projectConfig = buildShrikeProjectConfig({
-    policyId: 'typescript-baseline',
+    policyIds: ['typescript-baseline'],
     model: 'openai/gpt-4o-mini',
     fixModel: 'openai/gpt-4o-mini',
     runtimeMode: 'native',

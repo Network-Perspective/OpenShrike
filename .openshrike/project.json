@@ -9,7 +9,7 @@
       "src/**/*.ts"
     ],
     "opencodeSetup": "existing-config",
-    "seedPolicyId": "typescript-baseline"
+    "seedPolicyId": "javascript-baseline"
   },
   "runtime": {
     "configPath": ".openshrike/opencode.json",

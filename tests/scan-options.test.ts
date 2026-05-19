@@ -132,7 +132,7 @@ describe('validateScanOptions', () => {
 
     await writeShrikeInitFiles({
       repoRoot,
-      policyId: 'typescript-baseline',
+      policyIds: ['typescript-baseline'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -163,7 +163,7 @@ describe('validateScanOptions', () => {
 
     await writeShrikeInitFiles({
       repoRoot,
-      policyId: 'typescript-baseline',
+      policyIds: ['typescript-baseline'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -196,7 +196,7 @@ describe('validateScanOptions', () => {
 
     await writeShrikeInitFiles({
       repoRoot,
-      policyId: 'typescript-baseline',
+      policyIds: ['typescript-baseline'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -224,7 +224,7 @@ describe('validateScanOptions', () => {
 
     await writeShrikeInitFiles({
       repoRoot,
-      policyId: 'typescript-baseline',
+      policyIds: ['typescript-baseline'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',

@@ -127,7 +127,7 @@ describe('runtime config', () => {
 
     const result = await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyId: 'typescript-baseline',
+      policyIds: ['typescript-baseline'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -156,6 +156,7 @@ describe('runtime config', () => {
     expect(projectConfig.config.runtime.fixModel).toBe('azure/gpt-5.4-mini');
     expect(projectConfig.config.init.detectedFrom).toEqual(['package.json', 'tsconfig.json']);
     expect(projectConfig.config.init.seedPolicyId).toBe('typescript-baseline');
+    expect(projectConfig.config.init.seedPolicyIds).toEqual(['typescript-baseline']);
     expect(result.checksDirectory).toBe(path.join(tempRoot, '.openshrike', 'checks'));
     expect(result.seededCheckPaths.length).toBeGreaterThan(0);
     expect(readme).toContain('`project.json`');
@@ -164,6 +165,33 @@ describe('runtime config', () => {
     expect(gitignore).toContain('artifacts/');
     expect(gitignore).toContain('last-scan.json');
     expect(gitignore).toContain('last-scan.md');
+  });
+
+  it('seeds the union of checks from all selected policies', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-init-multi-policy-'));
+    tempDirectories.push(tempRoot);
+
+    const result = await writeShrikeInitFiles({
+      repoRoot: tempRoot,
+      policyIds: ['typescript-baseline', 'python-baseline'],
+      model: 'azure/gpt-5.4-mini',
+      runtimeMode: 'native',
+      projectType: 'typescript',
+      detectedFrom: ['package.json', 'tsconfig.json'],
+      opencodeSetup: 'existing-config'
+    });
+
+    const projectConfig = await loadProjectConfig(result.projectConfigPath);
+    const seededCheckFiles = await fs.readdir(result.checksDirectory);
+
+    expect(projectConfig.config.init.seedPolicyId).toBe('typescript-baseline');
+    expect(projectConfig.config.init.seedPolicyIds).toEqual([
+      'typescript-baseline',
+      'python-baseline'
+    ]);
+    expect(seededCheckFiles).toContain('typescript-api-001-public-boundary-types-avoid-any.md');
+    expect(seededCheckFiles).toContain('python-rel-001-http-clients-have-timeouts.md');
+    expect(result.seededCheckPaths.filter(filePath => filePath.endsWith('bp-api-001-machine-readable-errors.md'))).toHaveLength(1);
   });
 
   it('preserves existing .openshrike/.gitignore entries and adds the artifacts rule', async () => {
@@ -176,7 +204,7 @@ describe('runtime config', () => {
 
     await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyId: 'typescript-baseline',
+      policyIds: ['typescript-baseline'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -195,7 +223,7 @@ describe('runtime config', () => {
 
     const result = await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyId: 'typescript-baseline',
+      policyIds: ['typescript-baseline'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -258,7 +286,7 @@ describe('runtime config', () => {
 
     await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyId: 'typescript-baseline',
+      policyIds: ['typescript-baseline'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'docker',
       parallelism: 4,
@@ -286,7 +314,7 @@ describe('runtime config', () => {
 
     const result = await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyId: 'typescript-baseline',
+      policyIds: ['typescript-baseline'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -329,7 +357,7 @@ describe('runtime config', () => {
 
     await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyId: 'typescript-baseline',
+      policyIds: ['typescript-baseline'],
       model: 'azure/gpt-5.4',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -360,7 +388,7 @@ describe('runtime config', () => {
 
     await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyId: 'typescript-baseline',
+      policyIds: ['typescript-baseline'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -375,5 +403,6 @@ describe('runtime config', () => {
     expect(loaded?.repoRoot).toBe(tempRoot);
     expect(loaded?.config.scan.defaultId).toBe('.openshrike/checks');
     expect(loaded?.config.init.seedPolicyId).toBe('typescript-baseline');
+    expect(loaded?.config.init.seedPolicyIds).toEqual(['typescript-baseline']);
   });
 });

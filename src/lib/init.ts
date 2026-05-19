@@ -7,6 +7,7 @@ import {
   createInitUiSession,
   InitUiCancelledError,
   type InitHistoryItem,
+  type InitScreenResult,
   type InitUiSession,
   type InitScreenOption
 } from '../ui/init-app.js';
@@ -90,11 +91,11 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             ],
             summaryItems: [
               {
-                label: 'policy',
-                value: resolveSavedPolicyId(
+                label: 'policies',
+                value: formatPolicySelection(resolveSavedPolicyIds(
                   context.existingProjectConfig?.config,
                   context.policyCatalog.map(policy => policy.id)
-                ) ?? 'unknown'
+                ) ?? [])
               },
               {
                 label: 'scan model',
@@ -385,7 +386,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
         }
 
         case 'policy-selection': {
-          const prompt = 'Select default policy';
+          const prompt = 'Select default policies';
           const policyOptions = buildPolicyOptions(context);
           const selection = await ui.showScreen<string>({
             prompt,
@@ -394,11 +395,14 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
               `Evidence: ${context.selections.detectedFrom.join(', ')}`
             ],
             options: policyOptions,
-            initialValue: context.selections.policyId,
+            initialValue: context.selections.policyIds[0],
+            initialValues: context.selections.policyIds,
+            selectionMode: 'multiple',
             searchable: true,
             searchLabel: 'Search',
             noteLines: [
               '',
+              'Press Space to toggle policies, then Enter to confirm.',
               'Other defaults are written automatically:',
               `${context.selections.runtimeMode} • uncommitted • ${formatParallelism(context.selections.parallelism)} • ${DEFAULT_OUTPUT}`
             ],
@@ -419,7 +423,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             break;
           }
 
-          context.selections.policyId = selection.value;
+          context.selections.policyIds = resolveSubmittedValues(selection);
           if (selectionFlow === 'change-policy') {
             await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults', {
               scope: 'project',
@@ -429,7 +433,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             screen = context.error ? 'error' : 'change-defaults';
             selectionFlow = 'initial';
           } else {
-            pushSelectedHistory(history, 'policy-selection', prompt, policyOptions, selection.value);
+            pushSelectedHistory(history, 'policy-selection', prompt, policyOptions, context.selections.policyIds);
             await writeSelectionsOrShowError(context, 'success', 'success', {
               scope: 'all',
               preserveExisting: false,
@@ -455,7 +459,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             summaryItems: [
               {label: 'Scan model', value: context.selections.model ?? 'default'},
               {label: 'Fix model', value: context.selections.fixModel ?? context.selections.model ?? 'default'},
-              {label: 'Default policy', value: context.selections.policyId},
+              {label: 'Policies', value: formatPolicySelection(context.selections.policyIds)},
               {label: 'Runtime mode', value: context.selections.runtimeMode}
             ],
             options: optionsForScreen,
@@ -483,7 +487,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
         case 'change-defaults': {
           const prompt = 'Change saved defaults';
           const optionsForScreen: InitScreenOption<ChangeDefaultsAction>[] = [
-            {value: 'policy', label: `Policy: ${context.selections.policyId}`},
+            {value: 'policy', label: `Policies: ${formatPolicySelection(context.selections.policyIds)}`},
             ...(context.opencode.models.length > 1
               ? [
                   {value: 'scan-model' as const, label: `Scan model: ${context.selections.model ?? 'default'}`},
@@ -670,10 +674,10 @@ async function buildWizardContext(
     policyCatalog.map(policy => policy.id),
     projectDetection
   );
-  const defaultPolicyId = resolveSavedPolicyId(
+  const defaultPolicyIds = resolveSavedPolicyIds(
     existingProjectConfig?.config,
     policyCatalog.map(policy => policy.id)
-  ) ?? defaultPolicyOrder[0] ?? 'shared-foundation';
+  ) ?? [defaultPolicyOrder[0] ?? 'shared-foundation'];
 
   return {
     repoRoot,
@@ -692,7 +696,7 @@ async function buildWizardContext(
           existingProjectConfig?.config.runtime.scanModel ?? opencode.defaultModel ?? opencode.models[0],
           opencode.models
         ),
-      policyId: defaultPolicyId,
+      policyIds: defaultPolicyIds,
       runtimeMode: existingProjectConfig?.config.runtime.mode ?? DEFAULT_RUNTIME_MODE,
       parallelism: existingProjectConfig?.config.runtime.parallelism ?? DEFAULT_PARALLELISM,
       projectType: existingProjectConfig?.config.init.projectType ?? projectDetection.recommended.projectType,
@@ -714,7 +718,7 @@ function resetSelections(context: InitWizardContext, includeExistingDefaults: bo
     context.policyCatalog.map(policy => policy.id),
     context.projectDetection
   );
-  const fallbackPolicyId = defaultPolicyOrder[0] ?? 'shared-foundation';
+  const fallbackPolicyIds = [defaultPolicyOrder[0] ?? 'shared-foundation'];
 
   if (includeExistingDefaults && context.existingProjectConfig?.config) {
     context.selections = {
@@ -725,10 +729,10 @@ function resetSelections(context: InitWizardContext, includeExistingDefaults: bo
           context.existingProjectConfig.config.runtime.scanModel ?? context.opencode.defaultModel ?? context.opencode.models[0],
           context.opencode.models
         ),
-      policyId: resolveSavedPolicyId(
+      policyIds: resolveSavedPolicyIds(
         context.existingProjectConfig.config,
         context.policyCatalog.map(policy => policy.id)
-      ) ?? fallbackPolicyId,
+      ) ?? fallbackPolicyIds,
       runtimeMode: context.existingProjectConfig.config.runtime.mode,
       parallelism: context.existingProjectConfig.config.runtime.parallelism,
       projectType: context.existingProjectConfig.config.init.projectType,
@@ -744,7 +748,7 @@ function resetSelections(context: InitWizardContext, includeExistingDefaults: bo
       context.opencode.defaultModel ?? context.opencode.models[0],
       context.opencode.models
     ),
-    policyId: fallbackPolicyId,
+    policyIds: fallbackPolicyIds,
     runtimeMode: DEFAULT_RUNTIME_MODE,
     parallelism: DEFAULT_PARALLELISM,
     projectType: context.projectDetection.recommended.projectType,
@@ -884,12 +888,13 @@ function pushSelectedHistory<T extends string>(
   screen: string,
   prompt: string,
   options: InitScreenOption<T>[],
-  value: T
+  value: T | T[]
 ): void {
+  const values = Array.isArray(value) ? value : [value];
   history.push({
     screen,
     prompt,
-    responseLines: [resolveOptionLabel(options, value)]
+    responseLines: values.map(selectedValue => resolveOptionLabel(options, selectedValue))
   });
 }
 
@@ -903,18 +908,31 @@ function resolveOptionLabel<T extends string>(options: InitScreenOption<T>[], va
   return options.find(option => option.value === value)?.label ?? value;
 }
 
-function resolveSavedPolicyId(
+function resolveSavedPolicyIds(
   config: ShrikeProjectConfig | null | undefined,
   availablePolicyIds: string[]
-): string | null {
-  const candidate = config?.init.seedPolicyId
-    ?? (config?.scan.defaultKind === 'policy' ? config.scan.defaultId : undefined);
+): string[] | null {
+  const candidates = [
+    ...(config?.init.seedPolicyIds ?? []),
+    ...(config?.init.seedPolicyId ? [config.init.seedPolicyId] : []),
+    ...(config?.scan.defaultKind === 'policy' ? [config.scan.defaultId] : [])
+  ];
+  const seen = new Set<string>();
+  const selected = candidates.filter(candidate => {
+    if (!availablePolicyIds.includes(candidate)) {
+      return false;
+    }
 
-  if (!candidate) {
-    return null;
-  }
+    const normalized = candidate.toLowerCase();
+    if (seen.has(normalized)) {
+      return false;
+    }
 
-  return availablePolicyIds.includes(candidate) ? candidate : null;
+    seen.add(normalized);
+    return true;
+  });
+
+  return selected.length > 0 ? selected : null;
 }
 
 async function writeSelectionsOrShowError(
@@ -928,7 +946,7 @@ async function writeSelectionsOrShowError(
   try {
     context.writeResult = await writeShrikeInitFiles({
       repoRoot: context.repoRoot,
-      policyId: context.selections.policyId,
+      policyIds: context.selections.policyIds,
       model: context.selections.model,
       fixModel: context.selections.fixModel,
       runtimeMode: context.selections.runtimeMode,
@@ -1126,6 +1144,26 @@ function buildFixModelChoiceLines(context: InitWizardContext, suggestedFixModel:
 
 function resolveSuggestedFixModel(context: Pick<InitWizardContext, 'opencode' | 'selections'>): string {
   return resolveSuggestedFixModelFromModels(context.selections.model, context.opencode.models);
+}
+
+function resolveSubmittedValues<T extends string>(selection: InitScreenResult<T>): T[] {
+  if (selection.type !== 'submit') {
+    return [];
+  }
+
+  return 'values' in selection ? selection.values : [selection.value];
+}
+
+function formatPolicySelection(policyIds: string[]): string {
+  if (policyIds.length === 0) {
+    return 'unknown';
+  }
+
+  if (policyIds.length <= 2) {
+    return policyIds.join(', ');
+  }
+
+  return `${policyIds[0]}, ${policyIds[1]} +${policyIds.length - 2} more`;
 }
 
 function resolveSuggestedFixModelFromModels(
