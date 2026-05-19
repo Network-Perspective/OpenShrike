@@ -138,8 +138,10 @@ that specific rule.
 Policies are curated bundles of checks. A good policy:
 
 - Includes only checks strong enough for routine use.
-- Mixes architecture, security, reliability, testing, API quality, and
-  operations.
+- Is explicit about whether it is a broad baseline or a narrower overlay.
+- Baseline policies mix architecture, security, reliability, testing, API
+  quality, and operations. Overlay policies may intentionally focus on one
+  concern, such as an adopted architecture style.
 - Reuses shared cross-language checks instead of duplicating generic intent in
   every language variant.
 - Documents which checks are intentionally excluded from baseline because they
@@ -147,24 +149,31 @@ Policies are curated bundles of checks. A good policy:
 
 ## Library layout
 
-The library now has three layers:
+The library now has four layers:
 
 - `checks/shared`: language-agnostic checks for architecture, testing,
   security, reliability, operations, API design, and architectural records.
+- `checks/architecture`: architecture-style overlays that apply only after a
+  repository has intentionally chosen a structure such as Vertical Slice
+  Architecture.
 - `checks/<language>`: language- or stack-specific overlays for runtime,
   framework, and ecosystem failure modes.
-- `policies/*.md`: curated policies that link to shared and language-specific
-  checks.
+- `policies/*.md`: curated policies that link to shared, architecture-style,
+  and language-specific checks.
 
 This lets one policy reuse the same architectural and operational expectations
-across stacks while still enforcing the sharp language-specific rules that
-actually matter in review.
+across stacks while still enforcing the sharp architecture-style and
+language-specific rules that actually matter in review.
 
 ## Current policy catalog
 
 Shared:
 
 - `shared-foundation`
+
+Architecture style overlays:
+
+- `vertical-slice-architecture`
 
 .NET:
 
