@@ -147,8 +147,8 @@ export function reduceRuntimeEvent(
   return next;
 }
 
-export function extractAssistantTextFromParts(parts: Part[]): string {
-  return parts
+export function extractAssistantTextFromParts(parts: readonly Part[] | null | undefined): string {
+  return (Array.isArray(parts) ? parts : [])
     .filter((part): part is Extract<Part, {type: 'text'}> => part.type === 'text')
     .map(part => part.text)
     .join('')

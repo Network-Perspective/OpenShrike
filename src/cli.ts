@@ -147,6 +147,7 @@ function createProgram(argv: string[]): Command {
     .addOption(new Option('--runtime <MODE>', 'Runtime mode: native or docker'))
     .addOption(new Option('-p, --parallelism <N_OR_AUTO_OR_FULL>', 'Run checks concurrently'))
     .addOption(new Option('-l, --last-scan', 'Load the saved .openshrike/last-scan.json report instead of rescanning'))
+    .addOption(new Option('--no-ui', 'Disable the live dashboard'))
     .addOption(new Option('--check <CHECK_ID>', 'Check identifier, e.g. csharp-rel-001-cancellation-tokens'))
     .addOption(new Option('--policy <POLICY_ID>', 'Policy identifier, e.g. csharp-baseline'))
     .addOption(new Option('--output <FORMAT>', 'Output format: markdown or json'))
@@ -163,8 +164,7 @@ function createProgram(argv: string[]): Command {
     .action(async (commandOptions: Record<string, unknown>) => {
       const rawOptions: Partial<ScanCommandOptions> = {
         mockOpencode: resolveBooleanOption(commandOptions.mockRun, commandOptions.mockOpencode),
-        lastScan: Boolean(commandOptions.lastScan),
-        ui: false
+        lastScan: Boolean(commandOptions.lastScan)
       };
 
       assignIfDefined(rawOptions, 'checkId', asOptionalString(commandOptions.check));
@@ -187,6 +187,10 @@ function createProgram(argv: string[]): Command {
       assignIfDefined(rawOptions, 'image', asOptionalString(commandOptions.image));
       assignIfDefined(rawOptions, 'artifactsDir', asOptionalString(commandOptions.artifactsDir));
       assignIfDefined(rawOptions, 'parallelism', parseParallelism(commandOptions.parallelism));
+
+      if (commandOptions.ui === false) {
+        rawOptions.ui = false;
+      }
 
       process.exitCode = await executeFixCommand(rawOptions);
     });
@@ -275,7 +279,8 @@ function buildFixHelpSpec(defaultTarget: string | null): CommandHelpSpec {
         {term: '--runtime <MODE>', description: 'Runtime mode: native or docker.'},
         {term: '--path <PATH>', description: 'Repository path to scan (default: current folder).'},
         {term: '-p, --parallelism <N_OR_AUTO_OR_FULL>', description: 'Run checks concurrently. Accepts an integer, auto, or full (spawn as many agents as checks).'},
-        {term: '-l, --last-scan', description: 'Load the saved .openshrike/last-scan.json report instead of rescanning (default: false).'}
+        {term: '-l, --last-scan', description: 'Load the saved .openshrike/last-scan.json report instead of rescanning (default: false).'},
+        {term: '--no-ui', description: 'Disable the live dashboard.'}
       ],
       [
         {term: '--check <CHECK_ID>', description: 'Check identifier, e.g. csharp-rel-001-cancellation-tokens.'},

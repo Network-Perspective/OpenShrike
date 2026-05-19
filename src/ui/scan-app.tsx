@@ -105,6 +105,10 @@ interface ActionState {
   message: string | null;
 }
 
+interface AutomationMode {
+  kind: 'fix-all-failures';
+}
+
 interface SummaryMetricProps {
   label: string;
   value: string;
@@ -182,6 +186,11 @@ export class ScanUiEmptyScopeFallbackSelectionError extends Error {
   }
 }
 
+export interface ScanUiCompletion {
+  report: ScanReport;
+  scope?: SavedScanScope | undefined;
+}
+
 export function runScanWithInk(
   options: ScanCommandOptions,
   initialState?: {
@@ -195,15 +204,15 @@ export function runScanWithInk(
   } = {}
 ): Promise<ScanReport> {
   return new Promise<ScanReport>((resolve, reject) => {
-    let finalReport: ScanReport | null = null;
+    let completion: ScanUiCompletion | null = null;
     let finalError: Error | null = null;
 
     const instance = render(
       <ScanApp
         options={options}
         {...(initialState ? {initialState} : {})}
-        onDone={report => {
-          finalReport = report;
+        onDone={nextCompletion => {
+          completion = nextCompletion;
         }}
         onCancel={() => {
           finalError = new ScanUiCancelledError();
@@ -230,12 +239,71 @@ export function runScanWithInk(
           return;
         }
 
-        if (finalReport) {
-          resolve(finalReport);
+        if (completion) {
+          resolve(completion.report);
           return;
         }
 
         reject(new Error('Ink scan UI exited without producing a report.'));
+      },
+      error => {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    );
+  });
+}
+
+export function runFixWithInk(
+  options: ScanCommandOptions,
+  initialState?: {
+    initialReport: ScanReport;
+    savedRequest: SavedScanRequest;
+    savedScope?: SavedScanScope;
+  }
+): Promise<ScanUiCompletion> {
+  return new Promise<ScanUiCompletion>((resolve, reject) => {
+    let completion: ScanUiCompletion | null = null;
+    let finalError: Error | null = null;
+
+    const instance = render(
+      <ScanApp
+        options={options}
+        {...(initialState ? {initialState} : {})}
+        onDone={nextCompletion => {
+          completion = nextCompletion;
+        }}
+        onCancel={() => {
+          finalError = new ScanUiCancelledError();
+        }}
+        onSelectEmptyScopeFallback={action => {
+          finalError = new ScanUiEmptyScopeFallbackSelectionError(action);
+        }}
+        onError={error => {
+          finalError = error;
+        }}
+        allowEmptyScopeFallbackPrompt={false}
+        emptyScopeFallbackContext={{defaultBranchTarget: null}}
+        automation={{kind: 'fix-all-failures'}}
+      />,
+      {
+        stdout: process.stderr,
+        exitOnCtrlC: true
+      }
+    );
+
+    instance.waitUntilExit().then(
+      () => {
+        if (finalError) {
+          reject(finalError);
+          return;
+        }
+
+        if (completion) {
+          resolve(completion);
+          return;
+        }
+
+        reject(new Error('Ink fix UI exited without producing a report.'));
       },
       error => {
         reject(error instanceof Error ? error : new Error(String(error)));
@@ -251,12 +319,13 @@ function ScanApp(props: {
     savedRequest: SavedScanRequest;
     savedScope?: SavedScanScope;
   };
-  onDone: (report: ScanReport) => void;
+  onDone: (completion: ScanUiCompletion) => void;
   onCancel: () => void;
   onSelectEmptyScopeFallback: (action: EmptyScopeFallbackAction) => void;
   onError: (error: Error) => void;
   allowEmptyScopeFallbackPrompt: boolean;
   emptyScopeFallbackContext: EmptyScopeFallbackContext;
+  automation?: AutomationMode;
 }) {
   const {exit} = useApp();
   const {stdout} = useStdout();
@@ -287,6 +356,8 @@ function ScanApp(props: {
     fixingCheckIds: [],
     message: null
   });
+  const reportRef = useRef<ScanReport | null>(props.initialState?.initialReport ?? null);
+  const [isSessionReady, setIsSessionReady] = useState(!useNativeSession);
 
   const terminalWidth = stdout.columns || 80;
   const terminalHeight = Math.max(12, (stdout.rows || 24) - 1);
@@ -347,7 +418,11 @@ function ScanApp(props: {
   };
 
   const completeAndExit = (completedReport: ScanReport) => {
-    props.onDone(completedReport);
+    const scope = sessionRef.current?.getScope() ?? props.initialState?.savedScope;
+    props.onDone({
+      report: completedReport,
+      ...(scope ? {scope} : {})
+    });
     exit();
   };
 
@@ -419,6 +494,154 @@ function ScanApp(props: {
     exit();
   };
 
+  const resolvePersistedScope = (): SavedScanScope | undefined => {
+    return sessionRef.current?.getScope() ?? props.initialState?.savedScope;
+  };
+
+  const persistReportState = async (nextReport: ScanReport): Promise<string | null> => {
+    const scope = resolvePersistedScope();
+    const warnings = await saveLastScanState({
+      report: nextReport,
+      request: actionRequest,
+      ...(scope ? {scope} : {})
+    });
+
+    return warnings[0] ?? null;
+  };
+
+  const focusCheckById = (checkId: string): void => {
+    setBrowser(previous => {
+      const targetIndex = displayChecks.findIndex(check => check.id === checkId);
+      return targetIndex >= 0
+        ? {
+            ...previous,
+            selectedCheckIndex: targetIndex
+          }
+        : previous;
+    });
+  };
+
+  const formatBatchFixActionMessage = (
+    checkId: string,
+    sequence?: {index: number; total: number}
+  ): string => {
+    return sequence
+      ? `Fixing ${checkId} (${sequence.index} of ${sequence.total})...`
+      : `Fixing ${checkId}...`;
+  };
+
+  const runFixForCheckId = async (
+    checkId: string,
+    options?: {
+      sequence?: {
+        index: number;
+        total: number;
+      };
+    }
+  ): Promise<void> => {
+    focusCheckById(checkId);
+
+    if (useNativeSession && sessionRef.current) {
+      setActionState({
+        runningCheckIds: [],
+        fixingCheckIds: [checkId],
+        message: formatBatchFixActionMessage(checkId, options?.sequence)
+      });
+
+      try {
+        await sessionRef.current.requestFix(checkId);
+        const nextReport = sessionRef.current.getPersistableReport();
+        if (nextReport) {
+          reportRef.current = nextReport;
+          const warning = await persistReportState(nextReport);
+          if (warning) {
+            setActionState({
+              runningCheckIds: [],
+              fixingCheckIds: [],
+              message: warning
+            });
+            return;
+          }
+        }
+
+        setActionState({
+          runningCheckIds: [],
+          fixingCheckIds: [],
+          message: `Fixed and rechecked ${checkId}.`
+        });
+      } catch (error) {
+        setActionState({
+          runningCheckIds: [],
+          fixingCheckIds: [],
+          message: error instanceof Error ? error.message : String(error)
+        });
+        throw error;
+      }
+
+      return;
+    }
+
+    const currentReport = reportRef.current;
+    const failedCheck = (currentReport?.checks ?? []).find(check => check.id === checkId);
+
+    if (!currentReport || !failedCheck || failedCheck.status !== 'fail') {
+      const message = !currentReport
+        ? 'Actions are available after the current scan completes.'
+        : 'Fix is only available for failed checks.';
+      setActionMessage(message);
+      return;
+    }
+
+    setActionState({
+      runningCheckIds: [],
+      fixingCheckIds: [checkId],
+      message: formatBatchFixActionMessage(checkId, options?.sequence)
+    });
+
+    try {
+      const nextCheck = await fixAndRecheckCheck({
+        base: {
+          ...props.options,
+          repoPath: currentReport.repo.path,
+          ui: false,
+          lastScan: false
+        },
+        request: actionRequest,
+        report: currentReport,
+        check: failedCheck,
+        onRuntimeEvent: event => {
+          setTokenUsage(previous => reduceTokenUsageState(previous, event));
+        },
+        ...(props.initialState?.savedScope ? {scope: props.initialState.savedScope} : {})
+      });
+      const nextReport = updateReportCheck(currentReport, nextCheck);
+      reportRef.current = nextReport;
+      setReport(nextReport);
+      setProgress(previous => syncProgressWithReport(previous, nextReport));
+      const warning = await persistReportState(nextReport);
+      if (warning) {
+        setActionState({
+          runningCheckIds: [],
+          fixingCheckIds: [],
+          message: warning
+        });
+        return;
+      }
+      setActionState({
+        runningCheckIds: [],
+        fixingCheckIds: [],
+        message: `Fixed and rechecked ${checkId}.`
+      });
+    } catch (error) {
+      setActionState({
+        runningCheckIds: [],
+        fixingCheckIds: [],
+        message: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
+  };
+
   const performRecheck = () => {
     if (useNativeSession && sessionRef.current && selectedCheck) {
       setActionState({
@@ -431,16 +654,13 @@ function ScanApp(props: {
           await sessionRef.current?.requestRecheck(selectedCheck.id);
           const nextReport = sessionRef.current?.getPersistableReport();
           if (nextReport) {
-            const warnings = await saveLastScanState({
-              report: nextReport,
-              request: actionRequest,
-              scope: sessionRef.current?.getScope() ?? undefined
-            });
-            if (warnings.length > 0) {
+            reportRef.current = nextReport;
+            const warning = await persistReportState(nextReport);
+            if (warning) {
               setActionState({
                 runningCheckIds: [],
                 fixingCheckIds: [],
-                message: warnings[0] ?? null
+                message: warning
               });
               return;
             }
@@ -494,18 +714,15 @@ function ScanApp(props: {
           }
         });
         const nextReport = updateReportCheck(report, nextCheck);
+        reportRef.current = nextReport;
         setReport(nextReport);
         setProgress(previous => syncProgressWithReport(previous, nextReport));
-        const warnings = await saveLastScanState({
-          report: nextReport,
-          request: actionRequest,
-          ...(props.initialState?.savedScope ? {scope: props.initialState.savedScope} : {})
-        });
-        if (warnings.length > 0) {
+        const warning = await persistReportState(nextReport);
+        if (warning) {
           setActionState({
             runningCheckIds: [],
             fixingCheckIds: [],
-            message: warnings[0] ?? null
+            message: warning
           });
           return;
         }
@@ -525,47 +742,6 @@ function ScanApp(props: {
   };
 
   const performFix = () => {
-    if (useNativeSession && sessionRef.current && selectedCheck) {
-      setActionState({
-        runningCheckIds: [],
-        fixingCheckIds: [selectedCheck.id],
-        message: `Fixing ${selectedCheck.id}...`
-      });
-      void (async () => {
-        try {
-          await sessionRef.current?.requestFix(selectedCheck.id);
-          const nextReport = sessionRef.current?.getPersistableReport();
-          if (nextReport) {
-            const warnings = await saveLastScanState({
-              report: nextReport,
-              request: actionRequest,
-              scope: sessionRef.current?.getScope() ?? undefined
-            });
-            if (warnings.length > 0) {
-              setActionState({
-                runningCheckIds: [],
-                fixingCheckIds: [],
-                message: warnings[0] ?? null
-              });
-              return;
-            }
-          }
-          setActionState({
-            runningCheckIds: [],
-            fixingCheckIds: [],
-            message: `Fixed and rechecked ${selectedCheck.id}.`
-          });
-        } catch (error) {
-          setActionState({
-            runningCheckIds: [],
-            fixingCheckIds: [],
-            message: error instanceof Error ? error.message : String(error)
-          });
-        }
-      })();
-      return;
-    }
-
     if (!report || !selectedCheck) {
       setActionMessage('Actions are available after the current scan completes.');
       return;
@@ -582,57 +758,10 @@ function ScanApp(props: {
       return;
     }
 
-    setActionState({
-      runningCheckIds: [],
-      fixingCheckIds: [selectedCheck.id],
-      message: `Fixing ${selectedCheck.id}...`
-    });
-
     void (async () => {
       try {
-        const nextCheck = await fixAndRecheckCheck({
-          base: {
-            ...props.options,
-            repoPath: report.repo.path,
-            ui: false,
-            lastScan: false
-          },
-          request: actionRequest,
-          report,
-          check: failedCheck,
-          onRuntimeEvent: event => {
-            setTokenUsage(previous => reduceTokenUsageState(previous, event));
-          },
-          ...(props.initialState?.savedScope ? {scope: props.initialState.savedScope} : {})
-        });
-        const nextReport = updateReportCheck(report, nextCheck);
-        setReport(nextReport);
-        setProgress(previous => syncProgressWithReport(previous, nextReport));
-        const warnings = await saveLastScanState({
-          report: nextReport,
-          request: actionRequest,
-          ...(props.initialState?.savedScope ? {scope: props.initialState.savedScope} : {})
-        });
-        if (warnings.length > 0) {
-          setActionState({
-            runningCheckIds: [],
-            fixingCheckIds: [],
-            message: warnings[0] ?? null
-          });
-          return;
-        }
-        setActionState({
-          runningCheckIds: [],
-          fixingCheckIds: [],
-          message: `Fixed and rechecked ${selectedCheck.id}.`
-        });
-      } catch (error) {
-        setActionState({
-          runningCheckIds: [],
-          fixingCheckIds: [],
-          message: error instanceof Error ? error.message : String(error)
-        });
-      }
+        await runFixForCheckId(selectedCheck.id);
+      } catch {}
     })();
   };
 
@@ -913,6 +1042,10 @@ function ScanApp(props: {
   }, [hasAnimatedChecks, report]);
 
   useEffect(() => {
+    reportRef.current = report;
+  }, [report]);
+
+  useEffect(() => {
     if (useNativeSession) {
       let active = true;
       const session = createNativeScanSession(
@@ -941,6 +1074,7 @@ function ScanApp(props: {
         }
       );
       sessionRef.current = session;
+      setIsSessionReady(true);
 
       if (props.initialState?.initialReport) {
         finishedAtRef.current = startedAtRef.current;
@@ -970,6 +1104,7 @@ function ScanApp(props: {
       return () => {
         active = false;
         sessionRef.current = null;
+        setIsSessionReady(false);
         void session.close().catch(error => {
           props.onError(error instanceof Error ? error : new Error(String(error)));
         });
@@ -1032,6 +1167,57 @@ function ScanApp(props: {
       active = false;
     };
   }, [exit, props.initialState, props.onError, props.options, useNativeSession]);
+
+  useEffect(() => {
+    if (props.automation?.kind !== 'fix-all-failures' || !isScanComplete || !reportRef.current || !isSessionReady) {
+      return undefined;
+    }
+
+    let active = true;
+
+    void (async () => {
+      try {
+        const failedCheckIds = (reportRef.current?.checks ?? [])
+          .filter(check => check.status === 'fail')
+          .map(check => check.id);
+
+        for (const [index, checkId] of failedCheckIds.entries()) {
+          if (!active) {
+            return;
+          }
+
+          const currentCheck = (reportRef.current?.checks ?? []).find(check => check.id === checkId);
+          if (!currentCheck || currentCheck.status !== 'fail') {
+            continue;
+          }
+
+          await runFixForCheckId(checkId, {
+            sequence: {
+              index: index + 1,
+              total: failedCheckIds.length
+            }
+          });
+        }
+
+        const completedReport = reportRef.current;
+        if (!active || !completedReport) {
+          return;
+        }
+
+        completeAndExit(completedReport);
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+
+        handleScanError(error);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [isScanComplete, isSessionReady, props.automation]);
 
   useEffect(() => {
     if (displayChecks.length === 0) {

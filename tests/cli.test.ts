@@ -102,6 +102,7 @@ describe('runCli', () => {
     expect(output).toContain('--agent <NAME>');
     expect(output).toContain('--model <MODEL>');
     expect(output).toContain('--mock-run');
+    expect(output).toContain('--no-ui');
     expect(output).not.toContain('--fix-agent');
     expect(output).not.toContain('--fix-model');
   });
@@ -186,7 +187,27 @@ describe('runCli', () => {
       mockOpencode: true,
       runtimeMode: 'docker',
       parallelism: 'full',
-      lastScan: true,
+      lastScan: true
+    });
+  });
+
+  it('passes --no-ui through to executeFixCommand', async () => {
+    mockExecuteFixCommand.mockResolvedValue(0);
+
+    const exitCode = await runCli([
+      'node',
+      'shrike',
+      'fix',
+      '--policy',
+      'policy-a',
+      '--no-ui'
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(mockExecuteFixCommand).toHaveBeenCalledWith({
+      policyId: 'policy-a',
+      mockOpencode: false,
+      lastScan: false,
       ui: false
     });
   });

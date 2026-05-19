@@ -234,13 +234,14 @@ export class OpenCodeRuntime {
         responseResult,
         'OpenCode prompt failed.'
       );
+      const responseParts = Array.isArray(response.parts) ? response.parts : [];
 
-      let text = extractAssistantTextFromParts(response.parts);
+      let text = extractAssistantTextFromParts(responseParts);
       this.logger?.write('prompt.response', {
         sessionId: session.id,
         messageId: response.info.id,
-        partCount: response.parts.length,
-        partTypes: response.parts.map(part => part.type),
+        partCount: responseParts.length,
+        partTypes: responseParts.map(part => part.type),
         inlineAssistantTextLength: text.length
       });
 
@@ -344,8 +345,9 @@ export class OpenCodeRuntime {
         messagesResult,
         'Failed to read OpenCode session messages.'
       );
+      const safeMessages = Array.isArray(messages) ? messages : [];
 
-      const latestAssistantMessage = getLatestAssistantMessage(messages);
+      const latestAssistantMessage = getLatestAssistantMessage(safeMessages);
       const text = latestAssistantMessage ? extractAssistantTextFromParts(latestAssistantMessage.parts) : '';
       const completed = Boolean(latestAssistantMessage?.info.time.completed);
       const messageError = latestAssistantMessage
@@ -359,8 +361,8 @@ export class OpenCodeRuntime {
       this.logger?.write('prompt.wait.iteration', {
         sessionId,
         attempt,
-        messageCount: messages.length,
-        assistantMessageCount: messages.filter(message => message.info.role === 'assistant').length,
+        messageCount: safeMessages.length,
+        assistantMessageCount: safeMessages.filter(message => message.info.role === 'assistant').length,
         latestAssistantPartTypes: latestAssistantMessage?.parts.map(part => part.type) ?? [],
         latestAssistantTextLength: text.length,
         latestAssistantCompleted: completed,

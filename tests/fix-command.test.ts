@@ -1,4 +1,4 @@
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {ScanCommandOptions, ScanReport} from '../src/lib/types.js';
 
 const mockResolveScanOptions = vi.fn();
@@ -7,6 +7,7 @@ const mockCreateNativeScanSession = vi.fn();
 const mockLoadLastScanState = vi.fn();
 const mockSaveLastScanState = vi.fn();
 const mockFixAndRecheckCheck = vi.fn();
+const mockRunFixWithInk = vi.fn();
 
 vi.mock('../src/lib/markdown.js', () => ({
   renderScanReportMarkdown: vi.fn(() => '# fixed report')
@@ -48,6 +49,13 @@ vi.mock('../src/lib/fix.js', () => ({
   })
 }));
 
+class MockScanUiCancelledError extends Error {}
+
+vi.mock('../src/ui/scan-app.js', () => ({
+  runFixWithInk: mockRunFixWithInk,
+  ScanUiCancelledError: MockScanUiCancelledError
+}));
+
 const {executeFixCommand} = await import('../src/commands/fix.js');
 
 let stdoutSpy: ReturnType<typeof vi.spyOn>;
@@ -60,8 +68,14 @@ beforeEach(() => {
   mockLoadLastScanState.mockReset();
   mockSaveLastScanState.mockReset();
   mockFixAndRecheckCheck.mockReset();
+  mockRunFixWithInk.mockReset();
   stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+});
+
+afterEach(() => {
+  stdoutSpy.mockRestore();
+  stderrSpy.mockRestore();
 });
 
 describe('executeFixCommand', () => {
@@ -147,6 +161,142 @@ describe('executeFixCommand', () => {
     }));
     expect(stdoutSpy).toHaveBeenCalledWith('# fixed report\n');
   });
+
+  it('uses the shared Ink dashboard when UI is enabled on a TTY', async () => {
+    const ttyDescriptor = Object.getOwnPropertyDescriptor(process.stderr, 'isTTY');
+    setTty(process.stderr, true);
+    mockResolveScanOptions.mockResolvedValue(makeOptions({
+      policyId: 'policy-a',
+      ui: true
+    }));
+    mockRunFixWithInk.mockResolvedValue({
+      report: makeReport('pass'),
+      scope: {
+        kind: 'full',
+        label: 'full repository',
+        files: [],
+        isFullRepository: true
+      }
+    });
+    mockSaveLastScanState.mockResolvedValue([]);
+
+    try {
+      const exitCode = await executeFixCommand({repoPath: '.'});
+
+      expect(exitCode).toBe(0);
+      expect(mockRunFixWithInk).toHaveBeenCalledOnce();
+      expect(mockRunScan).not.toHaveBeenCalled();
+      expect(mockCreateNativeScanSession).not.toHaveBeenCalled();
+      expect(mockSaveLastScanState).toHaveBeenCalledWith({
+        report: makeReport('pass'),
+        request: expect.objectContaining({
+          runtimeMode: 'native'
+        }),
+        scope: {
+          kind: 'full',
+          label: 'full repository',
+          files: [],
+          isFullRepository: true
+        }
+      });
+    } finally {
+      restoreTty(process.stderr, ttyDescriptor);
+    }
+  });
+
+  it('passes the loaded report into the Ink dashboard for --last-scan runs', async () => {
+    const ttyDescriptor = Object.getOwnPropertyDescriptor(process.stderr, 'isTTY');
+    setTty(process.stderr, true);
+    const report = makeReport('fail');
+    mockResolveScanOptions.mockResolvedValue(makeOptions({
+      lastScan: true,
+      ui: true
+    }));
+    mockLoadLastScanState.mockResolvedValue({
+      state: {
+        version: 1,
+        savedAt: '2026-05-12T12:00:00.000Z',
+        repo: {
+          path: '/repo',
+          head: null,
+          dirty: false
+        },
+        request: {
+          checkId: null,
+          policyId: 'policy-a',
+          projectChecksDir: null,
+          scanScope: 'full',
+          scanTarget: null,
+          runtimeMode: 'native'
+        },
+        scope: {
+          kind: 'full',
+          label: 'full repository',
+          files: [],
+          isFullRepository: true
+        },
+        report
+      },
+      warnings: ['stale report']
+    });
+    mockRunFixWithInk.mockResolvedValue({
+      report: makeReport('pass'),
+      scope: {
+        kind: 'full',
+        label: 'full repository',
+        files: [],
+        isFullRepository: true
+      }
+    });
+    mockSaveLastScanState.mockResolvedValue([]);
+
+    try {
+      const exitCode = await executeFixCommand({repoPath: '.', lastScan: true});
+
+      expect(exitCode).toBe(0);
+      expect(mockRunFixWithInk).toHaveBeenCalledWith(
+        expect.objectContaining({
+          lastScan: true,
+          ui: true
+        }),
+        {
+          initialReport: report,
+          savedRequest: expect.objectContaining({
+            runtimeMode: 'native'
+          }),
+          savedScope: {
+            kind: 'full',
+            label: 'full repository',
+            files: [],
+            isFullRepository: true
+          }
+        }
+      );
+      expect(mockRunScan).not.toHaveBeenCalled();
+      expect(stderrSpy).toHaveBeenCalledWith('OpenShrike warning: stale report\n');
+    } finally {
+      restoreTty(process.stderr, ttyDescriptor);
+    }
+  });
+
+  it('returns 130 when the Ink fix dashboard is cancelled', async () => {
+    const ttyDescriptor = Object.getOwnPropertyDescriptor(process.stderr, 'isTTY');
+    setTty(process.stderr, true);
+    mockResolveScanOptions.mockResolvedValue(makeOptions({
+      policyId: 'policy-a',
+      ui: true
+    }));
+    mockRunFixWithInk.mockRejectedValue(new MockScanUiCancelledError());
+
+    try {
+      const exitCode = await executeFixCommand({repoPath: '.'});
+
+      expect(exitCode).toBe(130);
+      expect(stdoutSpy).not.toHaveBeenCalled();
+    } finally {
+      restoreTty(process.stderr, ttyDescriptor);
+    }
+  });
 });
 
 function makeSession(fixedReport: ScanReport) {
@@ -219,4 +369,23 @@ function makeReport(status: 'pass' | 'fail'): ScanReport {
       }
     ]
   };
+}
+
+function setTty(stream: NodeJS.WriteStream | NodeJS.ReadStream, value: boolean): void {
+  Object.defineProperty(stream, 'isTTY', {
+    configurable: true,
+    value
+  });
+}
+
+function restoreTty(
+  stream: NodeJS.WriteStream | NodeJS.ReadStream,
+  descriptor: PropertyDescriptor | undefined
+): void {
+  if (descriptor) {
+    Object.defineProperty(stream, 'isTTY', descriptor);
+    return;
+  }
+
+  delete (stream as {isTTY?: boolean}).isTTY;
 }
