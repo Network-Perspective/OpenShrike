@@ -54,7 +54,7 @@ describe('init ui layout', () => {
     expect(output.indexOf('◇  Project is already initialized')).toBeLessThan(output.indexOf('◆  OpenCode discovery'));
   });
 
-  it('limits the visible option list to 10 rows and shows the current window', () => {
+  it('shows all options when the list fits within the 20-row window', () => {
     const options = Array.from({length: 12}, (_, index) => ({
       value: `model-${index}` as const,
       label: `model-${index}`
@@ -81,9 +81,9 @@ describe('init ui layout', () => {
 
     expect(output).toContain('model-0');
     expect(output).toContain('model-9');
-    expect(output).not.toContain('model-10');
-    expect(output).not.toContain('model-11');
-    expect(output).toContain('Showing 1-10 of 12');
+    expect(output).toContain('model-10');
+    expect(output).toContain('model-11');
+    expect(output).not.toContain('Showing 1-12 of 12');
   });
 
   it('renders checkbox selections for multi-select screens', () => {
@@ -114,20 +114,95 @@ describe('init ui layout', () => {
     expect(output).toContain('› [ ]  python-baseline');
   });
 
+  it('limits the visible option list to 20 rows and shows the current window', () => {
+    const options = Array.from({length: 22}, (_, index) => ({
+      value: `model-${index}` as const,
+      label: `model-${index}`
+    }));
+    const spec: InitScreenSpec<(typeof options)[number]['value']> = {
+      prompt: 'Select default model',
+      options,
+      searchable: true
+    };
+
+    const output = stripAnsi(renderToString(
+      React.createElement(InitScreenLayout, {
+        spec,
+        history: [],
+        query: '',
+        showHelp: false,
+        filteredOptions: spec.options,
+        selectedValues: [],
+        effectiveIndex: 0,
+        visibleStart: 0
+      }),
+      {columns: 120}
+    ));
+
+    expect(output).toContain('model-0');
+    expect(output).toContain('model-19');
+    expect(output).not.toContain('model-20');
+    expect(output).not.toContain('model-21');
+    expect(output).toContain('Showing 1-20 of 22');
+  });
+
+  it('aligns option details to a shared column', () => {
+    const spec: InitScreenSpec<'shared-foundation' | 'pytorch-baseline'> = {
+      prompt: 'Select default policies',
+      options: [
+        {
+          value: 'shared-foundation',
+          label: 'shared-foundation',
+          detail: 'Shared Foundation Policy'
+        },
+        {
+          value: 'pytorch-baseline',
+          label: 'pytorch-baseline',
+          detail: 'PyTorch Baseline Policy'
+        }
+      ],
+      selectionMode: 'multiple'
+    };
+
+    const output = stripAnsi(renderToString(
+      React.createElement(InitScreenLayout, {
+        spec,
+        history: [],
+        query: '',
+        showHelp: false,
+        filteredOptions: spec.options,
+        selectedValues: [],
+        effectiveIndex: 0,
+        visibleStart: 0
+      }),
+      {columns: 120}
+    ));
+
+    const lines = output.split('\n');
+    const sharedLine = lines.find(line => line.includes('Shared Foundation Policy'));
+    const pytorchLine = lines.find(line => line.includes('PyTorch Baseline Policy'));
+
+    expect(sharedLine).toBeDefined();
+    expect(pytorchLine).toBeDefined();
+    expect(sharedLine!.indexOf('Shared Foundation Policy')).toBe(
+      pytorchLine!.indexOf('PyTorch Baseline Policy')
+    );
+  });
+
   it('scrolls the visible window when moving past the bottom edge', () => {
     expect(moveOptionNavigation({
-      selectedIndex: 9,
+      selectedIndex: 19,
       visibleStart: 0
-    }, 20, 1)).toEqual({
-      selectedIndex: 10,
+    }, 30, 1)).toEqual({
+      selectedIndex: 20,
       visibleStart: 1
     });
 
     expect(moveOptionNavigation({
-      selectedIndex: 10,
+      selectedIndex: 20,
       visibleStart: 1
-    }, 20, -1)).toEqual({
-      selectedIndex: 9,
+    }, 30, -1)).toEqual({
+      selectedIndex: 19,
       visibleStart: 1
     });
   });

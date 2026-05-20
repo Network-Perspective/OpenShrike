@@ -17,6 +17,8 @@ export interface SelectListItem {
   selectionMode?: 'single' | 'multiple' | undefined;
 }
 
+const MAX_DETAIL_LABEL_WIDTH = 20;
+
 export interface HistoryStep {
   prompt: string;
   responseLines: string[];
@@ -130,6 +132,11 @@ export function SelectList(props: {
   items: SelectListItem[];
   railTone?: DialogRailTone | undefined;
 }) {
+  const detailLabelWidth = Math.min(
+    props.items.reduce((width, item) => Math.max(width, item.detail ? item.label.length : 0), 0),
+    MAX_DETAIL_LABEL_WIDTH
+  );
+
   return (
     <>
       {props.items.map(item => (
@@ -145,7 +152,7 @@ export function SelectList(props: {
               </Text>
               <Text>  </Text>
               <Text color={item.active ? initTheme.primary : item.checked ? initTheme.selected : initTheme.secondary}>
-                {item.label}
+                {item.label.padEnd(detailLabelWidth)}
               </Text>
               {item.detail ? (
                 <>
@@ -160,7 +167,9 @@ export function SelectList(props: {
                 {item.active ? '●' : '○'}
               </Text>
               <Text>  </Text>
-              <Text color={item.active ? initTheme.primary : initTheme.secondary}>{item.label}</Text>
+              <Text color={item.active ? initTheme.primary : initTheme.secondary}>
+                {item.label.padEnd(detailLabelWidth)}
+              </Text>
               {item.detail ? (
                 <>
                   <Text color={initTheme.secondary}>  </Text>

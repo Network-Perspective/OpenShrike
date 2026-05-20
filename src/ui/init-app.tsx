@@ -73,7 +73,7 @@ interface OptionNavigationState {
   visibleStart: number;
 }
 
-const MAX_VISIBLE_OPTIONS = 10;
+const MAX_VISIBLE_OPTIONS = 20;
 
 class InkInitUiSession implements InitUiSession {
   private instance: ReturnType<typeof render> | null = null;
