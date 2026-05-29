@@ -1,0 +1,3 @@
+in vs code extention checks should be a flat list sortable by id status or name => remove current grouping of checks. add pending / in progress checks so the list is always populated, even before the run. if check is not evaluated it should still open with appropriate status.
+Remove sorting buttons with text - keep the ones with icons - no need to double the functionality.
+Borrow display logic from TUI, check on the list should display name and id in form bp-rel-02 not  bp-rel-002-retries-are-bounded-and-safe (just prefix and number) 

@@ -90,6 +90,14 @@ const DOCKER_OPENCODE_HOME_DIRECTORY_NAME = 'opencode-home';
 export interface ScanHooks {
   onProgress?: (event: ScanProgressEvent) => void;
   onRuntimeEvent?: (event: ScanRuntimeEvent) => void;
+  signal?: AbortSignal;
+}
+
+export class ScanCancelledError extends Error {
+  constructor(message = 'Scan cancelled.') {
+    super(message);
+    this.name = 'ScanCancelledError';
+  }
 }
 
 interface ScanSessionHooks {
@@ -848,6 +856,7 @@ export async function runNativeScan(
     runtimeMode: 'native'
   }
 ): Promise<ScanReport> {
+  throwIfScanCancelled(hooks.signal);
   const logger = await createScanLogger(options.logPath);
   const repoFullPath = path.resolve(options.repoPath);
 
@@ -1092,6 +1101,7 @@ async function runDockerScan(
   options: ScanCommandOptions,
   hooks: ScanHooks
 ): Promise<ScanReport> {
+  throwIfScanCancelled(hooks.signal);
   const repoFullPath = path.resolve(options.repoPath);
   const repoStats = await fs.stat(repoFullPath).catch(() => null);
   if (!repoStats?.isDirectory()) {
@@ -1132,6 +1142,7 @@ async function runDockerScan(
   if (!options.image) {
     await ensureDockerRuntimeImage(imageRef, progressTracker);
   }
+  throwIfScanCancelled(hooks.signal);
 
   const artifactsDir = await resolveDockerArtifactsDirectory(options);
   const requestHostPath = path.join(artifactsDir, DOCKER_SCAN_REQUEST_FILE);
@@ -1215,11 +1226,22 @@ async function runDockerScan(
 
   progressTracker.setStatus(`Starting Docker worker (${imageRef})`);
   await new Promise<void>((resolve, reject) => {
+    let cancelled = hooks.signal?.aborted === true;
     const child = spawn('docker', dockerArgs, {
       cwd: findToolRoot(),
       env: dockerEnv,
       stdio: ['ignore', 'pipe', 'pipe']
     });
+    const abortHandler = () => {
+      cancelled = true;
+      child.kill('SIGTERM');
+      setTimeout(() => {
+        if (child.exitCode === null) {
+          child.kill('SIGKILL');
+        }
+      }, 2000).unref();
+    };
+    hooks.signal?.addEventListener('abort', abortHandler, {once: true});
 
     const handleStdoutLine = (line: string) => {
       if (!line) {
@@ -1260,10 +1282,24 @@ async function runDockerScan(
       stderrBuffer.push(chunk);
     });
 
-    child.on('error', reject);
+    child.on('error', error => {
+      hooks.signal?.removeEventListener('abort', abortHandler);
+      if (cancelled) {
+        reject(new ScanCancelledError());
+        return;
+      }
+
+      reject(error);
+    });
     child.on('close', code => {
+      hooks.signal?.removeEventListener('abort', abortHandler);
       stdoutBuffer.flush();
       stderrBuffer.flush();
+
+      if (cancelled) {
+        reject(new ScanCancelledError());
+        return;
+      }
 
       if (code === 0 || code === 2) {
         resolve();
@@ -1283,6 +1319,7 @@ async function runDockerScan(
   });
 
   const reportRaw = await fs.readFile(reportHostPath, 'utf8').catch(() => null);
+  throwIfScanCancelled(hooks.signal);
   if (!reportRaw) {
     throw new Error(
       `Docker scan completed without producing ${path.basename(reportHostPath)}.`
@@ -1311,6 +1348,12 @@ async function runDockerScan(
           artifacts_dir: artifactsDir
         }
   };
+}
+
+function throwIfScanCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error ? signal.reason : new ScanCancelledError();
+  }
 }
 
 export async function ensureDockerRuntimeImage(

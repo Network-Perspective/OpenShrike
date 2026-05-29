@@ -1,5 +1,7 @@
 import {describe, expect, it} from 'vitest';
-import {createMockScanState, getDefaultSelectedFindingId, sortMockFindings} from '../src/vscode/mock-data.js';
+import {createEmptyScanState, createMockScanState, getDefaultSelectedFindingId, sortMockFindings} from '../src/vscode/mock-data.js';
+import {buildMockScanViewModel} from '../src/vscode/mock-view-model.js';
+import {renderChecksHtml} from '../src/vscode/views/checks-html.js';
 import {renderFindingDetailHtml} from '../src/vscode/views/detail-html.js';
 import {renderSummaryHtml} from '../src/vscode/views/summary-html.js';
 
@@ -48,49 +50,115 @@ describe('VS Code mock data', () => {
 
 describe('VS Code summary HTML', () => {
   it('renders the custom summary panel from the staged design snapshot', () => {
+    const viewModel = buildMockScanViewModel({
+      state: createMockScanState({
+        workspaceName: 'Workspace',
+        workspacePath: '/tmp/workspace'
+      }),
+      selectedFindingId: 'BP-SEC-001',
+      sortMode: 'status'
+    });
+    const html = renderSummaryHtml(viewModel);
+
+    expect(html).toContain('24 total checks scanned');
+    expect(html).toContain('Target');
+    expect(html).toContain('Tokens In / Out');
+    expect(html).toContain('430K / 27K');
+    expect(html).toContain('Duration');
+    expect(html).toContain('origin/main...HEAD');
+    expect(html).toContain('Scope: uncommitted changes');
+    expect(html).toContain('Runtime');
+    expect(html).toContain('Parallelism');
+    expect(html).not.toContain('>Run Scan<');
+    expect(html).not.toContain('>Load Last Scan<');
+    expect(html).not.toContain('>Show Output<');
+  });
+
+  it('renders a clickable scope control when the summary is idle', () => {
+    const viewModel = buildMockScanViewModel({
+      state: createEmptyScanState({
+        workspaceName: 'Workspace',
+        workspacePath: '/tmp/workspace'
+      }),
+      selectedFindingId: null,
+      sortMode: 'status'
+    });
+    const html = renderSummaryHtml(viewModel);
+
+    expect(html).toContain('command:openshrike.runScanWithScopeOverride');
+    expect(html).toContain('Scope: uncommitted changes');
+  });
+});
+
+describe('VS Code checks HTML', () => {
+  it('renders grouped findings with command links and selection styling', () => {
+    const viewModel = buildMockScanViewModel({
+      state: createMockScanState({
+        workspaceName: 'Workspace',
+        workspacePath: '/tmp/workspace'
+      }),
+      selectedFindingId: 'BP-SEC-001',
+      sortMode: 'status'
+    });
+    const html = renderChecksHtml(viewModel);
+
+    expect(html).toContain('Checks (10 of 24)');
+    expect(html).toContain('Failed');
+    expect(html).toContain('Inconclusive');
+    expect(html).toContain('Passed');
+    expect(html).toContain('command:openshrike.selectFinding');
+    expect(html).toContain('BP-SEC-001');
+    expect(html).toContain('is-selected');
+  });
+});
+
+describe('VS Code view model', () => {
+  it('builds grouped findings for multiple extension surfaces', () => {
     const state = createMockScanState({
       workspaceName: 'Workspace',
       workspacePath: '/tmp/workspace'
     });
-    const html = renderSummaryHtml(state);
+    const viewModel = buildMockScanViewModel({
+      state,
+      selectedFindingId: 'BP-SEC-001',
+      sortMode: 'status'
+    });
 
-    expect(html).toContain('24 total checks scanned');
-    expect(html).toContain('Tokens In / Out');
-    expect(html).toContain('430K / 27K');
-    expect(html).toContain('Duration');
-    expect(html).toContain('Fixing bp-sec-001... (1 of 2)');
-    expect(html).toContain('Scope: uncommitted changes');
-    expect(html).not.toContain('>Target<');
+    expect(viewModel.groups[0]?.status).toBe('fail');
+    expect(viewModel.groups[0]?.items.map(item => item.id)).toEqual(['BP-SEC-001', 'TS-ARCH-001']);
+    expect(viewModel.groups[1]?.status).toBe('unknown');
+    expect(viewModel.groups[2]?.status).toBe('pass');
+    expect(viewModel.selectedFinding?.id).toBe('BP-SEC-001');
+    expect(viewModel.statusBarText).toBe('$(sync~spin) OpenShrike: 10/24');
+    expect(viewModel.canCancel).toBe(false);
   });
 });
 
 describe('VS Code detail HTML', () => {
   it('renders the selected finding details and escapes unsafe content', () => {
-    const state = createMockScanState({
-      workspaceName: '<workspace>',
-      workspacePath: '/tmp/workspace'
+    const viewModel = buildMockScanViewModel({
+      state: createMockScanState({
+        workspaceName: '<workspace>',
+        workspacePath: '/tmp/workspace'
+      }),
+      selectedFindingId: 'BP-SEC-001',
+      sortMode: 'status'
     });
     const html = renderFindingDetailHtml({
-      state,
-      finding: state.findings.find(finding => finding.id === 'BP-SEC-001') ?? null
+      viewModel
     });
-    
+
     expect(html).toContain('External input is validated at trust boundaries');
     expect(html).toContain('&lt;workspace&gt;');
     expect(html).not.toContain('<workspace>');
-    expect(html).toContain('>Edit<');
+    expect(html).toContain('>Open Check Markdown<');
+    expect(html).toContain('>Open Last Scan Snapshot<');
     expect(html).toContain('>Recheck<');
-    expect(html).toContain('>Fix<');
+    expect(html).toContain('>Auto-Fix<');
     expect(html).toContain('class="hero-head"');
     expect(html).toContain('mock-pass');
-    expect(html).not.toContain('Open check markdown');
-    expect(html).not.toContain('Open evidence');
-    expect(html).not.toContain('Open last scan snapshot');
-    expect(html).not.toContain('>Target<');
-    expect(html).not.toContain('>Scope<');
-    expect(html).not.toContain('>Generated<');
+    expect(html).toContain('openshrike.openEvidence');
     expect(html).toContain('src/api/handlers.ts:42');
-    expect(html).not.toContain('Handler consumes req.body before validation');
-    expect(html).not.toContain('The handler casts request data into an internal payload type before a validation schema runs.');
+    expect(html).toContain('The handler casts request data into an internal payload type before a validation schema runs.');
   });
 });

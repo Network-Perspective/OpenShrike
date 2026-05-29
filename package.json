@@ -44,7 +44,8 @@
         {
           "id": "openshrike.checks",
           "name": "Checks",
-          "contextualTitle": "Checks"
+          "contextualTitle": "Checks",
+          "type": "webview"
         }
       ]
     },
@@ -66,6 +67,18 @@
         "category": "OpenShrike",
         "title": "Run Scan With Overrides",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "openshrike.runScanWithScopeOverride",
+        "category": "OpenShrike",
+        "title": "Change Scope",
+        "icon": "$(target)"
+      },
+      {
+        "command": "openshrike.runScanWithRuntimeOverride",
+        "category": "OpenShrike",
+        "title": "Change Runtime",
+        "icon": "$(terminal)"
       },
       {
         "command": "openshrike.cancelScan",
@@ -189,18 +202,6 @@
           "when": "openshrike.detailEditorActive",
           "group": "navigation@3"
         }
-      ],
-      "view/item/context": [
-        {
-          "command": "openshrike.openCheckMarkdown",
-          "when": "view == openshrike.checks && viewItem == finding",
-          "group": "inline"
-        },
-        {
-          "command": "openshrike.openEvidence",
-          "when": "view == openshrike.checks && viewItem == finding",
-          "group": "navigation"
-        }
       ]
     }
   },
@@ -212,6 +213,7 @@
     "dev:extension": "tsup --config tsup.extension.config.ts --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:extension-host": "node tests/extension-host/run.mjs",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:e2e:watch": "vitest --config vitest.e2e.config.ts",
     "test:watch": "vitest",
@@ -231,6 +233,7 @@
     "@types/node": "^24.5.2",
     "@types/react": "^19.2.2",
     "@types/vscode": "^1.101.0",
+    "@vscode/test-electron": "^2.5.2",
     "@xterm/headless": "^6.0.0",
     "tsup": "^8.5.0",
     "tsx": "^4.20.5",

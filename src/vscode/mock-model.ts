@@ -1,4 +1,12 @@
-import {findFindingById, sortMockFindings, type MockFinding, type MockFindingSortMode, type MockScanState} from './mock-data.js';
+import {
+  findFindingById,
+  getDefaultSelectedFindingId,
+  sortMockFindings,
+  type MockFinding,
+  type MockFindingSortMode,
+  type MockScanState
+} from './mock-data.js';
+import {buildMockScanViewModel, type MockScanViewModel} from './mock-view-model.js';
 
 type Listener = () => void;
 
@@ -6,11 +14,13 @@ export class MockExtensionModel {
   private readonly listeners = new Set<Listener>();
   private selectedFindingId: string | null;
   private sortMode: MockFindingSortMode = 'status';
+  private state: MockScanState;
 
   constructor(
-    private readonly state: MockScanState,
+    state: MockScanState,
     initialFindingId: string | null
   ) {
+    this.state = state;
     this.selectedFindingId = initialFindingId;
   }
 
@@ -24,6 +34,14 @@ export class MockExtensionModel {
 
   getSortMode(): MockFindingSortMode {
     return this.sortMode;
+  }
+
+  getViewModel(): MockScanViewModel {
+    return buildMockScanViewModel({
+      state: this.state,
+      selectedFindingId: this.selectedFindingId,
+      sortMode: this.sortMode
+    });
   }
 
   getSortedFindings(): MockFinding[] {
@@ -40,6 +58,18 @@ export class MockExtensionModel {
 
   getFindingById(findingId: string): MockFinding | null {
     return findFindingById(this.state, findingId);
+  }
+
+  setState(nextState: MockScanState): void {
+    this.state = nextState;
+
+    if (this.selectedFindingId && findFindingById(this.state, this.selectedFindingId)) {
+      this.emit();
+      return;
+    }
+
+    this.selectedFindingId = getDefaultSelectedFindingId(this.state);
+    this.emit();
   }
 
   selectFinding(findingId: string): void {

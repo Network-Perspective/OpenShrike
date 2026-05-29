@@ -40,14 +40,15 @@ describe('VS Code status bar', () => {
     statusBarItem.tooltip = '';
   });
 
-  it('shows only the failed check count in the status bar text', () => {
+  it('shows running progress and output command in the status bar', () => {
     const state = createMockScanState();
     const model = new MockExtensionModel(state, null);
 
     const statusBar = new OpenShrikeStatusBar(model);
 
     expect(createStatusBarItem).toHaveBeenCalledWith(1, 50);
-    expect(statusBarItem.text).toBe('$(shield) OpenShrike: 2 failed');
+    expect(statusBarItem.text).toBe('$(sync~spin) OpenShrike: 10/24');
+    expect(statusBarItem.command).toBe('openshrike.showOutput');
     expect(statusBarItem.tooltip).toContain('2 failed');
     expect(statusBarItem.tooltip).toContain('19 passed');
     expect(statusBarItem.tooltip).toContain('3 inconclusive');

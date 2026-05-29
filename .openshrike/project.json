@@ -9,7 +9,10 @@
       "src/**/*.ts"
     ],
     "opencodeSetup": "existing-config",
-    "seedPolicyId": "javascript-baseline"
+    "seedPolicyId": "javascript-baseline",
+    "seedPolicyIds": [
+      "javascript-baseline"
+    ]
   },
   "runtime": {
     "configPath": ".openshrike/opencode.json",
@@ -17,7 +20,7 @@
     "scanModel": "azure/gpt-5.4-mini",
     "fixAgent": "shrike-fixer",
     "fixModel": "azure/gpt-5.4",
-    "mode": "docker",
+    "mode": "native",
     "parallelism": "full",
     "agent": "shrike-checker",
     "model": "azure/gpt-5.4-mini"

@@ -1,95 +1,85 @@
 import * as vscode from 'vscode';
 import {registerMockCommands} from './commands.js';
-import {createMockScanState, getDefaultSelectedFindingId} from './mock-data.js';
+import {createEmptyScanState, getDefaultSelectedFindingId} from './mock-data.js';
 import {MockExtensionModel} from './mock-model.js';
 import {OpenShrikeOutputChannel} from './output-channel.js';
+import {OpenShrikeScanController} from './scan-controller.js';
 import {OpenShrikeStatusBar} from './status-bar.js';
-import {OpenShrikeTreeProvider, isFindingTreeItem} from './views/check-tree.js';
+import {OpenShrikeChecksViewProvider} from './views/checks-view.js';
 import {OpenShrikeDetailPanel} from './views/detail-panel.js';
 import {OpenShrikeSummaryViewProvider} from './views/summary-view.js';
 import {resolveWorkspaceTarget} from './workspace-target.js';
 
-export function activate(context: vscode.ExtensionContext): void {
-  const workspaceTarget = resolveWorkspaceTarget();
-  const state = createMockScanState({
-    workspaceName: workspaceTarget.name,
-    workspacePath: workspaceTarget.path
-  });
-  const model = new MockExtensionModel(state, getDefaultSelectedFindingId(state));
-  const output = new OpenShrikeOutputChannel(model);
-  const treeProvider = new OpenShrikeTreeProvider(model);
-  const detailPanel = new OpenShrikeDetailPanel(model);
-  const summaryViewProvider = new OpenShrikeSummaryViewProvider(model);
-  const statusBar = new OpenShrikeStatusBar(model);
-  const treeView = vscode.window.createTreeView('openshrike.checks', {
-    treeDataProvider: treeProvider,
-    showCollapseAll: false
-  });
+export interface OpenShrikeExtensionApi {
+  getState(): ReturnType<MockExtensionModel['getState']>;
+  getViewModel(): ReturnType<MockExtensionModel['getViewModel']>;
+}
 
-  const updateChecksViewMetadata = () => {
-    treeView.description = `${state.counts.visible} of ${state.counts.total} · ${formatSortMode(model.getSortMode())}`;
-  };
+export function activate(context: vscode.ExtensionContext): OpenShrikeExtensionApi {
+  try {
+    const workspaceTarget = resolveWorkspaceTarget();
+    console.info('[OpenShrike] Activating extension', workspaceTarget);
 
-  updateChecksViewMetadata();
-  treeView.badge = {
-    value: state.counts.fail,
-    tooltip: `${state.counts.fail} failing checks in the mock scan summary`
-  };
+    const state = createEmptyScanState({
+      workspaceName: workspaceTarget.name,
+      workspacePath: workspaceTarget.path,
+      outputLines: ['[startup] OpenShrike extension activated.']
+    });
+    const model = new MockExtensionModel(state, getDefaultSelectedFindingId(state));
+    const controller = new OpenShrikeScanController(model);
+    const output = new OpenShrikeOutputChannel(model);
+    const checksViewProvider = new OpenShrikeChecksViewProvider(model);
+    const detailPanel = new OpenShrikeDetailPanel(model);
+    const summaryViewProvider = new OpenShrikeSummaryViewProvider(model);
+    const statusBar = new OpenShrikeStatusBar(model);
 
-  context.subscriptions.push(
-    output,
-    treeProvider,
-    detailPanel,
-    summaryViewProvider,
-    statusBar,
-    treeView,
-    vscode.window.registerWebviewViewProvider('openshrike.summary', summaryViewProvider)
-  );
+    context.subscriptions.push(
+      output,
+      checksViewProvider,
+      detailPanel,
+      summaryViewProvider,
+      statusBar,
+      {
+        dispose: () => {
+          void controller.dispose();
+        }
+      },
+      vscode.window.registerWebviewViewProvider('openshrike.checks', checksViewProvider),
+      vscode.window.registerWebviewViewProvider('openshrike.summary', summaryViewProvider)
+    );
 
-  context.subscriptions.push(
-    treeView.onDidChangeSelection(event => {
-      const selectedFinding = event.selection.find(isFindingTreeItem);
+    registerMockCommands(context, {
+      model,
+      controller,
+      output,
+      detailPanel,
+      extensionPath: context.extensionPath
+    });
 
-      if (!selectedFinding) {
-        return;
-      }
-
-      model.selectFinding(selectedFinding.finding.id);
-      void detailPanel.revealSelected({
-        preserveFocus: true
+    void controller.initialize(workspaceTarget).then(async () => {
+      console.info('[OpenShrike] Controller initialized', workspaceTarget);
+      await controller.loadLastScan(workspaceTarget, {
+        silentMissing: true
       });
-    })
-  );
+      console.info('[OpenShrike] Activation restore completed');
+    }).catch(error => {
+      console.error('[OpenShrike] Activation restore failed', error);
+    });
 
-  const unsubscribeModel = model.subscribe(() => {
-    updateChecksViewMetadata();
-  });
-
-  context.subscriptions.push({
-    dispose: unsubscribeModel
-  });
-
-  registerMockCommands(context, {
-    model,
-    output
-  });
-
-  void detailPanel.revealSelected({
-    preserveFocus: true
-  });
+    return {
+      getState() {
+        return model.getState();
+      },
+      getViewModel() {
+        return model.getViewModel();
+      }
+    };
+  } catch (error) {
+    console.error('[OpenShrike] Activation failed', error);
+    throw error;
+  }
 }
 
 export function deactivate(): void {
   // No-op: the extension relies on VS Code disposables for teardown.
-}
-
-function formatSortMode(sortMode: 'id' | 'status' | 'name'): string {
-  switch (sortMode) {
-    case 'id':
-      return 'ID';
-    case 'status':
-      return 'Status';
-    case 'name':
-      return 'Name';
-  }
 }

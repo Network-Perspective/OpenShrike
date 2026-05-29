@@ -22,17 +22,9 @@ export class OpenShrikeStatusBar implements vscode.Disposable {
   }
 
   private render(): void {
-    const state = this.model.getState();
-    const {counts} = state;
-    this.statusBarItem.text = `$(shield) OpenShrike: ${counts.fail} failed`;
-    this.statusBarItem.tooltip = [
-      `${state.statusLabel} scan snapshot`,
-      `${counts.total} total checks scanned`,
-      `${counts.fail} failed`,
-      `${counts.unknown} inconclusive`,
-      `${counts.pass} passed`,
-      state.activeOperationLabel,
-      'Click to open the mock output channel.'
-    ].join('\n');
+    const viewModel = this.model.getViewModel();
+    this.statusBarItem.text = viewModel.statusBarText;
+    this.statusBarItem.tooltip = viewModel.statusBarTooltip;
+    this.statusBarItem.command = viewModel.canCancel ? 'openshrike.cancelScan' : 'openshrike.showOutput';
   }
 }

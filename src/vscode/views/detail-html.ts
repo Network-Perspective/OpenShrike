@@ -1,10 +1,13 @@
-import {formatConfidence, getStatusLabel, type MockFinding, type MockScanState} from '../mock-data.js';
+import {formatEvidenceLabel, parseEvidenceLocation} from '../../lib/evidence.js';
+import {createCommandUri} from '../command-uri.js';
+import type {MockFinding} from '../mock-data.js';
+import type {MockScanViewModel} from '../mock-view-model.js';
 
 export function renderFindingDetailHtml(input: {
-  finding: MockFinding | null;
-  state: MockScanState;
+  viewModel: MockScanViewModel;
 }): string {
-  const {finding, state} = input;
+  const {viewModel} = input;
+  const finding = viewModel.selectedFinding;
 
   if (!finding) {
     return [
@@ -24,11 +27,12 @@ export function renderFindingDetailHtml(input: {
     .map(item => `<li>${escapeHtml(item)}</li>`)
     .join('');
   const actionButtons = [
-    {label: 'Edit', command: 'openshrike.editFinding', kind: 'secondary'},
+    {label: 'Open Check Markdown', command: 'openshrike.openCheckMarkdown', kind: 'secondary'},
+    {label: 'Open Last Scan Snapshot', command: 'openshrike.openLastScan', kind: 'secondary'},
     {label: 'Recheck', command: 'openshrike.recheckFinding', kind: 'secondary'},
-    {label: 'Fix', command: 'openshrike.fixFinding', kind: 'primary'}
+    {label: 'Auto-Fix', command: 'openshrike.fixFinding', kind: 'primary'}
   ]
-    .map(action => `<a class="button button-${action.kind}" href="command:${action.command}">${escapeHtml(action.label)}</a>`)
+    .map(action => `<a class="button button-${action.kind}" href="${createCommandUri(action.command)}">${escapeHtml(action.label)}</a>`)
     .join('');
   const statusClass = `status-${finding.status}`;
 
@@ -52,6 +56,7 @@ export function renderFindingDetailHtml(input: {
             --status-fail: #f14c4c;
             --status-unknown: #cca700;
             --status-pass: #89d185;
+            --active: var(--vscode-list-highlightForeground, #3794ff);
           }
 
           * {
@@ -69,7 +74,7 @@ export function renderFindingDetailHtml(input: {
           main {
             max-width: 980px;
             margin: 0 auto;
-            padding: 28px 32px 56px;
+            padding: 24px 28px 56px;
           }
 
           h1,
@@ -87,21 +92,6 @@ export function renderFindingDetailHtml(input: {
             line-height: 1.35;
           }
 
-          .note {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            margin-bottom: 22px;
-            padding: 10px 12px;
-            border: 1px solid var(--soft-border);
-            background: var(--surface-3);
-            color: var(--text-muted);
-          }
-
-          .note strong {
-            color: var(--text-main);
-          }
-
           .hero {
             display: grid;
             gap: 12px;
@@ -116,7 +106,7 @@ export function renderFindingDetailHtml(input: {
 
           .title-block {
             display: grid;
-            gap: 12px;
+            gap: 10px;
             flex: 1 1 auto;
             min-width: 0;
           }
@@ -143,6 +133,11 @@ export function renderFindingDetailHtml(input: {
             padding: 4px 8px;
             font-family: var(--vscode-editor-font-family);
             font-size: 12px;
+          }
+
+          .pill.is-selected {
+            border-color: rgba(55, 148, 255, 0.45);
+            color: var(--active);
           }
 
           .status-fail {
@@ -233,7 +228,16 @@ export function renderFindingDetailHtml(input: {
           }
 
           .evidence-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
             padding: 10px 12px;
+          }
+
+          .evidence-copy {
+            padding: 0 12px 12px;
+            color: var(--text-muted);
           }
 
           .evidence-path {
@@ -285,6 +289,19 @@ export function renderFindingDetailHtml(input: {
             font-size: 12px;
           }
 
+          .breadcrumbs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 18px;
+            color: var(--text-muted);
+            font-size: 12px;
+          }
+
+          .breadcrumbs strong {
+            color: var(--text-main);
+          }
+
           @media (max-width: 760px) {
             main {
               padding: 18px 20px 40px;
@@ -301,14 +318,23 @@ export function renderFindingDetailHtml(input: {
         </style>
       </head>
       <body>
-        <main>          
+        <main>
+          <div class="breadcrumbs">
+            <span>OpenShrike</span>
+            <span>/</span>
+            <span>Scans</span>
+            <span>/</span>
+            <strong>${escapeHtml(finding.id)} Details</strong>
+          </div>
+
           <header class="hero">
             <div class="hero-head">
               <div class="title-block">
                 <div class="meta-row">
-                  <span class="pill ${statusClass}">${escapeHtml(getStatusLabel(finding.status))}</span>
+                  <span class="pill ${statusClass}">${escapeHtml(finding.statusLabel)}</span>
                   <span class="pill">ID: ${escapeHtml(finding.id)}</span>
-                  <span class="pill">Confidence: ${escapeHtml(formatConfidence(finding.confidence))}</span>
+                  <span class="pill">Confidence: ${escapeHtml(finding.confidenceLabel)}</span>
+                  <span class="pill is-selected">Workspace: ${escapeHtml(viewModel.workspaceName)}</span>
                 </div>
                 <h1>${escapeHtml(finding.title)}</h1>
                 <p class="section-copy">${escapeHtml(finding.summary)}</p>
@@ -324,9 +350,9 @@ export function renderFindingDetailHtml(input: {
 
           <section>
             <span class="section-label">Remediation</span>
-            <ol class="remediation-list">
+            <ul class="remediation-list">
               ${remediationMarkup}
-            </ol>
+            </ul>
           </section>
 
           <section>
@@ -337,7 +363,7 @@ export function renderFindingDetailHtml(input: {
           </section>
 
           <p class="footer">
-            OpenShrike mock workspace: ${escapeHtml(state.workspaceName)}. Counts reflect the staged design snapshot: ${escapeHtml(String(state.counts.pass))} passed, ${escapeHtml(String(state.counts.fail))} failed, ${escapeHtml(String(state.counts.unknown))} inconclusive.
+            OpenShrike mock workspace: ${escapeHtml(viewModel.workspaceName)}. Counts reflect the staged design snapshot: ${escapeHtml(String(viewModel.counts.pass))} passed, ${escapeHtml(String(viewModel.counts.fail))} failed, ${escapeHtml(String(viewModel.counts.unknown))} inconclusive.
           </p>
         </main>
       </body>
@@ -346,8 +372,8 @@ export function renderFindingDetailHtml(input: {
 }
 
 function renderEvidenceCard(evidence: MockFinding['evidence'][number]): string {
-  const pathLabel = evidence.location ?? evidence.raw;
-  const pathMarkup = `<a class="evidence-path" href="command:openshrike.openEvidence">${escapeHtml(pathLabel)}</a>`;
+  const pathLabel = resolveEvidenceLabel(evidence);
+  const pathMarkup = `<a class="evidence-path" href="${createCommandUri('openshrike.openEvidence', [evidence.location ?? evidence.raw])}">${escapeHtml(pathLabel)}</a>`;
   const snippetMarkup = renderSnippet(evidence.codeSnippet ?? createFallbackSnippet(evidence));
 
   return `
@@ -355,6 +381,7 @@ function renderEvidenceCard(evidence: MockFinding['evidence'][number]): string {
       <div class="evidence-header">
         ${pathMarkup}
       </div>
+      <div class="evidence-copy">${escapeHtml(evidence.excerpt)}</div>
       ${snippetMarkup}
     </article>
   `;
@@ -392,7 +419,7 @@ function renderSnippet(snippet: MockFinding['evidence'][number]['codeSnippet']):
 
 function createFallbackSnippet(evidence: MockFinding['evidence'][number]): NonNullable<MockFinding['evidence'][number]['codeSnippet']> {
   return {
-    path: evidence.location ?? evidence.raw,
+    path: resolveEvidenceLabel(evidence),
     language: 'typescript',
     lineStart: 1,
     lines: [
@@ -401,6 +428,11 @@ function createFallbackSnippet(evidence: MockFinding['evidence'][number]): NonNu
       `return { evidence: '${sanitizeForSnippet(evidence.raw)}' };`
     ]
   };
+}
+
+function resolveEvidenceLabel(evidence: MockFinding['evidence'][number]): string {
+  const location = parseEvidenceLocation(evidence.location ?? evidence.raw);
+  return location ? formatEvidenceLabel(location) : evidence.location ?? evidence.raw;
 }
 
 function sanitizeForSnippet(value: string): string {

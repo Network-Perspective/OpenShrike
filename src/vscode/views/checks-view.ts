@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
 import type {MockExtensionModel} from '../mock-model.js';
 import {renderExtensionErrorHtml} from './error-html.js';
-import {renderSummaryHtml} from './summary-html.js';
+import {renderChecksHtml} from './checks-html.js';
 
-export class OpenShrikeSummaryViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
+export class OpenShrikeChecksViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private webviewView: vscode.WebviewView | null = null;
   private readonly unsubscribe: () => void;
 
@@ -18,13 +18,13 @@ export class OpenShrikeSummaryViewProvider implements vscode.WebviewViewProvider
     webviewView.webview.options = {
       enableCommandUris: true
     };
-    console.info('[OpenShrike] Resolving summary webview');
+    console.info('[OpenShrike] Resolving checks webview');
 
     try {
       this.render();
     } catch (error) {
-      console.error('[OpenShrike] Failed to resolve summary webview', error);
-      webviewView.webview.html = renderExtensionErrorHtml('OpenShrike summary failed to load.', error);
+      console.error('[OpenShrike] Failed to resolve checks webview', error);
+      webviewView.webview.html = renderExtensionErrorHtml('OpenShrike checks failed to load.', error);
     }
   }
 
@@ -38,10 +38,10 @@ export class OpenShrikeSummaryViewProvider implements vscode.WebviewViewProvider
     }
 
     try {
-      this.webviewView.webview.html = renderSummaryHtml(this.model.getViewModel());
+      this.webviewView.webview.html = renderChecksHtml(this.model.getViewModel());
     } catch (error) {
-      console.error('[OpenShrike] Failed to render summary webview', error);
-      this.webviewView.webview.html = renderExtensionErrorHtml('OpenShrike summary failed to render.', error);
+      console.error('[OpenShrike] Failed to render checks webview', error);
+      this.webviewView.webview.html = renderExtensionErrorHtml('OpenShrike checks failed to render.', error);
     }
   }
 }

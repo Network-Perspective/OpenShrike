@@ -1,5 +1,6 @@
 export type MockFindingStatus = 'fail' | 'unknown' | 'pass';
 export type MockFindingSortMode = 'id' | 'status' | 'name';
+export type MockScanStatusKind = 'idle' | 'running' | 'cancelling' | 'cancelled' | 'completed' | 'failed' | 'loaded';
 
 export interface MockCodeSnippet {
   path: string;
@@ -40,6 +41,7 @@ export interface MockScanCounts {
 export interface MockScanState {
   workspaceName: string;
   workspacePath: string;
+   statusKind: MockScanStatusKind;
   statusLabel: string;
   generatedAtLabel: string;
   targetLabel: string;
@@ -47,11 +49,15 @@ export interface MockScanState {
   tokensLabel: string;
   scopeLabel: string;
   scanTargetLabel: string;
+   runtimeModeLabel: string;
+   parallelismLabel: string;
   counts: MockScanCounts;
   activeOperationLabel: string;
   findings: MockFinding[];
   outputLines: string[];
   lastScanPath: string;
+   warnings: string[];
+   canCancel: boolean;
 }
 
 const DEFAULT_SELECTED_FINDING_ID = 'BP-SEC-001';
@@ -305,6 +311,7 @@ export function createMockScanState(input: {
   return {
     workspaceName,
     workspacePath,
+    statusKind: 'running',
     statusLabel: 'Fixing (mock)',
     generatedAtLabel: 'May 19, 2026 09:12 UTC',
     targetLabel: truncateMiddle(workspacePath, 26),
@@ -312,6 +319,8 @@ export function createMockScanState(input: {
     tokensLabel: '430K / 27K',
     scopeLabel: 'uncommitted changes',
     scanTargetLabel: 'origin/main...HEAD',
+    runtimeModeLabel: 'native',
+    parallelismLabel: 'auto',
     counts: {
       fail: 2,
       unknown: 3,
@@ -330,13 +339,67 @@ export function createMockScanState(input: {
       '[09:12:13] Detail preview opened in an editor tab using mock data only',
       '[09:12:14] Edit, Recheck, and Fix actions remain placeholders'
     ],
-    lastScanPath: '.openshrike/last-scan.md'
+    lastScanPath: '.openshrike/last-scan.md',
+    warnings: [],
+    canCancel: false
+  };
+}
+
+export function createEmptyScanState(input: {
+  workspaceName: string;
+  workspacePath: string;
+  statusLabel?: string;
+  outputLines?: string[];
+  scopeLabel?: string;
+  runtimeModeLabel?: string;
+  parallelismLabel?: string;
+}): MockScanState {
+  return {
+    workspaceName: input.workspaceName,
+    workspacePath: input.workspacePath,
+    statusKind: 'idle',
+    statusLabel: input.statusLabel ?? 'Ready to scan',
+    generatedAtLabel: 'Not yet generated',
+    targetLabel: truncateMiddle(input.workspacePath, 26),
+    durationLabel: 'n/a',
+    tokensLabel: 'n/a',
+    scopeLabel: input.scopeLabel ?? 'uncommitted changes',
+    scanTargetLabel: 'project defaults',
+    runtimeModeLabel: input.runtimeModeLabel ?? 'native',
+    parallelismLabel: input.parallelismLabel ?? 'auto',
+    counts: {
+      fail: 0,
+      unknown: 0,
+      pass: 0,
+      total: 0,
+      visible: 0
+    },
+    activeOperationLabel: 'Run OpenShrike: Run Scan or Load Last Scan.',
+    findings: [],
+    outputLines: input.outputLines ?? [],
+    lastScanPath: '.openshrike/last-scan.md',
+    warnings: [],
+    canCancel: false
   };
 }
 
 export function getDefaultSelectedFindingId(state: MockScanState): string | null {
   const preferredFinding = findFindingById(state, DEFAULT_SELECTED_FINDING_ID);
-  return preferredFinding?.id ?? state.findings[0]?.id ?? null;
+  if (preferredFinding) {
+    return preferredFinding.id;
+  }
+
+  const failedFinding = state.findings.find(finding => finding.status === 'fail');
+  if (failedFinding) {
+    return failedFinding.id;
+  }
+
+  const unknownFinding = state.findings.find(finding => finding.status === 'unknown');
+  if (unknownFinding) {
+    return unknownFinding.id;
+  }
+
+  return state.findings[0]?.id ?? null;
 }
 
 export function findFindingById(state: MockScanState, findingId: string): MockFinding | null {

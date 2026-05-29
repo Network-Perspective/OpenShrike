@@ -39,17 +39,17 @@ export class OpenShrikeDetailPanel implements vscode.Disposable {
       );
       this.webviewPanel.onDidDispose(() => {
         this.webviewPanel = null;
-        void this.setPanelContext(false);
+        this.observePanelContext(false);
       });
       this.webviewPanel.onDidChangeViewState(event => {
-        void this.setPanelContext(event.webviewPanel.active);
+        this.observePanelContext(event.webviewPanel.active);
       });
     } else {
       this.webviewPanel.reveal(undefined, preserveFocus);
     }
 
     this.render();
-    void this.setPanelContext(this.webviewPanel.active);
+    this.observePanelContext(this.webviewPanel.active);
   }
 
   dispose(): void {
@@ -61,7 +61,7 @@ export class OpenShrikeDetailPanel implements vscode.Disposable {
       panel.dispose();
     }
 
-    void this.setPanelContext(false);
+    this.observePanelContext(false);
   }
 
   private render(): void {
@@ -77,13 +77,18 @@ export class OpenShrikeDetailPanel implements vscode.Disposable {
 
     this.webviewPanel.title = createPanelTitle(finding.id);
     this.webviewPanel.webview.html = renderFindingDetailHtml({
-      finding,
-      state: this.model.getState()
+      viewModel: this.model.getViewModel()
     });
   }
 
   private setPanelContext(active: boolean): Thenable<unknown> {
     return vscode.commands.executeCommand('setContext', DETAIL_EDITOR_CONTEXT, active);
+  }
+
+  private observePanelContext(active: boolean): void {
+    void Promise.resolve(this.setPanelContext(active)).catch((error: unknown) => {
+      console.error('[OpenShrike] Failed to update detail panel context', error);
+    });
   }
 }
 
