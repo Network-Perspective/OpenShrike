@@ -173,6 +173,7 @@ Shared:
 
 Architecture style overlays:
 
+- `clean-architecture`
 - `vertical-slice-architecture`
 
 .NET:
