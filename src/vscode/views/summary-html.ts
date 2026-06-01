@@ -9,9 +9,6 @@ export function renderSummaryHtml(viewModel: MockScanViewModel): string {
   const totalLabel = counts.completed === 0
     ? `${counts.total} total checks ready`
     : `${counts.total} total checks scanned`;
-  const cancelActionMarkup = viewModel.canCancel
-    ? `<div class="heading-actions"><a class="action-link" href="${createCommandUri('openshrike.cancelScan')}">Cancel Scan</a></div>`
-    : '';
 
   return `
     <!DOCTYPE html>
@@ -36,7 +33,6 @@ export function renderSummaryHtml(viewModel: MockScanViewModel): string {
             --activity-bg: rgba(14, 99, 156, 0.12);
             --activity-border: rgba(14, 99, 156, 0.28);
             --activity-text: var(--vscode-textLink-foreground);
-            --action-bg: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.12));
             --action-hover: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.18));
             --action-border: rgba(128, 128, 128, 0.22);
           }
@@ -97,25 +93,6 @@ export function renderSummaryHtml(viewModel: MockScanViewModel): string {
 
           .heading-status {
             color: var(--text-muted);
-          }
-
-          .heading-actions {
-            display: flex;
-            align-items: center;
-          }
-
-          .action-link {
-            display: inline-flex;
-            align-items: center;
-            padding: 5px 8px;
-            border: 1px solid var(--action-border);
-            background: var(--action-bg);
-            color: var(--text-main);
-            text-decoration: none;
-          }
-
-          .action-link:hover {
-            background: var(--action-hover);
           }
 
           .scope-chip {
@@ -303,7 +280,6 @@ export function renderSummaryHtml(viewModel: MockScanViewModel): string {
                   ${renderScopeControl(viewModel)}
                 </div>
               </div>
-              ${cancelActionMarkup}
             </div>
           </header>
 

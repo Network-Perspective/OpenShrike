@@ -1,0 +1,1 @@
+cancel btn is vscode extention summary view doesn't seem to work. Cancalling run properly works with the button from the status message box popping up in the bottom right on scan run. bind the summary "Cancel" button properly.

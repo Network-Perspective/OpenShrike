@@ -1,13 +1,17 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {createEmptyScanState, createMockScanState, getDefaultSelectedFindingId, sortMockFindings} from '../src/vscode/mock-data.js';
+import {MockExtensionModel} from '../src/vscode/mock-model.js';
 import {buildMockScanViewModel} from '../src/vscode/mock-view-model.js';
 import {createScanStateFromResults} from '../src/vscode/scan-state.js';
 import {renderChecksHtml} from '../src/vscode/views/checks-html.js';
+import {OpenShrikeChecksViewProvider} from '../src/vscode/views/checks-view.js';
 import {renderFindingDetailHtml} from '../src/vscode/views/detail-html.js';
 import {renderSummaryHtml} from '../src/vscode/views/summary-html.js';
+
+vi.mock('vscode', () => ({}));
 
 describe('VS Code mock data', () => {
   it('builds summary counts from the staged design snapshot', () => {
@@ -78,6 +82,25 @@ describe('VS Code summary HTML', () => {
     expect(html).not.toContain('>Show Output<');
   });
 
+  it('does not render a summary cancel button even while a scan is active', () => {
+    const viewModel = buildMockScanViewModel({
+      state: {
+        ...createMockScanState({
+          workspaceName: 'Workspace',
+          workspacePath: '/tmp/workspace'
+        }),
+        canCancel: true
+      },
+      selectedFindingId: 'BP-SEC-001',
+      sortMode: 'status'
+    });
+    const html = renderSummaryHtml(viewModel);
+
+    expect(html).not.toContain('data-action="cancel-scan"');
+    expect(html).not.toContain("vscode.postMessage({type: 'cancel-scan'})");
+    expect(html).not.toContain('Cancel</button>');
+  });
+
   it('renders a clickable scope control when the summary is idle', () => {
     const viewModel = buildMockScanViewModel({
       state: createEmptyScanState({
@@ -129,7 +152,7 @@ describe('VS Code summary HTML', () => {
 });
 
 describe('VS Code checks HTML', () => {
-  it('renders a flat findings list with command links, short ids, and selection styling', () => {
+  it('renders a flat findings list without an internal header', () => {
     const viewModel = buildMockScanViewModel({
       state: createMockScanState({
         workspaceName: 'Workspace',
@@ -140,14 +163,37 @@ describe('VS Code checks HTML', () => {
     });
     const html = renderChecksHtml(viewModel);
 
-    expect(html).toContain('Checks (10)');
-    expect(html).toContain('Sort: Status');
     expect(html).toContain('command:openshrike.selectFinding');
     expect(html).toContain('BP-SEC-001');
     expect(html).not.toContain('BP-SEC-001-BOUNDARY-INPUT-VALIDATION');
+    expect(html).not.toContain('Checks (10)');
+    expect(html).not.toContain('Sort: Status');
     expect(html).not.toContain('Status</a>');
     expect(html).not.toContain('Failed');
     expect(html).toContain('is-selected');
+  });
+});
+
+describe('VS Code checks view', () => {
+  it('moves the visible count into the container title', () => {
+    const model = new MockExtensionModel(createMockScanState(), 'BP-SEC-001');
+    const provider = new OpenShrikeChecksViewProvider(model);
+    const webviewView = {
+      title: 'Checks',
+      webview: {
+        options: {},
+        html: ''
+      }
+    };
+
+    provider.resolveWebviewView(webviewView as never);
+
+    expect(webviewView.title).toBe('Checks (10)');
+    expect(webviewView.webview.options).toEqual({enableCommandUris: true});
+    expect(webviewView.webview.html).not.toContain('Checks (10)');
+    expect(webviewView.webview.html).not.toContain('Sort: Status');
+
+    provider.dispose();
   });
 });
 

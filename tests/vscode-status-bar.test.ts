@@ -47,7 +47,7 @@ describe('VS Code status bar', () => {
     const statusBar = new OpenShrikeStatusBar(model);
 
     expect(createStatusBarItem).toHaveBeenCalledWith(1, 50);
-    expect(statusBarItem.text).toBe('$(sync~spin) OpenShrike: 10/24');
+    expect(statusBarItem.text).toBe('$(sync~spin) OpenShrike: 24/24');
     expect(statusBarItem.command).toBe('openshrike.showOutput');
     expect(statusBarItem.tooltip).toContain('2 failed');
     expect(statusBarItem.tooltip).toContain('19 passed');

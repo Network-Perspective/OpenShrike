@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import type {ScanCommandOptions, ShrikeProjectConfig} from '../src/lib/types.js';
+import type {SavedLastScanState, ScanCommandOptions, ShrikeProjectConfig} from '../src/lib/types.js';
 import type {ScanSessionSnapshot} from '../src/lib/scan.js';
 
 const mockCreateNativeScanSession = vi.fn();
@@ -294,6 +294,112 @@ describe('OpenShrike scan controller', () => {
     await controller.runScan(workspace);
 
     expect(model.getState().tokensLabel).toBe('1.2K / 56');
+  });
+
+  it('does not let a stale last-scan restore overwrite live token usage', async () => {
+    const workspacePath = await createWorkspace();
+    const workspace = {
+      name: 'Workspace',
+      path: workspacePath
+    };
+    const loadedReport = makeReport(workspacePath, {
+      runtimeMode: 'native'
+    });
+    const liveReport = makeReport(workspacePath, {
+      runtimeMode: 'native'
+    });
+    const model = new MockExtensionModel(createEmptyScanState({
+      workspaceName: workspace.name,
+      workspacePath
+    }), null);
+    const controller = new OpenShrikeScanController(model);
+    let resolveLoad!: (value: {state: SavedLastScanState; warnings: string[]}) => void;
+    let resolveStart!: (value: ReturnType<typeof makeReport>) => void;
+
+    await controller.initialize(workspace);
+    mockLoadLastScanState.mockImplementation(
+      () => new Promise(resolve => {
+        resolveLoad = resolve;
+      })
+    );
+    mockResolveScanOptions.mockResolvedValue(makeOptions(workspacePath, {
+      runtimeMode: 'native',
+      scanScope: 'full'
+    }));
+    mockCreateNativeScanSession.mockImplementation((_options, _initialState, hooks) => ({
+      start: async () => {
+        hooks?.onRuntimeEvent?.({
+          checkId: 'check-a',
+          workerId: 'worker-1',
+          runtimeMode: 'native',
+          event: {
+            type: 'message.updated',
+            properties: {
+              info: {
+                id: 'assistant-message-1',
+                role: 'assistant',
+                tokens: {
+                  input: 1234,
+                  output: 56
+                }
+              }
+            }
+          }
+        });
+
+        return await new Promise<ReturnType<typeof makeReport>>(resolve => {
+          resolveStart = resolve;
+        });
+      },
+      getScope: () => null,
+      getReport: () => liveReport,
+      getPersistableReport: () => liveReport,
+      close: vi.fn().mockResolvedValue(undefined)
+    }));
+
+    const loadPromise = controller.loadLastScan(workspace, {
+      silentMissing: true
+    });
+    const runPromise = controller.runScan(workspace);
+    await waitForCondition(() => model.getState().tokensLabel === '1.2K / 56');
+
+    resolveLoad({
+      state: {
+        version: 1,
+        savedAt: '2026-05-20T10:00:00.000Z',
+        repo: {
+          path: workspacePath,
+          head: 'abc123',
+          dirty: false
+        },
+        request: {
+          checkId: 'check-a',
+          policyId: null,
+          projectChecksDir: null,
+          scanScope: 'full',
+          scanTarget: null,
+          runtimeMode: 'native'
+        },
+        scope: {
+          kind: 'full',
+          label: 'full repository',
+          files: [],
+          isFullRepository: true
+        },
+        report: loadedReport
+      },
+      warnings: []
+    });
+    await loadPromise;
+
+    expect(model.getState()).toMatchObject({
+      statusKind: 'running',
+      tokensLabel: '1.2K / 56',
+      canCancel: true
+    });
+
+    resolveStart(liveReport);
+    await runPromise;
   });
 
   it('refreshes duration while a scan is running without waiting for progress events', async () => {

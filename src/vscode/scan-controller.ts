@@ -52,6 +52,7 @@ export class OpenShrikeScanController {
   private context: ScanContext | null = null;
   private activeRun: ActiveRun | null = null;
   private reusableNativeSession: NativeScanSession | null = null;
+  private restoreRevision = 0;
   private statusKind: MockScanStatusKind = 'idle';
   private statusLabel = 'Ready to scan';
   private activeOperationLabel = 'Run OpenShrike: Run Scan or Load Last Scan.';
@@ -85,6 +86,7 @@ export class OpenShrikeScanController {
   }
 
   async initialize(workspace: WorkspaceTarget): Promise<void> {
+    this.invalidatePendingRestore();
     this.context = {
       workspace,
       request: null,
@@ -98,10 +100,14 @@ export class OpenShrikeScanController {
   }
 
   async loadLastScan(workspace: WorkspaceTarget, options: {silentMissing?: boolean} = {}): Promise<void> {
+    const restoreRevision = this.invalidatePendingRestore();
     await this.resetForWorkspace(workspace, 'Loading last scan');
 
     try {
       const loaded = await loadLastScanState(workspace.path);
+      if (!this.isCurrentRestoreRevision(restoreRevision)) {
+        return;
+      }
       this.context = {
         workspace,
         request: loaded.state.request,
@@ -131,6 +137,10 @@ export class OpenShrikeScanController {
       await this.refreshCheckMetadata(loaded.state.request, this.checkOrder);
       this.renderState();
     } catch (error) {
+      if (!this.isCurrentRestoreRevision(restoreRevision)) {
+        return;
+      }
+
       if (options.silentMissing && isMissingLastScanError(error)) {
         this.statusKind = 'idle';
         this.statusLabel = 'Ready to scan';
@@ -145,6 +155,7 @@ export class OpenShrikeScanController {
   }
 
   async runScan(workspace: WorkspaceTarget, rawOverrides: Partial<ScanCommandOptions> = {}): Promise<void> {
+    this.invalidatePendingRestore();
     await this.releaseReusableNativeSession();
     await this.resetForWorkspace(workspace, 'Preparing scan');
 
@@ -1163,6 +1174,15 @@ export class OpenShrikeScanController {
 
     clearInterval(this.activeRunRenderTimer);
     this.activeRunRenderTimer = null;
+  }
+
+  private invalidatePendingRestore(): number {
+    this.restoreRevision += 1;
+    return this.restoreRevision;
+  }
+
+  private isCurrentRestoreRevision(restoreRevision: number): boolean {
+    return restoreRevision === this.restoreRevision;
   }
 
   private resolveTokensLabel(): string {

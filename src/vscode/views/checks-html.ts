@@ -16,10 +16,8 @@ export function renderChecksHtml(viewModel: MockScanViewModel): string {
           :root {
             color-scheme: light dark;
             --surface-1: var(--vscode-sideBar-background);
-            --surface-2: var(--vscode-sideBarSectionHeader-background, rgba(128, 128, 128, 0.08));
             --surface-3: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.08));
             --surface-4: var(--vscode-list-activeSelectionBackground, rgba(128, 128, 128, 0.16));
-            --border: var(--vscode-sideBarSectionHeader-border, rgba(128, 128, 128, 0.22));
             --text-main: var(--vscode-sideBar-foreground);
             --text-muted: var(--vscode-descriptionForeground);
             --text-strong: var(--vscode-foreground);
@@ -37,43 +35,27 @@ export function renderChecksHtml(viewModel: MockScanViewModel): string {
             box-sizing: border-box;
           }
 
+          html,
           body {
+            height: 100%;
             margin: 0;
             background: var(--surface-1);
             color: var(--text-main);
             font-family: var(--vscode-font-family);
             font-size: 12px;
             line-height: 1.45;
+            padding: 0;
           }
 
           main {
-            display: grid;
-            padding: 0 0 12px;
-          }
-
-          .toolbar {
-            position: sticky;
-            top: 0;
-            z-index: 1;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            padding: 10px 12px;
-            border-bottom: 1px solid var(--border);
-            background: var(--surface-2);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            font-size: 11px;
-            font-weight: 700;
-          }
-
-          .toolbar-meta {
-            color: var(--text-muted);
+            width: 100%;
+            min-height: 100%;
           }
 
           .content {
             display: grid;
+            width: 100%;
+            min-height: 100%;
           }
 
           .finding-link {
@@ -187,11 +169,6 @@ export function renderChecksHtml(viewModel: MockScanViewModel): string {
       </head>
       <body>
         <main>
-          <header class="toolbar">
-            <span>${escapeHtml(viewModel.checksHeading)}</span>
-            <span class="toolbar-meta">Sort: ${escapeHtml(viewModel.sortLabel)}</span>
-          </header>
-
           <div class="content">
             ${rowsMarkup}
           </div>

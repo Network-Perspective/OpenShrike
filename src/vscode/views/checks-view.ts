@@ -38,7 +38,9 @@ export class OpenShrikeChecksViewProvider implements vscode.WebviewViewProvider,
     }
 
     try {
-      this.webviewView.webview.html = renderChecksHtml(this.model.getViewModel());
+      const viewModel = this.model.getViewModel();
+      this.webviewView.title = viewModel.checksHeading;
+      this.webviewView.webview.html = renderChecksHtml(viewModel);
     } catch (error) {
       console.error('[OpenShrike] Failed to render checks webview', error);
       this.webviewView.webview.html = renderExtensionErrorHtml('OpenShrike checks failed to render.', error);
