@@ -1,3 +1,4 @@
+import {formatCheckIdDisplay} from '../lib/check-display.js';
 import {
   formatConfidence,
   getStatusLabel,
@@ -8,15 +9,9 @@ import {
   type MockScanState
 } from './mock-data.js';
 
-export interface MockScanFindingGroup {
-  status: MockFindingStatus;
-  label: string;
-  count: number;
-  items: MockScanFindingItem[];
-}
-
 export interface MockScanFindingItem {
   id: string;
+  idLabel: string;
   title: string;
   summary: string;
   status: MockFindingStatus;
@@ -26,12 +21,13 @@ export interface MockScanFindingItem {
 
 export interface MockScanSelectedFinding {
   id: string;
+  idLabel: string;
   title: string;
   summary: string;
   rationale: string;
   status: MockFindingStatus;
   statusLabel: string;
-  confidenceLabel: string;
+  confidenceLabel: string | null;
   remediation: string[];
   checkMarkdown: string;
   evidence: MockFinding['evidence'];
@@ -56,7 +52,7 @@ export interface MockScanViewModel {
   checksHeading: string;
   sortMode: MockFindingSortMode;
   sortLabel: string;
-  groups: MockScanFindingGroup[];
+  items: MockScanFindingItem[];
   selectedFinding: MockScanSelectedFinding | null;
   statusBarText: string;
   statusBarTooltip: string;
@@ -73,19 +69,34 @@ export function buildMockScanViewModel(input: {
 }): MockScanViewModel {
   const {state, selectedFindingId, sortMode} = input;
   const sortedFindings = sortMockFindings(state.findings, sortMode);
-  const groups = buildFindingGroups(sortedFindings, selectedFindingId);
+  const items = buildFindingItems(sortedFindings, selectedFindingId);
   const selectedFinding = state.findings.find(finding => finding.id === selectedFindingId) ?? null;
   const statusBarText = buildStatusBarText(state);
-  const statusBarTooltip = [
+  const statusBarTooltipLines = [
     `${state.statusLabel}`,
     `${state.counts.total} total checks`,
+    `${state.counts.completed} completed`,
     `${state.counts.fail} failed`,
     `${state.counts.unknown} inconclusive`,
     `${state.counts.pass} passed`,
     `Runtime: ${state.runtimeModeLabel}`,
     `Parallelism: ${state.parallelismLabel}`,
     state.canCancel ? 'Click to cancel the active scan.' : 'Click to open the OpenShrike output channel.'
-  ].join('\n');
+  ];
+
+  if (state.counts.fixing > 0) {
+    statusBarTooltipLines.splice(2, 0, `${state.counts.fixing} fixing`);
+  }
+
+  if (state.counts.running > 0) {
+    statusBarTooltipLines.splice(2, 0, `${state.counts.running} in progress`);
+  }
+
+  if (state.counts.pending > 0) {
+    statusBarTooltipLines.splice(2, 0, `${state.counts.pending} pending`);
+  }
+
+  const statusBarTooltip = statusBarTooltipLines.join('\n');
 
   return {
     workspaceName: state.workspaceName,
@@ -103,19 +114,22 @@ export function buildMockScanViewModel(input: {
     activeOperationLabel: state.activeOperationLabel,
     counts: state.counts,
     visibleFindingCount: state.findings.length,
-    checksHeading: `Checks (${state.counts.visible} of ${state.counts.total})`,
+    checksHeading: `Checks (${state.findings.length})`,
     sortMode,
     sortLabel: formatSortMode(sortMode),
-    groups,
+    items,
     selectedFinding: selectedFinding
       ? {
           id: selectedFinding.id,
+          idLabel: formatCheckIdDisplay(selectedFinding.id),
           title: selectedFinding.title,
           summary: selectedFinding.summary,
           rationale: selectedFinding.rationale,
           status: selectedFinding.status,
           statusLabel: getStatusLabel(selectedFinding.status),
-          confidenceLabel: formatConfidence(selectedFinding.confidence),
+          confidenceLabel: selectedFinding.confidence
+            ? formatConfidence(selectedFinding.confidence)
+            : null,
           remediation: selectedFinding.remediation,
           checkMarkdown: selectedFinding.checkMarkdown,
           evidence: selectedFinding.evidence
@@ -133,7 +147,7 @@ export function buildMockScanViewModel(input: {
 function buildStatusBarText(state: MockScanState): string {
   switch (state.statusKind) {
     case 'running':
-      return `$(sync~spin) OpenShrike: ${state.counts.visible}/${state.counts.total}`;
+      return `$(sync~spin) OpenShrike: ${state.counts.completed}/${state.counts.total}`;
     case 'cancelling':
       return '$(debug-stop) OpenShrike: Cancelling';
     case 'cancelled':
@@ -145,42 +159,24 @@ function buildStatusBarText(state: MockScanState): string {
     case 'completed':
       return `$(shield) OpenShrike: ${state.counts.fail} failed`;
     case 'idle':
-      return state.counts.total > 0
-        ? `$(shield) OpenShrike: ${state.counts.fail} failed`
-        : '$(shield) OpenShrike: Ready';
+      return '$(shield) OpenShrike: Ready';
   }
 }
 
-function buildFindingGroups(
+function buildFindingItems(
   findings: MockFinding[],
   selectedFindingId: string | null
-): MockScanFindingGroup[] {
-  const groups = new Map<MockFindingStatus, MockScanFindingItem[]>();
-
-  for (const status of STATUS_ORDER) {
-    groups.set(status, []);
-  }
-
-  for (const finding of findings) {
-    groups.get(finding.status)?.push({
+): MockScanFindingItem[] {
+  return findings.map(finding => ({
       id: finding.id,
+      idLabel: formatCheckIdDisplay(finding.id),
       title: finding.title,
       summary: finding.summary,
       status: finding.status,
       statusLabel: getStatusLabel(finding.status),
       isSelected: finding.id === selectedFindingId
-    });
-  }
-
-  return STATUS_ORDER.map(status => ({
-    status,
-    label: getStatusLabel(status),
-    count: groups.get(status)?.length ?? 0,
-    items: groups.get(status) ?? []
-  }));
+    }));
 }
-
-const STATUS_ORDER: MockFindingStatus[] = ['fail', 'unknown', 'pass'];
 
 export function formatSortMode(sortMode: MockFindingSortMode): string {
   switch (sortMode) {

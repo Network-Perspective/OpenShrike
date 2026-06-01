@@ -1,7 +1,7 @@
 import path from 'node:path';
-import {parseEvidenceLocation} from '../lib/evidence.js';
+import {formatEvidenceLabel, parseEvidenceLocation} from '../lib/evidence.js';
 import type {CheckResult, ParallelismValue, RuntimeMode, SavedScanRequest} from '../lib/types.js';
-import type {MockEvidenceItem, MockFinding, MockScanState, MockScanStatusKind} from './mock-data.js';
+import type {MockEvidenceItem, MockFinding, MockFindingStatus, MockScanState, MockScanStatusKind} from './mock-data.js';
 
 export function createScanStateFromResults(input: {
   workspaceName: string;
@@ -16,7 +16,10 @@ export function createScanStateFromResults(input: {
   runtimeMode: RuntimeMode | null;
   parallelism: ParallelismValue | null;
   totalChecks: number;
+  checkIds: string[];
   checks: CheckResult[];
+  runningCheckIds?: string[];
+  fixingCheckId?: string | null;
   titlesByCheckId: Record<string, string>;
   checkMarkdownPathsByCheckId: Record<string, string>;
   activeOperationLabel: string;
@@ -25,16 +28,35 @@ export function createScanStateFromResults(input: {
   lastScanPath: string;
   canCancel: boolean;
 }): MockScanState {
-  const findings = input.checks.map(check => buildFinding(check, {
-    ...(input.titlesByCheckId[check.id] ? {title: input.titlesByCheckId[check.id]} : {}),
-    ...(input.checkMarkdownPathsByCheckId[check.id]
-      ? {checkMarkdownPath: input.checkMarkdownPathsByCheckId[check.id]}
-      : {})
-  }));
+  const resultsByCheckId = new Map(input.checks.map(check => [check.id, check] as const));
+  const runningCheckIds = new Set(input.runningCheckIds ?? []);
+  const findingIds = dedupeCheckIds([...input.checkIds, ...input.checks.map(check => check.id)]);
+  const findings = findingIds.map(checkId => {
+    const result = resultsByCheckId.get(checkId) ?? null;
+    return buildFinding({
+      checkId,
+      result,
+      status: resolveFindingStatus({
+        checkId,
+        result,
+        runningCheckIds,
+        fixingCheckId: input.fixingCheckId ?? null
+      })
+    }, {
+      ...(input.titlesByCheckId[checkId] ? {title: input.titlesByCheckId[checkId]} : {}),
+      ...(input.checkMarkdownPathsByCheckId[checkId]
+        ? {checkMarkdownPath: input.checkMarkdownPathsByCheckId[checkId]}
+        : {})
+    });
+  });
   const counts = {
-    fail: findings.filter(finding => finding.status === 'fail').length,
-    unknown: findings.filter(finding => finding.status === 'unknown').length,
-    pass: findings.filter(finding => finding.status === 'pass').length,
+    fail: input.checks.filter(check => check.status === 'fail').length,
+    unknown: input.checks.filter(check => check.status === 'unknown').length,
+    pass: input.checks.filter(check => check.status === 'pass').length,
+    pending: findings.filter(finding => finding.status === 'pending').length,
+    running: findings.filter(finding => finding.status === 'running').length,
+    fixing: findings.filter(finding => finding.status === 'fixing').length,
+    completed: resultsByCheckId.size,
     total: input.totalChecks,
     visible: findings.length
   };
@@ -75,29 +97,82 @@ export function formatSelectionLabel(request: SavedScanRequest | null): string {
 }
 
 function buildFinding(
-  check: CheckResult,
+  input: {
+    checkId: string;
+    result: CheckResult | null;
+    status: MockFindingStatus;
+  },
   metadata: {
     title?: string;
     checkMarkdownPath?: string;
   }
 ): MockFinding {
+  const isTransient = input.status === 'pending' || input.status === 'running' || input.status === 'fixing';
+
   return {
-    id: check.id,
-    title: metadata.title ?? check.id,
-    status: check.status,
-    confidence: check.confidence.toLowerCase() as MockFinding['confidence'],
-    summary: summarizeRationale(check.rationale),
-    rationale: check.rationale,
-    remediation: check.remediation,
-    checkMarkdown: metadata.checkMarkdownPath ?? check.id,
-    evidence: check.evidence.map(buildEvidenceItem)
+    id: input.checkId,
+    title: metadata.title ?? input.checkId,
+    status: input.status,
+    confidence: input.result
+      ? input.result.confidence.toLowerCase() as Exclude<MockFinding['confidence'], null>
+      : null,
+    summary: isTransient
+      ? describeTransientSummary(input.status as Extract<MockFindingStatus, 'pending' | 'running' | 'fixing'>)
+      : summarizeRationale(input.result?.rationale ?? ''),
+    rationale: input.result?.rationale ?? describeTransientRationale(input.status),
+    remediation: [...(input.result?.remediation ?? [])],
+    checkMarkdown: metadata.checkMarkdownPath ?? input.checkId,
+    evidence: (input.result?.evidence ?? []).map(buildEvidenceItem)
   };
+}
+
+function resolveFindingStatus(input: {
+  checkId: string;
+  result: CheckResult | null;
+  runningCheckIds: ReadonlySet<string>;
+  fixingCheckId: string | null;
+}): MockFindingStatus {
+  if (input.checkId === input.fixingCheckId) {
+    return 'fixing';
+  }
+
+  if (input.runningCheckIds.has(input.checkId)) {
+    return 'running';
+  }
+
+  return input.result?.status ?? 'pending';
+}
+
+function describeTransientSummary(status: Extract<MockFindingStatus, 'pending' | 'running' | 'fixing'>): string {
+  switch (status) {
+    case 'pending':
+      return 'Check is pending execution.';
+    case 'running':
+      return 'Check is currently running.';
+    case 'fixing':
+      return 'Check is currently being fixed.';
+  }
+}
+
+function describeTransientRationale(status: MockFindingStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'Check is pending execution.';
+    case 'running':
+      return 'Check is pending execution or still running.';
+    case 'fixing':
+      return 'Check is currently being fixed.';
+    case 'fail':
+    case 'unknown':
+    case 'pass':
+      return 'No rationale available.';
+  }
 }
 
 function buildEvidenceItem(raw: string): MockEvidenceItem {
   const location = parseEvidenceLocation(raw);
   return {
-    label: location ? formatEvidenceLabel(location.filePath, location.startLine, location.endLine) : raw,
+    label: location ? formatEvidenceLabel(location) : raw,
     ...(location ? {location: raw} : {}),
     excerpt: raw,
     raw
@@ -132,6 +207,22 @@ function formatDurationLabel(durationMs: number | null): string {
   return `${(durationMs / 1000).toFixed(1)}s`;
 }
 
+function dedupeCheckIds(checkIds: readonly string[]): string[] {
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+
+  for (const checkId of checkIds) {
+    if (seen.has(checkId)) {
+      continue;
+    }
+
+    seen.add(checkId);
+    deduped.push(checkId);
+  }
+
+  return deduped;
+}
+
 function truncateMiddle(value: string, maxLength: number): string {
   if (value.length <= maxLength) {
     return value;
@@ -140,10 +231,4 @@ function truncateMiddle(value: string, maxLength: number): string {
   const headLength = Math.floor((maxLength - 3) / 2);
   const tailLength = Math.max(1, maxLength - 3 - headLength);
   return `${value.slice(0, headLength)}...${value.slice(-tailLength)}`;
-}
-
-function formatEvidenceLabel(filePath: string, startLine: number, endLine: number): string {
-  return startLine === endLine
-    ? `${filePath}:${startLine}`
-    : `${filePath}:${startLine}-${endLine}`;
 }

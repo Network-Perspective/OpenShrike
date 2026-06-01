@@ -6,6 +6,9 @@ export function renderSummaryHtml(viewModel: MockScanViewModel): string {
   const failWidth = `${toPercent(counts.fail, counts.total)}%`;
   const unknownWidth = `${toPercent(counts.unknown, counts.total)}%`;
   const passWidth = `${toPercent(counts.pass, counts.total)}%`;
+  const totalLabel = counts.completed === 0
+    ? `${counts.total} total checks ready`
+    : `${counts.total} total checks scanned`;
   const cancelActionMarkup = viewModel.canCancel
     ? `<div class="heading-actions"><a class="action-link" href="${createCommandUri('openshrike.cancelScan')}">Cancel Scan</a></div>`
     : '';
@@ -331,7 +334,7 @@ export function renderSummaryHtml(viewModel: MockScanViewModel): string {
             </div>
           </section>
 
-          <div class="total">${escapeHtml(String(counts.total))} total checks scanned</div>
+          <div class="total">${escapeHtml(totalLabel)}</div>
           <div class="subcopy">Selection: ${escapeHtml(viewModel.scanTargetLabel)}</div>
 
           ${viewModel.warnings.length > 0 ? `<section class="warning-list">${viewModel.warnings.map(warning => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}</section>` : ''}

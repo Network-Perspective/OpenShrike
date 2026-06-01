@@ -1,11 +1,11 @@
-import {formatEvidenceLabel, parseEvidenceLocation} from '../../lib/evidence.js';
+import {loadEvidencePreview} from '../../lib/evidence.js';
 import {createCommandUri} from '../command-uri.js';
 import type {MockFinding} from '../mock-data.js';
 import type {MockScanViewModel} from '../mock-view-model.js';
 
-export function renderFindingDetailHtml(input: {
+export async function renderFindingDetailHtml(input: {
   viewModel: MockScanViewModel;
-}): string {
+}): Promise<string> {
   const {viewModel} = input;
   const finding = viewModel.selectedFinding;
 
@@ -20,12 +20,24 @@ export function renderFindingDetailHtml(input: {
     ].join('');
   }
 
-  const evidenceMarkup = finding.evidence
-    .map(evidence => renderEvidenceCard(evidence))
-    .join('');
-  const remediationMarkup = finding.remediation
+  const evidenceMarkup = finding.evidence.length > 0
+    ? (await Promise.all(
+        finding.evidence.map(evidence => renderEvidenceCard(evidence, viewModel.workspacePath))
+      )).join('')
+    : `<p class="empty-copy">${escapeHtml(
+        finding.confidenceLabel
+          ? 'No evidence provided.'
+          : 'No evidence available until the check completes.'
+      )}</p>`;
+  const remediationMarkup = finding.remediation.length > 0
+    ? finding.remediation
     .map(item => `<li>${escapeHtml(item)}</li>`)
-    .join('');
+    .join('')
+    : `<li>${escapeHtml(
+        finding.confidenceLabel
+          ? 'No remediation provided.'
+          : 'No remediation available until the check completes.'
+      )}</li>`;
   const actionButtons = [
     {label: 'Open Check Markdown', command: 'openshrike.openCheckMarkdown', kind: 'secondary'},
     {label: 'Open Last Scan Snapshot', command: 'openshrike.openLastScan', kind: 'secondary'},
@@ -55,6 +67,9 @@ export function renderFindingDetailHtml(input: {
             --text-link: var(--vscode-textLink-foreground);
             --status-fail: #f14c4c;
             --status-unknown: #cca700;
+            --status-pending: var(--vscode-descriptionForeground, #8b949e);
+            --status-running: var(--vscode-textLink-foreground, #3794ff);
+            --status-fixing: var(--vscode-chartsBlue, #4fc1ff);
             --status-pass: #89d185;
             --active: var(--vscode-list-highlightForeground, #3794ff);
           }
@@ -150,6 +165,21 @@ export function renderFindingDetailHtml(input: {
             color: var(--status-unknown);
           }
 
+          .status-pending {
+            border-color: rgba(128, 128, 128, 0.32);
+            color: var(--status-pending);
+          }
+
+          .status-running {
+            border-color: rgba(55, 148, 255, 0.35);
+            color: var(--status-running);
+          }
+
+          .status-fixing {
+            border-color: rgba(79, 193, 255, 0.35);
+            color: var(--status-fixing);
+          }
+
           .status-pass {
             border-color: rgba(137, 209, 133, 0.42);
             color: var(--status-pass);
@@ -222,6 +252,10 @@ export function renderFindingDetailHtml(input: {
             gap: 16px;
           }
 
+          .empty-copy {
+            color: var(--text-muted);
+          }
+
           .evidence-card {
             border: 1px solid var(--panel-border);
             background: var(--surface-2);
@@ -249,6 +283,10 @@ export function renderFindingDetailHtml(input: {
 
           .evidence-path:hover {
             text-decoration: underline;
+          }
+
+          .evidence-path-static {
+            color: var(--text-main);
           }
 
           .snippet {
@@ -324,7 +362,7 @@ export function renderFindingDetailHtml(input: {
             <span>/</span>
             <span>Scans</span>
             <span>/</span>
-            <strong>${escapeHtml(finding.id)} Details</strong>
+            <strong>${escapeHtml(finding.idLabel)} Details</strong>
           </div>
 
           <header class="hero">
@@ -332,8 +370,8 @@ export function renderFindingDetailHtml(input: {
               <div class="title-block">
                 <div class="meta-row">
                   <span class="pill ${statusClass}">${escapeHtml(finding.statusLabel)}</span>
-                  <span class="pill">ID: ${escapeHtml(finding.id)}</span>
-                  <span class="pill">Confidence: ${escapeHtml(finding.confidenceLabel)}</span>
+                  <span class="pill">ID: ${escapeHtml(finding.idLabel)}</span>
+                  ${finding.confidenceLabel ? `<span class="pill">Confidence: ${escapeHtml(finding.confidenceLabel)}</span>` : ''}
                   <span class="pill is-selected">Workspace: ${escapeHtml(viewModel.workspaceName)}</span>
                 </div>
                 <h1>${escapeHtml(finding.title)}</h1>
@@ -363,7 +401,7 @@ export function renderFindingDetailHtml(input: {
           </section>
 
           <p class="footer">
-            OpenShrike mock workspace: ${escapeHtml(viewModel.workspaceName)}. Counts reflect the staged design snapshot: ${escapeHtml(String(viewModel.counts.pass))} passed, ${escapeHtml(String(viewModel.counts.fail))} failed, ${escapeHtml(String(viewModel.counts.unknown))} inconclusive.
+            OpenShrike workspace: ${escapeHtml(viewModel.workspaceName)}. Current totals: ${escapeHtml(String(viewModel.counts.pass))} passed, ${escapeHtml(String(viewModel.counts.fail))} failed, ${escapeHtml(String(viewModel.counts.unknown))} inconclusive.
           </p>
         </main>
       </body>
@@ -371,17 +409,24 @@ export function renderFindingDetailHtml(input: {
   `;
 }
 
-function renderEvidenceCard(evidence: MockFinding['evidence'][number]): string {
-  const pathLabel = resolveEvidenceLabel(evidence);
-  const pathMarkup = `<a class="evidence-path" href="${createCommandUri('openshrike.openEvidence', [evidence.location ?? evidence.raw])}">${escapeHtml(pathLabel)}</a>`;
-  const snippetMarkup = renderSnippet(evidence.codeSnippet ?? createFallbackSnippet(evidence));
+async function renderEvidenceCard(
+  evidence: MockFinding['evidence'][number],
+  workspacePath: string
+): Promise<string> {
+  const preview = await loadEvidencePreview(evidence.location ?? evidence.raw, workspacePath);
+  const reference = evidence.location ?? evidence.raw;
+  const pathMarkup = preview.location
+    ? `<a class="evidence-path" href="${createCommandUri('openshrike.openEvidence', [reference])}">${escapeHtml(preview.displayLabel)}</a>`
+    : `<span class="evidence-path evidence-path-static">${escapeHtml(preview.displayLabel)}</span>`;
+  const snippetMarkup = renderSnippet(createSnippetFromPreview(preview) ?? evidence.codeSnippet);
+  const evidenceCopy = renderEvidenceCopy(evidence, preview.displayLabel);
 
   return `
     <article class="evidence-card">
       <div class="evidence-header">
         ${pathMarkup}
       </div>
-      <div class="evidence-copy">${escapeHtml(evidence.excerpt)}</div>
+      ${evidenceCopy}
       ${snippetMarkup}
     </article>
   `;
@@ -417,26 +462,40 @@ function renderSnippet(snippet: MockFinding['evidence'][number]['codeSnippet']):
   `;
 }
 
-function createFallbackSnippet(evidence: MockFinding['evidence'][number]): NonNullable<MockFinding['evidence'][number]['codeSnippet']> {
+function createSnippetFromPreview(
+  preview: Awaited<ReturnType<typeof loadEvidencePreview>>
+): NonNullable<MockFinding['evidence'][number]['codeSnippet']> | undefined {
+  if (!preview.location || !preview.lines || preview.lines.length === 0) {
+    return undefined;
+  }
+
+  const [firstLine] = preview.lines;
+  if (!firstLine) {
+    return undefined;
+  }
+
   return {
-    path: resolveEvidenceLabel(evidence),
-    language: 'typescript',
-    lineStart: 1,
-    lines: [
-      'const issue = inspectBoundaryInput(payload);',
-      "if (!issue) return { status: 'mock-pass' };",
-      `return { evidence: '${sanitizeForSnippet(evidence.raw)}' };`
-    ]
+    path: preview.location.filePath,
+    language: 'text',
+    lineStart: firstLine.number,
+    highlightedLine: preview.location.startLine,
+    lines: preview.lines.map(line => line.text)
   };
 }
 
-function resolveEvidenceLabel(evidence: MockFinding['evidence'][number]): string {
-  const location = parseEvidenceLocation(evidence.location ?? evidence.raw);
-  return location ? formatEvidenceLabel(location) : evidence.location ?? evidence.raw;
-}
+function renderEvidenceCopy(evidence: MockFinding['evidence'][number], pathLabel: string): string {
+  const excerpt = evidence.excerpt.trim();
+  if (!excerpt) {
+    return '';
+  }
 
-function sanitizeForSnippet(value: string): string {
-  return value.replaceAll('\\', '\\\\').replaceAll("'", "\\'");
+  const raw = evidence.raw.trim();
+  const location = evidence.location?.trim() ?? '';
+  if (excerpt === raw || excerpt === location || excerpt === pathLabel) {
+    return '';
+  }
+
+  return `<div class="evidence-copy">${escapeHtml(excerpt)}</div>`;
 }
 
 function escapeHtml(value: string): string {

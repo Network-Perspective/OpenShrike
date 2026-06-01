@@ -1,24 +1,10 @@
 import {createCommandUri} from '../command-uri.js';
-import type {MockScanViewModel} from '../mock-view-model.js';
+import type {MockScanFindingItem, MockScanViewModel} from '../mock-view-model.js';
 
 export function renderChecksHtml(viewModel: MockScanViewModel): string {
-  const sectionsMarkup = viewModel.groups
-    .map(group => {
-      const rows = group.items.length > 0
-        ? group.items.map(item => renderFindingRow(item)).join('')
-        : '<div class="empty-state">No checks in this section.</div>';
-
-      return `
-        <section class="group">
-          <div class="group-header">
-            <span>${escapeHtml(group.label)}</span>
-            <span>${escapeHtml(String(group.count))}</span>
-          </div>
-          ${rows}
-        </section>
-      `;
-    })
-    .join('');
+  const rowsMarkup = viewModel.items.length > 0
+    ? viewModel.items.map(item => renderFindingRow(item)).join('')
+    : '<div class="empty-state">No checks available.</div>';
 
   return `
     <!DOCTYPE html>
@@ -38,10 +24,12 @@ export function renderChecksHtml(viewModel: MockScanViewModel): string {
             --text-muted: var(--vscode-descriptionForeground);
             --text-strong: var(--vscode-foreground);
             --focus: var(--vscode-focusBorder);
-            --link: var(--vscode-textLink-foreground);
             --fail: var(--vscode-problemsErrorIcon-foreground, #f14c4c);
             --unknown: var(--vscode-problemsWarningIcon-foreground, #cca700);
             --pass: var(--vscode-testing-iconPassed, #89d185);
+            --pending: var(--vscode-descriptionForeground, #8b949e);
+            --running: var(--vscode-textLink-foreground, #3794ff);
+            --fixing: var(--vscode-chartsBlue, #4fc1ff);
             --active: var(--vscode-list-highlightForeground, #3794ff);
           }
 
@@ -60,7 +48,6 @@ export function renderChecksHtml(viewModel: MockScanViewModel): string {
 
           main {
             display: grid;
-            gap: 12px;
             padding: 0 0 12px;
           }
 
@@ -85,52 +72,8 @@ export function renderChecksHtml(viewModel: MockScanViewModel): string {
             color: var(--text-muted);
           }
 
-          .sort-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-          }
-
-          .sort-link {
-            display: inline-flex;
-            align-items: center;
-            padding: 4px 8px;
-            border: 1px solid var(--border);
-            color: var(--text-main);
-            text-decoration: none;
-            text-transform: none;
-            letter-spacing: 0;
-            font-weight: 400;
-          }
-
-          .sort-link.is-active {
-            border-color: var(--focus);
-            color: var(--text-strong);
-          }
-
           .content {
             display: grid;
-            gap: 12px;
-          }
-
-          .group {
-            display: grid;
-          }
-
-          .group-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            padding: 4px 12px;
-            color: var(--text-muted);
-            border-top: 1px solid var(--border);
-            border-bottom: 1px solid var(--border);
-            background: var(--surface-2);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            font-size: 11px;
-            font-weight: 700;
           }
 
           .finding-link {
@@ -139,8 +82,9 @@ export function renderChecksHtml(viewModel: MockScanViewModel): string {
             grid-template-columns: 16px minmax(0, 1fr) auto;
             gap: 8px;
             align-items: center;
-            min-height: 30px;
+            min-height: 32px;
             padding: 6px 12px;
+            border-bottom: 1px solid rgba(128, 128, 128, 0.08);
             color: var(--text-main);
             text-decoration: none;
           }
@@ -169,7 +113,6 @@ export function renderChecksHtml(viewModel: MockScanViewModel): string {
           .finding-icon {
             width: 14px;
             height: 14px;
-            flex: 0 0 auto;
             color: currentColor;
           }
 
@@ -182,6 +125,11 @@ export function renderChecksHtml(viewModel: MockScanViewModel): string {
             stroke-width: 1.8;
             stroke-linecap: round;
             stroke-linejoin: round;
+          }
+
+          .finding-icon svg.is-spinning {
+            animation: spin 1s linear infinite;
+            transform-origin: center;
           }
 
           .finding-title {
@@ -209,9 +157,31 @@ export function renderChecksHtml(viewModel: MockScanViewModel): string {
             color: var(--pass);
           }
 
+          .status-pending {
+            color: var(--pending);
+          }
+
+          .status-running {
+            color: var(--running);
+          }
+
+          .status-fixing {
+            color: var(--fixing);
+          }
+
           .empty-state {
-            padding: 8px 12px;
+            padding: 10px 12px;
             color: var(--text-muted);
+          }
+
+          @keyframes spin {
+            from {
+              transform: rotate(0deg);
+            }
+
+            to {
+              transform: rotate(360deg);
+            }
           }
         </style>
       </head>
@@ -222,14 +192,8 @@ export function renderChecksHtml(viewModel: MockScanViewModel): string {
             <span class="toolbar-meta">Sort: ${escapeHtml(viewModel.sortLabel)}</span>
           </header>
 
-          <section class="sort-actions" aria-label="Sort checks">
-            ${renderSortLink('status', 'Status', viewModel.sortMode)}
-            ${renderSortLink('id', 'ID', viewModel.sortMode)}
-            ${renderSortLink('name', 'Name', viewModel.sortMode)}
-          </section>
-
           <div class="content">
-            ${sectionsMarkup}
+            ${rowsMarkup}
           </div>
         </main>
       </body>
@@ -237,7 +201,7 @@ export function renderChecksHtml(viewModel: MockScanViewModel): string {
   `;
 }
 
-function renderFindingRow(item: MockScanViewModel['groups'][number]['items'][number]): string {
+function renderFindingRow(item: MockScanFindingItem): string {
   const selectedClass = item.isSelected ? ' is-selected' : '';
   const commandUri = createCommandUri('openshrike.selectFinding', [item.id]);
 
@@ -245,23 +209,12 @@ function renderFindingRow(item: MockScanViewModel['groups'][number]['items'][num
     <a class="finding-link status-${item.status}${selectedClass}" href="${commandUri}" title="${escapeHtml(item.summary)}">
       <span class="finding-icon" aria-hidden="true">${renderStatusIcon(item.status)}</span>
       <span class="finding-title">${escapeHtml(item.title)}</span>
-      <span class="finding-id">${escapeHtml(item.id)}</span>
+      <span class="finding-id">${escapeHtml(item.idLabel)}</span>
     </a>
   `;
 }
 
-function renderSortLink(sortMode: 'status' | 'id' | 'name', label: string, current: MockScanViewModel['sortMode']): string {
-  const activeClass = sortMode === current ? ' is-active' : '';
-  const commandName = sortMode === 'status'
-    ? 'openshrike.sortChecksByStatus'
-    : sortMode === 'id'
-      ? 'openshrike.sortChecksById'
-      : 'openshrike.sortChecksByName';
-
-  return `<a class="sort-link${activeClass}" href="${createCommandUri(commandName)}">${escapeHtml(label)}</a>`;
-}
-
-function renderStatusIcon(status: MockScanViewModel['groups'][number]['status']): string {
+function renderStatusIcon(status: MockScanFindingItem['status']): string {
   switch (status) {
     case 'fail':
       return `
@@ -277,6 +230,24 @@ function renderStatusIcon(status: MockScanViewModel['groups'][number]['status'])
           <path d="M8 2.2 13.2 12H2.8L8 2.2Z"></path>
           <path d="M8 5.8V8.8"></path>
           <path d="M8 11.1H8.01"></path>
+        </svg>
+      `;
+    case 'pending':
+      return `
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="3.5" y="3.5" width="9" height="9" rx="2"></rect>
+        </svg>
+      `;
+    case 'running':
+      return `
+        <svg class="is-spinning" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 2.2a5.8 5.8 0 1 0 4.1 1.7"></path>
+        </svg>
+      `;
+    case 'fixing':
+      return `
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M9.9 3a2.9 2.9 0 0 0 3.1 4l-5 5a1.4 1.4 0 0 1-2 0l-.7-.7a1.4 1.4 0 0 1 0-2l5-5A2.9 2.9 0 0 0 9.9 3Z"></path>
         </svg>
       `;
     case 'pass':

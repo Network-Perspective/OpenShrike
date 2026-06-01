@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
 export interface EvidenceLocation {
   filePath: string;
   startLine: number;
@@ -7,6 +10,13 @@ export interface EvidenceLocation {
 export interface EvidencePreviewLine {
   number: number;
   text: string;
+}
+
+export interface EvidencePreview {
+  raw: string;
+  location: EvidenceLocation | null;
+  displayLabel: string;
+  lines: EvidencePreviewLine[] | null;
 }
 
 export function parseEvidenceLocation(value: string): EvidenceLocation | null {
@@ -71,4 +81,51 @@ export function formatEvidenceLabel(location: EvidenceLocation): string {
   return location.startLine === location.endLine
     ? `${location.filePath}:${location.startLine}`
     : `${location.filePath}:${location.startLine}-${location.endLine}`;
+}
+
+export function buildEvidenceFallbackPreview(evidence: string): EvidencePreview {
+  const location = parseEvidenceLocation(evidence);
+
+  return {
+    raw: evidence,
+    location,
+    displayLabel: location ? formatEvidenceLabel(location) : evidence,
+    lines: null
+  };
+}
+
+export function buildEvidenceFallbackPreviews(evidence: readonly string[]): EvidencePreview[] {
+  return evidence.map(buildEvidenceFallbackPreview);
+}
+
+export async function loadEvidencePreview(
+  evidence: string,
+  repoPath: string
+): Promise<EvidencePreview> {
+  const fallback = buildEvidenceFallbackPreview(evidence);
+  if (!fallback.location) {
+    return fallback;
+  }
+
+  try {
+    const fileContents = await fs.readFile(path.resolve(repoPath, fallback.location.filePath), 'utf8');
+    const sourceLines = fileContents.split(/\r?\n/u);
+    const window = resolveEvidenceWindow(fallback.location, sourceLines.length);
+
+    return {
+      ...fallback,
+      lines: window
+        ? buildPreviewLines(sourceLines, window.startLine, window.endLine)
+        : null
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+export async function loadEvidencePreviews(
+  evidence: readonly string[],
+  repoPath: string
+): Promise<EvidencePreview[]> {
+  return Promise.all(evidence.map(item => loadEvidencePreview(item, repoPath)));
 }

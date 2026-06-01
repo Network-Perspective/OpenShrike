@@ -1,4 +1,6 @@
-export type MockFindingStatus = 'fail' | 'unknown' | 'pass';
+import type {CheckStatus} from '../lib/types.js';
+
+export type MockFindingStatus = CheckStatus | 'pending' | 'running' | 'fixing';
 export type MockFindingSortMode = 'id' | 'status' | 'name';
 export type MockScanStatusKind = 'idle' | 'running' | 'cancelling' | 'cancelled' | 'completed' | 'failed' | 'loaded';
 
@@ -22,7 +24,7 @@ export interface MockFinding {
   id: string;
   title: string;
   status: MockFindingStatus;
-  confidence: 'high' | 'medium' | 'low';
+  confidence: 'high' | 'medium' | 'low' | null;
   summary: string;
   rationale: string;
   remediation: string[];
@@ -34,6 +36,10 @@ export interface MockScanCounts {
   fail: number;
   unknown: number;
   pass: number;
+  pending: number;
+  running: number;
+  fixing: number;
+  completed: number;
   total: number;
   visible: number;
 }
@@ -325,6 +331,10 @@ export function createMockScanState(input: {
       fail: 2,
       unknown: 3,
       pass: 19,
+      pending: 0,
+      running: 0,
+      fixing: 0,
+      completed: 24,
       total: 24,
       visible: MOCK_FINDINGS.length
     },
@@ -371,6 +381,10 @@ export function createEmptyScanState(input: {
       fail: 0,
       unknown: 0,
       pass: 0,
+      pending: 0,
+      running: 0,
+      fixing: 0,
+      completed: 0,
       total: 0,
       visible: 0
     },
@@ -412,12 +426,18 @@ export function getStatusLabel(status: MockFindingStatus): string {
       return 'Failed';
     case 'unknown':
       return 'Inconclusive';
+    case 'pending':
+      return 'Pending';
+    case 'running':
+      return 'In Progress';
+    case 'fixing':
+      return 'Fixing';
     case 'pass':
       return 'Passed';
   }
 }
 
-export function formatConfidence(confidence: MockFinding['confidence']): string {
+export function formatConfidence(confidence: NonNullable<MockFinding['confidence']>): string {
   return confidence.charAt(0).toUpperCase() + confidence.slice(1);
 }
 
@@ -459,7 +479,10 @@ function compareStatus(left: MockFindingStatus, right: MockFindingStatus): numbe
   const order: Record<MockFindingStatus, number> = {
     fail: 0,
     unknown: 1,
-    pass: 2
+    fixing: 2,
+    running: 3,
+    pending: 4,
+    pass: 5
   };
 
   return order[left] - order[right];

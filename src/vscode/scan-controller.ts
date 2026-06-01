@@ -1,7 +1,14 @@
+import fs from 'node:fs/promises';
 import {fixAndRecheckCheck, recheckSingleCheck, updateReportCheck} from '../lib/fix.js';
-import {readCheckTitle, resolveCheckDefinitionPath} from '../lib/checks.js';
+import {
+  getProjectChecksDirectory,
+  readCheckTitle,
+  resolveCheckDefinitionPath,
+  resolveProjectCheckSelection
+} from '../lib/checks.js';
 import {loadLastScanState, resolveLastScanPaths, saveLastScanState} from '../lib/last-scan.js';
-import {loadProjectConfigForRepo, writeProjectConfig} from '../lib/project-config.js';
+import {loadProjectConfigForRepo, resolveProjectConfigRelativePath, writeProjectConfig} from '../lib/project-config.js';
+import {resolvePolicyDefinition} from '../lib/policies.js';
 import {createRuntimeStreamState, reduceRuntimeEvent, type RuntimeStreamState} from '../lib/runtime-events.js';
 import {resolveScanOptions} from '../lib/scan-options.js';
 import {createNativeScanSession, runScan, type NativeScanSession, type ScanSessionSnapshot} from '../lib/scan.js';
@@ -25,12 +32,21 @@ interface ScanContext {
 }
 
 interface ActiveRun {
+  id: number;
   kind: 'native' | 'docker';
   cancelRequested: boolean;
   startedAtMs: number;
   session?: NativeScanSession;
   abortController?: AbortController;
 }
+
+interface TokenUsageState {
+  byMessageId: Record<string, {input: number; output: number}>;
+  input: number;
+  output: number;
+}
+
+const ACTIVE_RUN_RENDER_INTERVAL_MS = 100;
 
 export class OpenShrikeScanController {
   private context: ScanContext | null = null;
@@ -53,11 +69,16 @@ export class OpenShrikeScanController {
   private outputLines: string[] = [];
   private warnings: string[] = [];
   private checkOrder: string[] = [];
+  private readonly runningCheckIds = new Set<string>();
+  private fixingCheckId: string | null = null;
   private readonly resultsByCheckId = new Map<string, CheckResult>();
   private readonly titleCache = new Map<string, string>();
   private readonly checkMarkdownPathCache = new Map<string, string>();
   private readonly runtimeStreams = new Map<string, RuntimeStreamState>();
   private readonly sessionScopeSelections = new Map<string, ScopeSelection>();
+  private activeRunRenderTimer: NodeJS.Timeout | null = null;
+  private nextRunId = 1;
+  private tokenUsage: TokenUsageState | null = null;
 
   constructor(private readonly model: MockExtensionModel) {
     this.outputLines = [...this.model.getState().outputLines];
@@ -72,6 +93,7 @@ export class OpenShrikeScanController {
     };
     await this.restoreWorkspaceDefaults(workspace);
     this.lastScanPath = await this.resolveLastScanPath(workspace.path);
+    await this.primeConfiguredCheckSelection(workspace);
     this.renderState();
   }
 
@@ -91,6 +113,7 @@ export class OpenShrikeScanController {
       this.scopeLabel = await this.resolveDisplayedScopeLabel(workspace.path, loaded.state.request, loaded.state.scope ?? null);
       this.checkOrder = loaded.state.report.checks.map(check => check.id);
       this.resultsByCheckId.clear();
+      this.clearTransientCheckStates();
       for (const check of loaded.state.report.checks) {
         this.resultsByCheckId.set(check.id, check);
       }
@@ -100,6 +123,7 @@ export class OpenShrikeScanController {
       this.generatedAt = new Date(loaded.state.savedAt);
       this.completedAtMs = null;
       this.lastDurationMs = null;
+      this.tokenUsage = null;
       this.appendOutputLine(`Loaded saved scan for ${workspace.name}.`);
       loaded.warnings.forEach(warning => {
         this.appendOutputLine(`Warning: ${warning}`);
@@ -111,6 +135,7 @@ export class OpenShrikeScanController {
         this.statusKind = 'idle';
         this.statusLabel = 'Ready to scan';
         this.activeOperationLabel = 'Run OpenShrike: Run Scan or Load Last Scan.';
+        await this.primeConfiguredCheckSelection(workspace);
         this.renderState();
         return;
       }
@@ -153,13 +178,16 @@ export class OpenShrikeScanController {
       scope: null,
       report: null
     };
+    await this.applyCheckSelection(request, await this.resolveCheckIdsForRequest(request));
     this.parallelism = options.parallelism;
     this.scopeLabel = await this.resolveDisplayedScopeLabel(workspace.path, request, null);
     this.generatedAt = null;
     this.completedAtMs = null;
     this.lastDurationMs = null;
+    this.tokenUsage = createTokenUsageState();
     this.warnings = [];
     this.appendOutputLine(`Starting ${options.runtimeMode} scan for ${workspace.name}.`);
+    this.renderState(this.checkOrder.length);
 
     if (options.runtimeMode === 'native') {
       await this.runNativeSession(options, workspace, request);
@@ -253,21 +281,29 @@ export class OpenShrikeScanController {
       return;
     }
 
-    const rechecked = await recheckSingleCheck({
-      base: baseOptions,
-      request: context.request!,
-      repoPath: context.report!.repo.path,
-      checkId: selectedFinding.id,
-      onRuntimeEvent: event => {
-        this.handleRuntimeEvent(event);
-      }
-    });
-    context.report = updateReportCheck(context.report!, rechecked);
-    this.resultsByCheckId.set(rechecked.id, rechecked);
-    this.generatedAt = new Date();
-    this.completedAtMs = Date.now();
-    await this.persistCurrentContext();
-    await this.refreshFromContext('completed', `Rechecked ${selectedFinding.id}`);
+    this.setRunningCheck(selectedFinding.id);
+    this.renderState();
+
+    try {
+      const rechecked = await recheckSingleCheck({
+        base: baseOptions,
+        request: context.request!,
+        repoPath: context.report!.repo.path,
+        checkId: selectedFinding.id,
+        onRuntimeEvent: event => {
+          this.handleRuntimeEvent(event);
+        }
+      });
+      context.report = updateReportCheck(context.report!, rechecked);
+      this.resultsByCheckId.set(rechecked.id, rechecked);
+      this.generatedAt = new Date();
+      this.completedAtMs = Date.now();
+      await this.persistCurrentContext();
+      await this.refreshFromContext('completed', `Rechecked ${selectedFinding.id}`);
+    } finally {
+      this.clearTransientCheckStates();
+      this.renderState();
+    }
   }
 
   async fixSelectedFinding(): Promise<void> {
@@ -301,28 +337,36 @@ export class OpenShrikeScanController {
       throw new Error(`Could not find ${selectedFinding.id} in the current scan report.`);
     }
 
-    const rechecked = await fixAndRecheckCheck({
-      base: baseOptions,
-      request: context.request!,
-      report: context.report!,
-      check: currentCheck,
-      ...(context.scope ? {scope: context.scope} : {}),
-      onRuntimeEvent: event => {
-        this.handleRuntimeEvent(event);
-      }
-    });
-    context.report = updateReportCheck(context.report!, rechecked);
-    this.resultsByCheckId.set(rechecked.id, rechecked);
-    this.generatedAt = new Date();
-    this.completedAtMs = Date.now();
-    await this.persistCurrentContext();
-    await this.refreshFromContext('completed', `Fixed ${selectedFinding.id}`);
+    this.setFixingCheck(selectedFinding.id);
+    this.renderState();
+
+    try {
+      const rechecked = await fixAndRecheckCheck({
+        base: baseOptions,
+        request: context.request!,
+        report: context.report!,
+        check: currentCheck,
+        ...(context.scope ? {scope: context.scope} : {}),
+        onRuntimeEvent: event => {
+          this.handleRuntimeEvent(event);
+        }
+      });
+      context.report = updateReportCheck(context.report!, rechecked);
+      this.resultsByCheckId.set(rechecked.id, rechecked);
+      this.generatedAt = new Date();
+      this.completedAtMs = Date.now();
+      await this.persistCurrentContext();
+      await this.refreshFromContext('completed', `Fixed ${selectedFinding.id}`);
+    } finally {
+      this.clearTransientCheckStates();
+      this.renderState();
+    }
   }
 
   async dispose(): Promise<void> {
-    this.activeRun?.abortController?.abort();
-    await this.activeRun?.session?.close().catch(() => undefined);
-    this.activeRun = null;
+    const activeRun = this.takeActiveRun();
+    activeRun?.abortController?.abort();
+    await activeRun?.session?.close().catch(() => undefined);
     await this.releaseReusableNativeSession();
   }
 
@@ -331,6 +375,7 @@ export class OpenShrikeScanController {
     workspace: WorkspaceTarget,
     request: SavedScanRequest
   ): Promise<void> {
+    const runId = this.nextRunId++;
     const session = createNativeScanSession(
       {
         ...options,
@@ -340,20 +385,21 @@ export class OpenShrikeScanController {
       undefined,
       {
         onUpdate: snapshot => {
-          this.handleNativeSnapshot(workspace, request, options, snapshot);
+          this.handleNativeSnapshot(runId, workspace, request, options, snapshot);
         },
         onRuntimeEvent: event => {
-          this.handleRuntimeEvent(event);
+          this.handleRuntimeEvent(event, runId);
         }
       }
     );
 
-    this.activeRun = {
+    this.setActiveRun({
+      id: runId,
       kind: 'native',
       cancelRequested: false,
       startedAtMs: Date.now(),
       session
-    };
+    });
     this.statusKind = 'running';
     this.statusLabel = 'Preparing scan';
     this.activeOperationLabel = 'Preparing scan';
@@ -362,7 +408,8 @@ export class OpenShrikeScanController {
     try {
       await session.start();
       const completedAtMs = Date.now();
-      const startedAtMs = this.activeRun?.startedAtMs ?? completedAtMs;
+      const activeRun = this.takeActiveRun();
+      const startedAtMs = activeRun?.startedAtMs ?? completedAtMs;
       this.context = {
         workspace,
         request,
@@ -373,14 +420,13 @@ export class OpenShrikeScanController {
       this.completedAtMs = completedAtMs;
       this.lastDurationMs = completedAtMs - startedAtMs;
       this.reusableNativeSession = session;
-      this.activeRun = null;
       await this.persistCurrentContext();
       await this.refreshFromContext('completed', 'Scan complete');
     } catch (error) {
-      const cancelled = this.activeRun?.cancelRequested === true || isNativeSessionClosedError(error);
       const completedAtMs = Date.now();
-      const startedAtMs = this.activeRun?.startedAtMs ?? completedAtMs;
-      this.activeRun = null;
+      const activeRun = this.takeActiveRun();
+      const cancelled = activeRun?.cancelRequested === true || isNativeSessionClosedError(error);
+      const startedAtMs = activeRun?.startedAtMs ?? completedAtMs;
 
       if (cancelled) {
         this.context = {
@@ -416,13 +462,15 @@ export class OpenShrikeScanController {
     workspace: WorkspaceTarget,
     request: SavedScanRequest
   ): Promise<void> {
+    const runId = this.nextRunId++;
     const abortController = new AbortController();
-    this.activeRun = {
+    this.setActiveRun({
+      id: runId,
       kind: 'docker',
       cancelRequested: false,
       startedAtMs: Date.now(),
       abortController
-    };
+    });
     this.statusKind = 'running';
     this.statusLabel = 'Preparing Docker runtime';
     this.activeOperationLabel = 'Preparing Docker runtime';
@@ -438,16 +486,16 @@ export class OpenShrikeScanController {
         {
           signal: abortController.signal,
           onProgress: event => {
-            this.handleDockerProgress(workspace, request, options, event);
+            this.handleDockerProgress(runId, workspace, request, options, event);
           },
           onRuntimeEvent: event => {
-            this.handleRuntimeEvent(event);
+            this.handleRuntimeEvent(event, runId);
           }
         }
       );
       const completedAtMs = Date.now();
-      const startedAtMs = this.activeRun?.startedAtMs ?? completedAtMs;
-      this.activeRun = null;
+      const activeRun = this.takeActiveRun();
+      const startedAtMs = activeRun?.startedAtMs ?? completedAtMs;
       this.context = {
         workspace,
         request,
@@ -465,10 +513,10 @@ export class OpenShrikeScanController {
       await this.persistCurrentContext();
       await this.refreshFromContext('completed', 'Scan complete');
     } catch (error) {
-      const cancelled = this.activeRun?.cancelRequested === true || isAbortError(error);
       const completedAtMs = Date.now();
-      const startedAtMs = this.activeRun?.startedAtMs ?? completedAtMs;
-      this.activeRun = null;
+      const activeRun = this.takeActiveRun();
+      const cancelled = activeRun?.cancelRequested === true || isAbortError(error);
+      const startedAtMs = activeRun?.startedAtMs ?? completedAtMs;
 
       if (cancelled) {
         this.generatedAt = new Date();
@@ -478,6 +526,7 @@ export class OpenShrikeScanController {
         this.statusLabel = 'Scan cancelled';
         this.activeOperationLabel = 'Scan cancelled before completion.';
         this.appendOutputLine(`Cancelled scan for ${workspace.name}.`);
+        this.clearTransientCheckStates();
         this.renderState();
         return;
       }
@@ -494,6 +543,20 @@ export class OpenShrikeScanController {
   }
 
   private handleNativeSnapshot(
+    runId: number,
+    workspace: WorkspaceTarget,
+    request: SavedScanRequest,
+    options: ScanCommandOptions,
+    snapshot: ScanSessionSnapshot
+  ): void {
+    if (!this.shouldAcceptActiveRunCallback(runId)) {
+      return;
+    }
+
+    this.applyNativeSnapshot(workspace, request, options, snapshot);
+  }
+
+  private applyNativeSnapshot(
     workspace: WorkspaceTarget,
     request: SavedScanRequest,
     options: ScanCommandOptions,
@@ -501,6 +564,11 @@ export class OpenShrikeScanController {
   ): void {
     this.checkOrder = [...snapshot.checkOrder];
     this.resultsByCheckId.clear();
+    this.runningCheckIds.clear();
+    snapshot.runningCheckIds.forEach(checkId => {
+      this.runningCheckIds.add(checkId);
+    });
+    this.fixingCheckId = snapshot.fixingCheckId;
     for (const [checkId, result] of Object.entries(snapshot.resultsByCheckId)) {
       this.resultsByCheckId.set(checkId, result);
     }
@@ -530,6 +598,7 @@ export class OpenShrikeScanController {
   }
 
   private handleDockerProgress(
+    runId: number,
     workspace: WorkspaceTarget,
     request: SavedScanRequest,
     options: ScanCommandOptions,
@@ -538,12 +607,22 @@ export class OpenShrikeScanController {
       checkIds: string[];
       checkId: string | null;
       checkResult: CheckResult | null;
+      runningCheckIds: string[];
       scopeLabel: string;
       totalChecks: number;
       statusLabel: string;
     }
   ): void {
+    if (!this.shouldAcceptActiveRunCallback(runId)) {
+      return;
+    }
+
     this.checkOrder = [...event.checkIds];
+    this.runningCheckIds.clear();
+    event.runningCheckIds.forEach(checkId => {
+      this.runningCheckIds.add(checkId);
+    });
+    this.fixingCheckId = null;
     if (event.checkId && event.checkResult) {
       this.resultsByCheckId.set(event.checkId, event.checkResult);
     }
@@ -564,11 +643,16 @@ export class OpenShrikeScanController {
     this.renderState(event.totalChecks);
   }
 
-  private handleRuntimeEvent(event: ScanRuntimeEvent): void {
+  private handleRuntimeEvent(event: ScanRuntimeEvent, runId?: number): void {
+    if (runId !== undefined && !this.shouldAcceptActiveRunCallback(runId)) {
+      return;
+    }
+
     const streamKey = `${event.runtimeMode}:${event.checkId ?? event.workerId ?? 'session'}`;
     const previous = this.runtimeStreams.get(streamKey) ?? createRuntimeStreamState();
     const next = reduceRuntimeEvent(previous, event.event);
     this.runtimeStreams.set(streamKey, next);
+    this.tokenUsage = reduceTokenUsageState(this.tokenUsage ?? createTokenUsageState(), event);
 
     if (next.items.length <= previous.items.length) {
       return;
@@ -593,6 +677,7 @@ export class OpenShrikeScanController {
     );
     this.checkOrder = context.report?.checks.map(check => check.id) ?? this.checkOrder;
     this.resultsByCheckId.clear();
+    this.clearTransientCheckStates();
     for (const check of context.report?.checks ?? []) {
       this.resultsByCheckId.set(check.id, check);
     }
@@ -609,7 +694,7 @@ export class OpenShrikeScanController {
       .map(checkId => this.resultsByCheckId.get(checkId) ?? null)
       .filter((check): check is CheckResult => check !== null);
 
-    const state = checks.length > 0 || this.statusKind !== 'idle'
+    const state = this.checkOrder.length > 0 || checks.length > 0 || this.statusKind !== 'idle'
       ? createScanStateFromResults({
           workspaceName: workspace.name,
           workspacePath: workspace.path,
@@ -617,12 +702,16 @@ export class OpenShrikeScanController {
           statusLabel: this.statusLabel,
           generatedAt: this.generatedAt,
           durationMs: this.resolveDurationMs(),
+          tokensLabel: this.resolveTokensLabel(),
           scopeLabel: this.scopeLabel,
           selectionLabel: formatSelectionLabel(this.context?.request ?? null),
           runtimeMode: this.runtimeMode,
           parallelism: this.parallelism,
           totalChecks: totalChecks ?? this.context?.report?.summary.total_checks ?? this.checkOrder.length,
+          checkIds: this.checkOrder,
           checks,
+          runningCheckIds: [...this.runningCheckIds],
+          fixingCheckId: this.fixingCheckId,
           titlesByCheckId: this.buildTitleMap(this.context?.request ?? null, this.checkOrder),
           checkMarkdownPathsByCheckId: this.buildCheckMarkdownPathMap(this.context?.request ?? null, this.checkOrder),
           activeOperationLabel: this.activeOperationLabel,
@@ -650,6 +739,109 @@ export class OpenShrikeScanController {
     }
 
     return Math.max(0, Date.now() - this.activeRun.startedAtMs);
+  }
+
+  private clearTransientCheckStates(): void {
+    this.runningCheckIds.clear();
+    this.fixingCheckId = null;
+  }
+
+  private shouldAcceptActiveRunCallback(runId: number): boolean {
+    return this.activeRun?.id === runId && this.activeRun.cancelRequested !== true;
+  }
+
+  private setRunningCheck(checkId: string): void {
+    this.clearTransientCheckStates();
+    this.runningCheckIds.add(checkId);
+  }
+
+  private setFixingCheck(checkId: string): void {
+    this.clearTransientCheckStates();
+    this.fixingCheckId = checkId;
+  }
+
+  private async primeConfiguredCheckSelection(workspace: WorkspaceTarget): Promise<void> {
+    try {
+      const request = await this.resolveConfiguredRequest(workspace.path);
+      if (!request) {
+        return;
+      }
+
+      await this.applyCheckSelection(request, await this.resolveCheckIdsForRequest(request));
+    } catch (error) {
+      console.error('[OpenShrike] Failed to preload configured checks', error);
+      this.checkOrder = [];
+      if (this.context) {
+        this.context = {
+          ...this.context,
+          request: null
+        };
+      }
+    }
+  }
+
+  private async applyCheckSelection(request: SavedScanRequest | null, checkIds: readonly string[]): Promise<void> {
+    this.checkOrder = [...checkIds];
+    if (this.context) {
+      this.context = {
+        ...this.context,
+        request
+      };
+    }
+    await this.refreshCheckMetadata(request, this.checkOrder);
+  }
+
+  private async resolveConfiguredRequest(repoPath: string): Promise<SavedScanRequest | null> {
+    const loadedProjectConfig = await loadProjectConfigForRepo(repoPath).catch(() => null);
+    if (!loadedProjectConfig) {
+      return null;
+    }
+
+    const projectChecksDir = await this.resolveConfiguredProjectChecksDirectory(loadedProjectConfig);
+
+    return {
+      checkId: projectChecksDir || loadedProjectConfig.config.scan.defaultKind !== 'check'
+        ? null
+        : loadedProjectConfig.config.scan.defaultId,
+      policyId: projectChecksDir || loadedProjectConfig.config.scan.defaultKind !== 'policy'
+        ? null
+        : loadedProjectConfig.config.scan.defaultId,
+      projectChecksDir: projectChecksDir ?? null,
+      scanScope: this.scopeSelection.scanScope,
+      scanTarget: this.scopeSelection.scanTarget,
+      runtimeMode: this.runtimeMode ?? loadedProjectConfig.config.runtime.mode
+    };
+  }
+
+  private async resolveConfiguredProjectChecksDirectory(input: NonNullable<Awaited<ReturnType<typeof loadProjectConfigForRepo>>>): Promise<string | undefined> {
+    if (input.config.scan.defaultKind === 'project-checks') {
+      return resolveProjectConfigRelativePath(input, input.config.scan.defaultId);
+    }
+
+    const configuredPath = getProjectChecksDirectory(input.repoRoot);
+
+    try {
+      const stats = await fs.stat(configuredPath);
+      return stats.isDirectory() ? configuredPath : undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        return undefined;
+      }
+
+      throw error;
+    }
+  }
+
+  private async resolveCheckIdsForRequest(request: SavedScanRequest): Promise<string[]> {
+    if (request.projectChecksDir) {
+      return (await resolveProjectCheckSelection(request.projectChecksDir, request.checkId ?? undefined)).checkIds;
+    }
+
+    if (request.policyId) {
+      return (await resolvePolicyDefinition(request.policyId)).checkIds;
+    }
+
+    return request.checkId ? [request.checkId] : [];
   }
 
   private buildTitleMap(request: SavedScanRequest | null, checkIds: readonly string[]): Record<string, string> {
@@ -769,7 +961,7 @@ export class OpenShrikeScanController {
       },
       {
         onUpdate: snapshot => {
-          this.handleNativeSnapshot(context.workspace, context.request!, baseOptions, snapshot);
+          this.applyNativeSnapshot(context.workspace, context.request!, baseOptions, snapshot);
         },
         onRuntimeEvent: event => {
           this.handleRuntimeEvent(event);
@@ -820,6 +1012,7 @@ export class OpenShrikeScanController {
     }
 
     await this.releaseReusableNativeSession();
+    this.setActiveRun(null);
     this.context = {
       workspace,
       request: null,
@@ -832,12 +1025,15 @@ export class OpenShrikeScanController {
     this.generatedAt = null;
     this.completedAtMs = null;
     this.lastDurationMs = null;
+    this.tokenUsage = null;
     this.warnings = [];
     this.checkOrder = [];
+    this.clearTransientCheckStates();
     this.resultsByCheckId.clear();
     this.runtimeStreams.clear();
     await this.restoreWorkspaceDefaults(workspace);
     this.lastScanPath = await this.resolveLastScanPath(workspace.path);
+    await this.primeConfiguredCheckSelection(workspace);
     this.renderState();
   }
 
@@ -846,7 +1042,9 @@ export class OpenShrikeScanController {
       throw new Error('A scan is already running. Cancel it before starting another scan.');
     }
 
+    const sameWorkspace = this.context?.workspace.path === workspace.path;
     await this.releaseReusableNativeSession();
+    this.setActiveRun(null);
     this.context = {
       workspace,
       request: null,
@@ -859,12 +1057,19 @@ export class OpenShrikeScanController {
     this.generatedAt = null;
     this.completedAtMs = null;
     this.lastDurationMs = null;
+    this.tokenUsage = null;
     this.warnings = [];
-    this.checkOrder = [];
+    if (!sameWorkspace) {
+      this.checkOrder = [];
+    }
+    this.clearTransientCheckStates();
     this.resultsByCheckId.clear();
     await this.restoreWorkspaceDefaults(workspace);
     this.runtimeStreams.clear();
     this.lastScanPath = await this.resolveLastScanPath(workspace.path);
+    if (!sameWorkspace) {
+      await this.primeConfiguredCheckSelection(workspace);
+    }
     this.renderState();
   }
 
@@ -890,6 +1095,7 @@ export class OpenShrikeScanController {
       this.scopeLabel = input.scope.label;
     }
     this.appendOutputLine(`Scan failed: ${message}`);
+    this.clearTransientCheckStates();
 
     if (input.report) {
       this.checkOrder = input.report.checks.map(check => check.id);
@@ -922,6 +1128,104 @@ export class OpenShrikeScanController {
 
     return await resolvePersistedScopeLabel(repoPath, request, scope, this.scopeLabel);
   }
+
+  private setActiveRun(activeRun: ActiveRun | null): void {
+    this.activeRun = activeRun;
+
+    if (this.activeRun) {
+      if (!this.activeRunRenderTimer) {
+        this.activeRunRenderTimer = setInterval(() => {
+          if (!this.activeRun) {
+            this.clearActiveRunRenderTimer();
+            return;
+          }
+
+          this.renderState();
+        }, ACTIVE_RUN_RENDER_INTERVAL_MS);
+      }
+
+      return;
+    }
+
+    this.clearActiveRunRenderTimer();
+  }
+
+  private takeActiveRun(): ActiveRun | null {
+    const activeRun = this.activeRun;
+    this.setActiveRun(null);
+    return activeRun;
+  }
+
+  private clearActiveRunRenderTimer(): void {
+    if (!this.activeRunRenderTimer) {
+      return;
+    }
+
+    clearInterval(this.activeRunRenderTimer);
+    this.activeRunRenderTimer = null;
+  }
+
+  private resolveTokensLabel(): string {
+    if (!this.tokenUsage) {
+      return 'n/a';
+    }
+
+    return `${formatTokenCount(this.tokenUsage.input)} / ${formatTokenCount(this.tokenUsage.output)}`;
+  }
+}
+
+function createTokenUsageState(): TokenUsageState {
+  return {
+    byMessageId: {},
+    input: 0,
+    output: 0
+  };
+}
+
+function reduceTokenUsageState(
+  previous: TokenUsageState,
+  event: ScanRuntimeEvent
+): TokenUsageState {
+  if (event.event.type !== 'message.updated') {
+    return previous;
+  }
+
+  const info = (event.event.properties as {
+    info?: {
+      id?: string;
+      role?: string;
+      tokens?: {
+        input?: number;
+        output?: number;
+      };
+    };
+  } | undefined)?.info;
+
+  if (info?.role !== 'assistant' || !info.id || !info.tokens) {
+    return previous;
+  }
+
+  const nextUsage = {
+    input: Math.max(0, info.tokens.input ?? 0),
+    output: Math.max(0, info.tokens.output ?? 0)
+  };
+  const previousUsage = previous.byMessageId[info.id] ?? {input: 0, output: 0};
+
+  return {
+    byMessageId: {
+      ...previous.byMessageId,
+      [info.id]: nextUsage
+    },
+    input: previous.input - previousUsage.input + nextUsage.input,
+    output: previous.output - previousUsage.output + nextUsage.output
+  };
+}
+
+function formatTokenCount(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: value >= 10_000 ? 0 : 1
+  }).format(value).replace('k', 'K');
 }
 
 function isMissingLastScanError(error: unknown): boolean {

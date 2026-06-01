@@ -1,0 +1,1 @@
+evidence in should pull and display actual source code not mockup. Also in the header the filename is doubled - keep only the one that is link. use the same logic for pulling source code as in TUI - maybe even reuse the code (?), i.e. extract it to some common function.

@@ -28,6 +28,7 @@ describe('VS Code scan state', () => {
       runtimeMode: 'native',
       parallelism: 'auto',
       totalChecks: 1,
+      checkIds: ['bp-sec-001-boundary-input-validation'],
       checks,
       titlesByCheckId: {
         'bp-sec-001-boundary-input-validation': 'Boundary input validation'
@@ -49,6 +50,59 @@ describe('VS Code scan state', () => {
     expect(state.findings[0]?.evidence[0]?.location).toBe('src/api/handlers.ts:42');
     expect(state.durationLabel).toBe('2.1s');
     expect(state.runtimeModeLabel).toBe('native');
+  });
+
+  it('keeps pending and in-progress checks visible before they return results', () => {
+    const state = createScanStateFromResults({
+      workspaceName: 'Workspace',
+      workspacePath: '/tmp/workspace',
+      statusKind: 'running',
+      statusLabel: 'Running bp-sec-001-boundary-input-validation',
+      generatedAt: null,
+      durationMs: 900,
+      scopeLabel: 'uncommitted changes',
+      selectionLabel: 'shared-baseline',
+      runtimeMode: 'native',
+      parallelism: 'auto',
+      totalChecks: 3,
+      checkIds: [
+        'bp-sec-001-boundary-input-validation',
+        'bp-rel-002-retries-are-bounded-and-safe',
+        'bp-test-001-behavior-changes-covered'
+      ],
+      checks: [
+        {
+          id: 'bp-sec-001-boundary-input-validation',
+          version: '1',
+          status: 'fail',
+          confidence: 'HIGH',
+          evidence: [],
+          rationale: 'Validation is missing at the request boundary.',
+          remediation: []
+        }
+      ],
+      runningCheckIds: ['bp-rel-002-retries-are-bounded-and-safe'],
+      titlesByCheckId: {
+        'bp-sec-001-boundary-input-validation': 'Boundary input validation',
+        'bp-rel-002-retries-are-bounded-and-safe': 'Retries are bounded and safe',
+        'bp-test-001-behavior-changes-covered': 'Behavior changes are covered'
+      },
+      checkMarkdownPathsByCheckId: {},
+      activeOperationLabel: 'Running bp-rel-002-retries-are-bounded-and-safe',
+      outputLines: [],
+      warnings: [],
+      lastScanPath: '/tmp/workspace/.openshrike/last-scan.md',
+      canCancel: true
+    });
+
+    expect(state.findings.map(finding => [finding.id, finding.status])).toEqual([
+      ['bp-sec-001-boundary-input-validation', 'fail'],
+      ['bp-rel-002-retries-are-bounded-and-safe', 'running'],
+      ['bp-test-001-behavior-changes-covered', 'pending']
+    ]);
+    expect(state.counts.completed).toBe(1);
+    expect(state.counts.running).toBe(1);
+    expect(state.counts.pending).toBe(1);
   });
 
   it('formats scan selection labels from saved request data', () => {

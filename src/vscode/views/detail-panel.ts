@@ -8,10 +8,13 @@ const DETAIL_VIEW_TYPE = 'openshrike.detailEditor';
 export class OpenShrikeDetailPanel implements vscode.Disposable {
   private webviewPanel: vscode.WebviewPanel | null = null;
   private readonly unsubscribe: () => void;
+  private renderRevision = 0;
 
   constructor(private readonly model: MockExtensionModel) {
     this.unsubscribe = this.model.subscribe(() => {
-      this.render();
+      void this.render().catch((error: unknown) => {
+        console.error('[OpenShrike] Failed to render detail panel', error);
+      });
     });
   }
 
@@ -48,8 +51,8 @@ export class OpenShrikeDetailPanel implements vscode.Disposable {
       this.webviewPanel.reveal(undefined, preserveFocus);
     }
 
-    this.render();
-    this.observePanelContext(this.webviewPanel.active);
+    await this.render();
+    this.observePanelContext(this.webviewPanel?.active ?? false);
   }
 
   dispose(): void {
@@ -64,8 +67,9 @@ export class OpenShrikeDetailPanel implements vscode.Disposable {
     this.observePanelContext(false);
   }
 
-  private render(): void {
-    if (!this.webviewPanel) {
+  private async render(): Promise<void> {
+    const panel = this.webviewPanel;
+    if (!panel) {
       return;
     }
 
@@ -75,10 +79,17 @@ export class OpenShrikeDetailPanel implements vscode.Disposable {
       return;
     }
 
-    this.webviewPanel.title = createPanelTitle(finding.id);
-    this.webviewPanel.webview.html = renderFindingDetailHtml({
+    const revision = ++this.renderRevision;
+    panel.title = createPanelTitle(finding.id);
+    const html = await renderFindingDetailHtml({
       viewModel: this.model.getViewModel()
     });
+
+    if (!this.webviewPanel || this.webviewPanel !== panel || revision !== this.renderRevision) {
+      return;
+    }
+
+    panel.webview.html = html;
   }
 
   private setPanelContext(active: boolean): Thenable<unknown> {

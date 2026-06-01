@@ -1,6 +1,10 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createEmptyScanState, createMockScanState, getDefaultSelectedFindingId, sortMockFindings} from '../src/vscode/mock-data.js';
 import {buildMockScanViewModel} from '../src/vscode/mock-view-model.js';
+import {createScanStateFromResults} from '../src/vscode/scan-state.js';
 import {renderChecksHtml} from '../src/vscode/views/checks-html.js';
 import {renderFindingDetailHtml} from '../src/vscode/views/detail-html.js';
 import {renderSummaryHtml} from '../src/vscode/views/summary-html.js';
@@ -88,10 +92,44 @@ describe('VS Code summary HTML', () => {
     expect(html).toContain('command:openshrike.runScanWithScopeOverride');
     expect(html).toContain('Scope: uncommitted changes');
   });
+
+  it('keeps zero-complete cancelled scans out of the fully scanned copy', () => {
+    const state = createScanStateFromResults({
+      workspaceName: 'Workspace',
+      workspacePath: '/tmp/workspace',
+      statusKind: 'cancelled',
+      statusLabel: 'Scan cancelled',
+      generatedAt: new Date('2026-05-20T10:00:00.000Z'),
+      durationMs: 1200,
+      scopeLabel: 'full repository',
+      selectionLabel: 'shared-baseline',
+      runtimeMode: 'native',
+      parallelism: 'auto',
+      totalChecks: 25,
+      checkIds: Array.from({length: 25}, (_, index) => `check-${index + 1}`),
+      checks: [],
+      titlesByCheckId: {},
+      checkMarkdownPathsByCheckId: {},
+      activeOperationLabel: 'Scan cancelled',
+      outputLines: [],
+      warnings: [],
+      lastScanPath: '/tmp/workspace/.openshrike/last-scan.md',
+      canCancel: false
+    });
+    const viewModel = buildMockScanViewModel({
+      state,
+      selectedFindingId: null,
+      sortMode: 'status'
+    });
+    const html = renderSummaryHtml(viewModel);
+
+    expect(html).toContain('25 total checks ready');
+    expect(html).not.toContain('25 total checks scanned');
+  });
 });
 
 describe('VS Code checks HTML', () => {
-  it('renders grouped findings with command links and selection styling', () => {
+  it('renders a flat findings list with command links, short ids, and selection styling', () => {
     const viewModel = buildMockScanViewModel({
       state: createMockScanState({
         workspaceName: 'Workspace',
@@ -102,18 +140,19 @@ describe('VS Code checks HTML', () => {
     });
     const html = renderChecksHtml(viewModel);
 
-    expect(html).toContain('Checks (10 of 24)');
-    expect(html).toContain('Failed');
-    expect(html).toContain('Inconclusive');
-    expect(html).toContain('Passed');
+    expect(html).toContain('Checks (10)');
+    expect(html).toContain('Sort: Status');
     expect(html).toContain('command:openshrike.selectFinding');
     expect(html).toContain('BP-SEC-001');
+    expect(html).not.toContain('BP-SEC-001-BOUNDARY-INPUT-VALIDATION');
+    expect(html).not.toContain('Status</a>');
+    expect(html).not.toContain('Failed');
     expect(html).toContain('is-selected');
   });
 });
 
 describe('VS Code view model', () => {
-  it('builds grouped findings for multiple extension surfaces', () => {
+  it('builds flat findings for multiple extension surfaces', () => {
     const state = createMockScanState({
       workspaceName: 'Workspace',
       workspacePath: '/tmp/workspace'
@@ -124,18 +163,16 @@ describe('VS Code view model', () => {
       sortMode: 'status'
     });
 
-    expect(viewModel.groups[0]?.status).toBe('fail');
-    expect(viewModel.groups[0]?.items.map(item => item.id)).toEqual(['BP-SEC-001', 'TS-ARCH-001']);
-    expect(viewModel.groups[1]?.status).toBe('unknown');
-    expect(viewModel.groups[2]?.status).toBe('pass');
+    expect(viewModel.items.slice(0, 2).map(item => item.id)).toEqual(['BP-SEC-001', 'TS-ARCH-001']);
+    expect(viewModel.items[0]?.idLabel).toBe('BP-SEC-001');
     expect(viewModel.selectedFinding?.id).toBe('BP-SEC-001');
-    expect(viewModel.statusBarText).toBe('$(sync~spin) OpenShrike: 10/24');
+    expect(viewModel.statusBarText).toBe('$(sync~spin) OpenShrike: 24/24');
     expect(viewModel.canCancel).toBe(false);
   });
 });
 
 describe('VS Code detail HTML', () => {
-  it('renders the selected finding details and escapes unsafe content', () => {
+  it('renders the selected finding details and escapes unsafe content', async () => {
     const viewModel = buildMockScanViewModel({
       state: createMockScanState({
         workspaceName: '<workspace>',
@@ -144,7 +181,7 @@ describe('VS Code detail HTML', () => {
       selectedFindingId: 'BP-SEC-001',
       sortMode: 'status'
     });
-    const html = renderFindingDetailHtml({
+    const html = await renderFindingDetailHtml({
       viewModel
     });
 
@@ -156,9 +193,79 @@ describe('VS Code detail HTML', () => {
     expect(html).toContain('>Recheck<');
     expect(html).toContain('>Auto-Fix<');
     expect(html).toContain('class="hero-head"');
-    expect(html).toContain('mock-pass');
+    expect(html).toContain('processUserData');
+    expect(html).toContain('database.users.insert');
     expect(html).toContain('openshrike.openEvidence');
     expect(html).toContain('src/api/handlers.ts:42');
     expect(html).toContain('The handler casts request data into an internal payload type before a validation schema runs.');
+  });
+
+  it('renders real source snippets for live evidence and suppresses duplicate path copy', async () => {
+    const workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-evidence-'));
+
+    try {
+      const sourceFilePath = path.join(workspacePath, 'src/api/handlers.ts');
+      await fs.mkdir(path.dirname(sourceFilePath), {recursive: true});
+      await fs.writeFile(sourceFilePath, [
+        'export async function process(req: Request) {',
+        '  const payload = req.body;',
+        '  return validate(payload);',
+        '}'
+      ].join('\n'));
+
+      const state = createScanStateFromResults({
+        workspaceName: 'Workspace',
+        workspacePath,
+        statusKind: 'completed',
+        statusLabel: 'Scan complete',
+        generatedAt: new Date('2026-05-20T10:00:00.000Z'),
+        durationMs: 1200,
+        scopeLabel: 'full repository',
+        selectionLabel: 'shared-baseline',
+        runtimeMode: 'native',
+        parallelism: 'auto',
+        totalChecks: 1,
+        checkIds: ['bp-sec-001-boundary-input-validation'],
+        checks: [
+          {
+            id: 'bp-sec-001-boundary-input-validation',
+            version: '1',
+            status: 'fail',
+            confidence: 'HIGH',
+            evidence: ['src/api/handlers.ts:2'],
+            rationale: 'Validation is missing at the request boundary.',
+            remediation: ['Validate the request before using it.']
+          }
+        ],
+        titlesByCheckId: {
+          'bp-sec-001-boundary-input-validation': 'Boundary input validation'
+        },
+        checkMarkdownPathsByCheckId: {
+          'bp-sec-001-boundary-input-validation': path.join(
+            workspacePath,
+            '.openshrike/checks/bp-sec-001-boundary-input-validation.md'
+          )
+        },
+        activeOperationLabel: 'Scan complete',
+        outputLines: [],
+        warnings: [],
+        lastScanPath: path.join(workspacePath, '.openshrike/last-scan.md'),
+        canCancel: false
+      });
+      const viewModel = buildMockScanViewModel({
+        state,
+        selectedFindingId: 'bp-sec-001-boundary-input-validation',
+        sortMode: 'status'
+      });
+      const html = await renderFindingDetailHtml({viewModel});
+
+      expect(html).toContain('const payload = req.body;');
+      expect(html).toContain('return validate(payload);');
+      expect(html).not.toContain('mock-pass');
+      expect(html).toContain('src/api/handlers.ts:2');
+      expect(html).not.toContain('class="evidence-copy">src/api/handlers.ts:2<');
+    } finally {
+      await fs.rm(workspacePath, {recursive: true, force: true});
+    }
   });
 });

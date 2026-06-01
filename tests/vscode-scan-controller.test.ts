@@ -3,7 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {ScanCommandOptions, ShrikeProjectConfig} from '../src/lib/types.js';
+import type {ScanSessionSnapshot} from '../src/lib/scan.js';
 
+const mockCreateNativeScanSession = vi.fn();
 const mockResolveScanOptions = vi.fn();
 const mockRunScan = vi.fn();
 const mockLoadLastScanState = vi.fn();
@@ -17,8 +19,13 @@ vi.mock('../src/lib/fix.js', () => ({
 }));
 
 vi.mock('../src/lib/checks.js', () => ({
+  getProjectChecksDirectory: vi.fn((repoRoot: string) => path.join(repoRoot, '.openshrike', 'checks')),
   readCheckTitle: vi.fn(),
-  resolveCheckDefinitionPath: vi.fn()
+  resolveCheckDefinitionPath: vi.fn(),
+  resolveProjectCheckSelection: vi.fn(async (_projectChecksDir: string, checkId?: string) => ({
+    checkIds: checkId ? [checkId] : ['check-a'],
+    version: '1'
+  }))
 }));
 
 vi.mock('../src/lib/last-scan.js', () => ({
@@ -37,7 +44,7 @@ vi.mock('../src/lib/scan-options.js', () => ({
 }));
 
 vi.mock('../src/lib/scan.js', () => ({
-  createNativeScanSession: vi.fn(),
+  createNativeScanSession: mockCreateNativeScanSession,
   runScan: mockRunScan
 }));
 
@@ -48,6 +55,7 @@ const {OpenShrikeScanController} = await import('../src/vscode/scan-controller.j
 const tempDirectories: string[] = [];
 
 beforeEach(() => {
+  mockCreateNativeScanSession.mockReset();
   mockResolveScanOptions.mockReset();
   mockRunScan.mockReset();
   mockLoadLastScanState.mockReset();
@@ -95,6 +103,30 @@ describe('OpenShrike scan controller', () => {
     expect(state.scopeLabel).toBe('full repository');
     expect(state.runtimeModeLabel).toBe('docker');
     expect(state.parallelismLabel).toBe('4');
+  });
+
+  it('preloads the configured checks as pending before the first run', async () => {
+    const workspacePath = await createWorkspace();
+    const workspace = {
+      name: 'Workspace',
+      path: workspacePath
+    };
+    const model = new MockExtensionModel(createEmptyScanState({
+      workspaceName: workspace.name,
+      workspacePath
+    }), null);
+    const controller = new OpenShrikeScanController(model);
+
+    await controller.initialize(workspace);
+
+    const state = model.getState();
+    expect(state.statusKind).toBe('idle');
+    expect(state.counts.total).toBe(1);
+    expect(state.counts.pending).toBe(1);
+    expect(state.findings[0]).toMatchObject({
+      id: 'check-a',
+      status: 'pending'
+    });
   });
 
   it('remembers the selected scope for future scans in the current session', async () => {
@@ -209,6 +241,151 @@ describe('OpenShrike scan controller', () => {
     expect(state.canCancel).toBe(false);
     expect(state.outputLines.at(-1)).toContain('Scan failed: Docker image build failed.');
   });
+
+  it('tracks assistant token usage for native scans', async () => {
+    const workspacePath = await createWorkspace();
+    const workspace = {
+      name: 'Workspace',
+      path: workspacePath
+    };
+    const report = makeReport(workspacePath, {
+      runtimeMode: 'native'
+    });
+    const model = new MockExtensionModel(createEmptyScanState({
+      workspaceName: workspace.name,
+      workspacePath
+    }), null);
+    const controller = new OpenShrikeScanController(model);
+
+    await controller.initialize(workspace);
+    mockResolveScanOptions.mockResolvedValue(makeOptions(workspacePath, {
+      runtimeMode: 'native',
+      scanScope: 'full'
+    }));
+    mockCreateNativeScanSession.mockImplementation((_options, _initialState, hooks) => ({
+      start: async () => {
+        hooks?.onRuntimeEvent?.({
+          checkId: 'check-a',
+          workerId: 'worker-1',
+          runtimeMode: 'native',
+          event: {
+            type: 'message.updated',
+            properties: {
+              info: {
+                id: 'assistant-message-1',
+                role: 'assistant',
+                tokens: {
+                  input: 1234,
+                  output: 56
+                }
+              }
+            }
+          }
+        });
+
+        return report;
+      },
+      getScope: () => null,
+      getReport: () => report,
+      getPersistableReport: () => report,
+      close: vi.fn().mockResolvedValue(undefined)
+    }));
+
+    await controller.runScan(workspace);
+
+    expect(model.getState().tokensLabel).toBe('1.2K / 56');
+  });
+
+  it('refreshes duration while a scan is running without waiting for progress events', async () => {
+    const workspacePath = await createWorkspace();
+    const workspace = {
+      name: 'Workspace',
+      path: workspacePath
+    };
+    const report = makeReport(workspacePath, {
+      runtimeMode: 'native'
+    });
+    const model = new MockExtensionModel(createEmptyScanState({
+      workspaceName: workspace.name,
+      workspacePath
+    }), null);
+    const controller = new OpenShrikeScanController(model);
+    let resolveStart!: (value: ReturnType<typeof makeReport>) => void;
+
+    await controller.initialize(workspace);
+    mockResolveScanOptions.mockResolvedValue(makeOptions(workspacePath, {
+      runtimeMode: 'native',
+      scanScope: 'full'
+    }));
+    mockCreateNativeScanSession.mockImplementation(() => ({
+      start: () => new Promise<ReturnType<typeof makeReport>>(resolve => {
+        resolveStart = resolve;
+      }),
+      getScope: () => null,
+      getReport: () => report,
+      getPersistableReport: () => report,
+      close: vi.fn().mockResolvedValue(undefined)
+    }));
+
+    const runPromise = controller.runScan(workspace);
+    await waitForCondition(() => model.getState().canCancel);
+    await delay(260);
+
+    expect(Number.parseFloat(model.getState().durationLabel)).toBeGreaterThanOrEqual(0.2);
+
+    resolveStart(report);
+    await runPromise;
+  });
+
+  it('ignores late native session updates after cancellation completes', async () => {
+    const workspacePath = await createWorkspace();
+    const workspace = {
+      name: 'Workspace',
+      path: workspacePath
+    };
+    const model = new MockExtensionModel(createEmptyScanState({
+      workspaceName: workspace.name,
+      workspacePath
+    }), null);
+    const controller = new OpenShrikeScanController(model);
+    let rejectStart: ((reason?: unknown) => void) | null = null;
+    let latestSnapshotHook: ((snapshot: ScanSessionSnapshot) => void) | undefined;
+
+    await controller.initialize(workspace);
+    mockResolveScanOptions.mockResolvedValue(makeOptions(workspacePath, {
+      runtimeMode: 'native',
+      scanScope: 'full'
+    }));
+    mockCreateNativeScanSession.mockImplementation((_options, _initialState, hooks) => {
+      latestSnapshotHook = hooks?.onUpdate;
+
+      return {
+        start: () => new Promise((_, reject) => {
+          rejectStart = reject;
+        }),
+        getScope: () => null,
+        getReport: () => null,
+        getPersistableReport: () => null,
+        close: vi.fn().mockImplementation(async () => {
+          rejectStart?.(new Error('Scan session closed.'));
+        })
+      };
+    });
+
+    const runPromise = controller.runScan(workspace);
+    await waitForCondition(() => model.getState().canCancel);
+    await controller.cancelScan();
+    await runPromise;
+
+    latestSnapshotHook?.(makeSessionSnapshot(workspacePath, {
+      runningCheckIds: ['check-a'],
+      statusLabel: 'Running check-a'
+    }));
+
+    const state = model.getState();
+    expect(state.statusKind).toBe('cancelled');
+    expect(state.statusLabel).toBe('Scan cancelled');
+  });
 });
 
 async function createWorkspace(overrides: {
@@ -308,4 +485,64 @@ function makeReport(
       }
     ]
   };
+}
+
+function makeSessionSnapshot(
+  repoPath: string,
+  overrides: Partial<ScanSessionSnapshot> = {}
+): ScanSessionSnapshot {
+  return {
+    request: {
+      checkId: 'check-a',
+      policyId: null,
+      projectChecksDir: null,
+      scanScope: 'uncommitted',
+      scanTarget: null,
+      runtimeMode: 'native'
+    },
+    repoPath,
+    bundleId: 'bundle-a',
+    policyVersion: '1',
+    checkOrder: ['check-a'],
+    resultsByCheckId: {},
+    runningCheckIds: [],
+    fixingCheckId: null,
+    scopeLabel: 'full repository',
+    scopeFileCount: 0,
+    isFullRepository: true,
+    completedCount: 0,
+    totalChecks: 1,
+    passedCount: 0,
+    failedCount: 0,
+    unknownCount: 0,
+    statusLabel: 'Preparing scan',
+    detailLines: [],
+    isPrepared: true,
+    isScanComplete: false,
+    report: null,
+    ...overrides
+  };
+}
+
+async function waitForCondition(
+  predicate: () => boolean,
+  timeoutMs = 1_000
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+
+    await delay(10);
+  }
+
+  throw new Error('Timed out waiting for test condition.');
+}
+
+async function delay(durationMs: number): Promise<void> {
+  await new Promise(resolve => {
+    setTimeout(resolve, durationMs);
+  });
 }
