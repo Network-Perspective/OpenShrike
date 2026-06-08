@@ -74,7 +74,9 @@ jobs:
       - name: Read package version
         id: package
         shell: bash
-        run: echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Build publishable artifacts
         shell: bash
