@@ -13,10 +13,6 @@ jobs, or distributed workflows.
 
 Return `unknown` when idempotency or side-effect safety is not visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Find retry loops, retry libraries, queue redelivery handling, or resilient

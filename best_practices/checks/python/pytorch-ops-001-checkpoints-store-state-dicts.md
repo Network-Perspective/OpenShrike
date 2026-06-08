@@ -12,10 +12,6 @@ Applies to PyTorch training and model export code that writes checkpoints.
 
 Return `unknown` when artifact writing is outside scope.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review checkpoint serialization code.

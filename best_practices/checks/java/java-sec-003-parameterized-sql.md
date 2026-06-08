@@ -12,10 +12,6 @@ Applies when the diff introduces or changes raw SQL or native query paths.
 
 Return `unknown` when the final query renderer is hidden behind abstractions.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review changed SQL strings and native query APIs.

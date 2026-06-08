@@ -14,10 +14,6 @@ synchronously.
 Return `unknown` when the code is ordinary application logic with no clear
 allocation pressure.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Find async APIs returning `Task` or `ValueTask`.

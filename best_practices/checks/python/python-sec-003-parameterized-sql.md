@@ -12,10 +12,6 @@ Applies when the diff builds raw SQL, text queries, or driver-level statements.
 
 Return `unknown` when the final SQL generation is hidden behind a wrapper.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review raw SQL and query-building code.

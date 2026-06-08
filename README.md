@@ -59,7 +59,19 @@ in CI, against the LLM provider of your choice.
 
 Prerequisite: [Node.js 22+](https://nodejs.org/en/download).
 
-Install the latest GitHub release:
+Install the CLI from npm:
+
+```bash
+npm install -g @networkperspective/openshrike
+```
+
+Install the VS Code extension:
+
+```bash
+code --install-extension networkperspective.openshrike
+```
+
+Or install the latest GitHub release bundle:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Network-Perspective/OpenShrike/main/install | bash

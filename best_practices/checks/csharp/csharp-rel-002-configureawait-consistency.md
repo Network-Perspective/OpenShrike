@@ -17,10 +17,6 @@ Applies only to:
 Return `unknown` for ordinary ASP.NET Core application code unless the repo has
 an explicit policy stating otherwise.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Determine whether the project is a reusable library or a context-sensitive

@@ -14,10 +14,6 @@ Applies when the code starts external processes through `ProcessStartInfo`,
 Return `unknown` when the process wrapper exists but input provenance is not
 visible.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Find `ProcessStartInfo` and process-launch wrappers.

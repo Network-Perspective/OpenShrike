@@ -17,10 +17,6 @@ Return `unknown` when:
   contract, or
 - packaging and consumer expectations are not visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Look for package-producing projects or shared libraries with public types.

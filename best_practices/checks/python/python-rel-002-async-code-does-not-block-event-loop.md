@@ -13,10 +13,6 @@ workers, or other async Python code.
 
 Return `unknown` when the runtime model is not clearly async.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review async functions and handlers in the diff.

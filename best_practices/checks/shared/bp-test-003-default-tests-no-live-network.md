@@ -13,10 +13,6 @@ developer and CI path.
 
 Return `unknown` when the test-suite taxonomy is not visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review tests for real URLs, cloud resources, or ambient credential use.

@@ -13,10 +13,6 @@ validity, or any other time-sensitive behavior.
 
 Return `unknown` when the changed tests are not time-sensitive.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Search test code for `DateTime.Now`, `DateTime.UtcNow`, `DateTimeOffset.UtcNow`,

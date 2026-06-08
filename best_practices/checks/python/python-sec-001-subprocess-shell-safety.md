@@ -13,10 +13,6 @@ or wrappers around them.
 
 Return `unknown` when input provenance is not visible.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Find subprocess calls in changed code.

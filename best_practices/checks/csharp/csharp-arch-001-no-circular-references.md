@@ -15,10 +15,6 @@ Return `unknown` when:
 - the relevant `.csproj` files are outside the available review scope, or
 - the repository is effectively a single-project application.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Inspect `<ProjectReference>` edges across `.csproj` files.

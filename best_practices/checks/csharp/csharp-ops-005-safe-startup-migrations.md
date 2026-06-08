@@ -13,10 +13,6 @@ from application startup code.
 
 Return `unknown` when migration ownership is not visible in scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Search for `Database.Migrate()`, migration runners, or startup migration

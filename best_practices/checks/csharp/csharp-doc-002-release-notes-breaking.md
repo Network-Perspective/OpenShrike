@@ -13,10 +13,6 @@ Applies only to externally versioned libraries, SDKs, or public API contracts.
 Return `unknown` for internal-only services or when release-note ownership is
 not visible.
 
-## Strategy
-
-`reasoning`
-
 ## What to inspect
 
 1. Identify breaking changes to public APIs or documented contracts.

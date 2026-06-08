@@ -13,10 +13,6 @@ transforms alongside trained artifacts.
 
 Return `unknown` when only one side of the train/serve boundary is visible.
 
-## Strategy
-
-`reasoning`
-
 ## What to inspect
 
 1. Review how features are transformed during training.

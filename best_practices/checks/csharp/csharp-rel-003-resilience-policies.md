@@ -14,10 +14,6 @@ services, queues, caches, or other remote dependencies.
 Return `unknown` when idempotency or retry safety cannot be established from
 the available scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Find outbound clients introduced or changed in the diff.

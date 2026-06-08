@@ -12,10 +12,6 @@ Applies to PyTorch validation, test, and inference code.
 
 Return `unknown` when execution is hidden behind helpers out of scope.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review validation and inference loops.

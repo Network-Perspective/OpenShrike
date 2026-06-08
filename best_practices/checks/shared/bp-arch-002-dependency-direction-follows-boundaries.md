@@ -13,10 +13,6 @@ identifiable boundaries.
 
 Return `unknown` when no meaningful layering is visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Determine the intended boundary from repo layout, names, or existing code.

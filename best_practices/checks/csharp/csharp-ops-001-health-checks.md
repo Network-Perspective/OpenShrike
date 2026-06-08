@@ -14,10 +14,6 @@ resources such as databases, queues, caches, or critical upstream services.
 Return `unknown` for libraries and for apps whose runtime topology is not
 visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Find service startup and health-check registration.

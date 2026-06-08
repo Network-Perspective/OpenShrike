@@ -16,10 +16,6 @@ Return `unknown` when:
 - the repository is too small to have module boundaries, or
 - the dependency graph is not visible from the available evidence.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review changed imports, references, package links, or service dependencies.

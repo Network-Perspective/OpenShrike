@@ -14,10 +14,6 @@ system.
 
 Return `unknown` when the boundary validation pipeline is not visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Identify changed external input models and handlers.

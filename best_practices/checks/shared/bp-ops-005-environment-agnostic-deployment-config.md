@@ -13,10 +13,6 @@ deployment scripts, and other committed runtime configuration.
 
 Return `unknown` when deployment config is not in scope.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review changed deployment and infrastructure config.

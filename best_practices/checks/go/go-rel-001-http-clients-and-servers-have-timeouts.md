@@ -13,10 +13,6 @@ HTTP servers.
 
 Return `unknown` when shared wrappers likely own timeout policy outside scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review `http.Client`, transport config, and server construction.

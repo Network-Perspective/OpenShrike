@@ -14,10 +14,6 @@ expressions from external or semi-trusted input.
 Return `unknown` when the deserialization wrapper exists but its loader choice is
 out of scope.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Search for `pickle.load(s)`, `joblib.load`, `yaml.load`, `eval`, `exec`, and

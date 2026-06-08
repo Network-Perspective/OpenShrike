@@ -21,10 +21,6 @@ Return `unknown` when:
 - the change is pure infrastructure or platform work, or
 - the repository is too small for slice boundaries to be meaningful.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Establish whether the surrounding repository is already slice-oriented.

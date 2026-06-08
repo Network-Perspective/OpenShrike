@@ -17,10 +17,6 @@ Return `unknown` when:
 - the repository intentionally owns a singleton/static `HttpClient` in a small
   SDK wrapper and the lifetime strategy is clear.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Search for `new HttpClient()` in production code.

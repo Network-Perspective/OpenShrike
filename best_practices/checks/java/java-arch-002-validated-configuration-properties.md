@@ -14,10 +14,6 @@ single bootstrap lookup.
 Return `unknown` when the project is not using externalized configuration in a
 structured way.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review changed config access through `Environment`, `@Value`, or raw property

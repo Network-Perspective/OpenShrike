@@ -14,10 +14,6 @@ imports beyond a single script.
 Return `unknown` when the repo is intentionally script-style and not organized
 as importable modules.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review top-level module code added or changed in the diff.

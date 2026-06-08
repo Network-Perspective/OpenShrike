@@ -13,10 +13,6 @@ that execute external processes.
 Return `unknown` when the process wrapper exists but input provenance is out of
 scope.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review `exec`, `execSync`, `spawn`, `spawnSync`, `fork`, and wrapper calls.

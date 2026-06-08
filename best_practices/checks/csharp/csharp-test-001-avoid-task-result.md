@@ -12,10 +12,6 @@ Applies when test code calls async APIs or awaits asynchronous side effects.
 
 Return `unknown` when no async code is involved.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Search test projects for `.Result`, `.Wait()`, and `.GetAwaiter().GetResult()`.

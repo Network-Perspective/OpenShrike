@@ -14,10 +14,6 @@ keys, or generates security-sensitive randomness.
 Return `unknown` when the changed code references crypto indirectly through a
 well-known library and the implementation is out of scope.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Find `System.Security.Cryptography` usage and any custom crypto helpers.

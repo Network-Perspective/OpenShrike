@@ -13,10 +13,6 @@ suppression around type safety, or equivalent bypasses.
 
 Return `unknown` when the suppression reason is owned by generated code.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review new or changed suppression comments.

@@ -13,10 +13,6 @@ can grow beyond a small fixed set.
 
 Return `unknown` when the underlying dataset size is not visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review endpoints returning collections.

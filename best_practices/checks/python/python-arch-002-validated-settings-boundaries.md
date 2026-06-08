@@ -14,10 +14,6 @@ one-off lookup in bootstrap code.
 Return `unknown` when the code is a tiny script or the configuration surface is
 not visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Look for repeated `os.getenv`, `os.environ`, dotenv, or config-dict lookups

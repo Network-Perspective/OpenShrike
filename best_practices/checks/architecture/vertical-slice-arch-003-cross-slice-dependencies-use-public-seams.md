@@ -17,10 +17,6 @@ Return `unknown` when:
 - only one slice is in scope, or
 - the repository is too small for cross-slice coupling to matter.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Identify imports, references, or calls from one slice into another.

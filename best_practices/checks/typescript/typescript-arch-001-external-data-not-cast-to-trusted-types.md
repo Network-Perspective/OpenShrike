@@ -14,10 +14,6 @@ boundary.
 
 Return `unknown` when runtime validation may exist in helpers outside scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review trust-boundary parsing and handler code.

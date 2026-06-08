@@ -14,10 +14,6 @@ cross-team contracts.
 Return `unknown` when the code is purely internal and not consumed outside the
 module.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review exported functions, classes, interfaces, and DTO types changed in the

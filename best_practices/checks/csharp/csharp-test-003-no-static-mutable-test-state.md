@@ -11,10 +11,6 @@ Applies to test projects and test fixtures.
 
 Return `unknown` only when the relevant test support code is out of scope.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Search test code for mutable `static` fields, properties, collections, and

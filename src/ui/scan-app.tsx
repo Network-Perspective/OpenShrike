@@ -1,10 +1,18 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, render, useApp, useInput, useStdout} from 'ink';
 import {ScrollView, type ScrollViewRef} from 'ink-scroll-view';
 import {readCheckTitle} from '../lib/checks.js';
 import {CliError} from '../lib/cli-error.js';
+import {formatCheckIdDisplay} from '../lib/check-display.js';
+import {
+  buildEvidenceFallbackPreviews,
+  loadEvidencePreviews,
+  parseEvidenceLocation,
+  resolveEvidenceWindow,
+  type EvidencePreview,
+  type EvidenceLocation
+} from '../lib/evidence.js';
 import {
   buildEmptyScopeFallbackOptions,
   resolveDefaultEmptyScopeFallbackAction,
@@ -25,6 +33,8 @@ import type {
   ScanReport,
   ScanRuntimeEvent
 } from '../lib/types.js';
+
+export {formatCheckIdDisplay};
 
 type SectionViewMode = 'detail' | 'list';
 type CheckDisplayStatus = CheckStatus | 'pending' | 'running' | 'fixing';
@@ -71,19 +81,6 @@ interface TokenUsageState {
   output: number;
 }
 
-export interface EvidenceLocation {
-  filePath: string;
-  startLine: number;
-  endLine: number;
-}
-
-interface EvidencePreview {
-  raw: string;
-  location: EvidenceLocation | null;
-  displayLabel: string;
-  lines: Array<{number: number; text: string}> | null;
-}
-
 interface ProgressViewState {
   scopeLabel: string;
   scopeFileCount: number;
@@ -114,6 +111,9 @@ interface SummaryMetricProps {
   value: string;
   width: number;
 }
+
+export {parseEvidenceLocation, resolveEvidenceWindow};
+export type {EvidenceLocation};
 
 interface CheckListModuleProps {
   checks: DisplayCheck[];
@@ -1864,9 +1864,7 @@ function EvidenceBlock(props: {
     setPreviews(buildEvidenceFallbackPreviews(props.evidence));
 
     void (async () => {
-      const nextPreviews = await Promise.all(
-        props.evidence.map(evidence => buildEvidencePreview(evidence, props.repoPath))
-      );
+      const nextPreviews = await loadEvidencePreviews(props.evidence, props.repoPath);
 
       if (!active) {
         return;
@@ -2371,19 +2369,6 @@ function getRunningIndicatorFrame(elapsedMs: number): string {
   return RUNNING_SPINNER_FRAMES[frameIndex] ?? RUNNING_SPINNER_FRAMES[0];
 }
 
-export function formatCheckIdDisplay(checkId: string): string {
-  const parts = checkId
-    .split('-')
-    .map(part => part.trim())
-    .filter(Boolean);
-  const numericIndex = parts.findIndex(part => /^\d+$/u.test(part));
-  const visibleParts = numericIndex >= 0
-    ? parts.slice(0, numericIndex + 1)
-    : parts.slice(0, Math.min(parts.length, 3));
-
-  return visibleParts.join('-').toUpperCase();
-}
-
 function formatConfidence(value: CheckResult['confidence']): string {
   return value.slice(0, 1) + value.slice(1).toLowerCase();
 }
@@ -2442,118 +2427,6 @@ function splitMultilineText(value: string): string[] {
   return value.split(/\r?\n/u).map(line => line || ' ');
 }
 
-export function parseEvidenceLocation(value: string): EvidenceLocation | null {
-  const match = /^(?<file>.+?):(?<start>\d+)(?::\d+)?(?:-(?<end>\d+)(?::\d+)?)?$/u.exec(value.trim());
-  if (!match?.groups?.file || !match.groups.start) {
-    return null;
-  }
-
-  const startLine = Number.parseInt(match.groups.start, 10);
-  const endLine = Number.parseInt(match.groups.end ?? match.groups.start, 10);
-  if (!Number.isFinite(startLine) || !Number.isFinite(endLine)) {
-    return null;
-  }
-
-  return {
-    filePath: match.groups.file,
-    startLine: Math.max(1, Math.min(startLine, endLine)),
-    endLine: Math.max(1, Math.max(startLine, endLine))
-  };
-}
-
-export function resolveEvidenceWindow(
-  location: EvidenceLocation,
-  totalLines: number
-): {startLine: number; endLine: number} | null {
-  const span = location.endLine - location.startLine + 1;
-  if (span > 3) {
-    return null;
-  }
-
-  if (span === 1) {
-    return {
-      startLine: Math.max(1, location.startLine - 1),
-      endLine: Math.min(totalLines, location.endLine + 1)
-    };
-  }
-
-  return {
-    startLine: Math.max(1, location.startLine),
-    endLine: Math.min(totalLines, location.endLine)
-  };
-}
-
-async function buildEvidencePreview(
-  evidence: string,
-  repoPath: string
-): Promise<EvidencePreview> {
-  const location = parseEvidenceLocation(evidence);
-  if (!location) {
-    return {
-      raw: evidence,
-      location: null,
-      displayLabel: evidence,
-      lines: null
-    };
-  }
-
-  try {
-    const fileContents = await fs.readFile(path.resolve(repoPath, location.filePath), 'utf8');
-    const sourceLines = fileContents.split(/\r?\n/u);
-    const window = resolveEvidenceWindow(location, sourceLines.length);
-
-    return {
-      raw: evidence,
-      location,
-      displayLabel: formatEvidenceLabel(location),
-      lines: window
-        ? buildPreviewLines(sourceLines, window.startLine, window.endLine)
-        : null
-    };
-  } catch {
-    return {
-      raw: evidence,
-      location,
-      displayLabel: formatEvidenceLabel(location),
-      lines: null
-    };
-  }
-}
-
-function buildEvidenceFallbackPreviews(evidence: string[]): EvidencePreview[] {
-  return evidence.map(item => {
-    const location = parseEvidenceLocation(item);
-    return {
-      raw: item,
-      location,
-      displayLabel: location ? formatEvidenceLabel(location) : item,
-      lines: null
-    };
-  });
-}
-
-function buildPreviewLines(
-  sourceLines: string[],
-  startLine: number,
-  endLine: number
-): Array<{number: number; text: string}> {
-  const lines: Array<{number: number; text: string}> = [];
-
-  for (let lineNumber = startLine; lineNumber <= endLine; lineNumber += 1) {
-    lines.push({
-      number: lineNumber,
-      text: sourceLines[lineNumber - 1] ?? ''
-    });
-  }
-
-  return lines;
-}
-
-function formatEvidenceLabel(location: EvidenceLocation): string {
-  return location.startLine === location.endLine
-    ? `${location.filePath}:${location.startLine}`
-    : `${location.filePath}:${location.startLine}-${location.endLine}`;
-}
 
 export function buildProgressSegments(options: {
   failedCount: number;

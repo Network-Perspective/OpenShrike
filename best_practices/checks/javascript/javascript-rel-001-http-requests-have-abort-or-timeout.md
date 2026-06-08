@@ -13,10 +13,6 @@ Axios, got, undici, cloud SDK wrappers, or equivalent clients.
 
 Return `unknown` when a wrapper likely owns the timeout but is outside scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review outbound HTTP calls or shared client configuration.

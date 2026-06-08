@@ -18,10 +18,6 @@ Return `unknown` when:
 - the shared abstraction predates the diff and is not meaningfully changed, or
 - the visible scope does not show enough call sites to judge reuse.
 
-## Strategy
-
-`reasoning`
-
 ## What to inspect
 
 1. Review new or expanded shared modules, base classes, generic services, or

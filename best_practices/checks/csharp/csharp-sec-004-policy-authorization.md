@@ -13,10 +13,6 @@ entry points that mutate state or expose protected data.
 
 Return `unknown` when the route or consumer exposure level is unclear.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Find entry points added or changed in the diff.

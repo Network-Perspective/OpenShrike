@@ -13,10 +13,6 @@ Applies to worker, scheduler, blocking I/O, and concurrency code that catches
 
 Return `unknown` when the diff does not touch interruptible code.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review `catch (InterruptedException ...)` blocks.

@@ -14,10 +14,6 @@ equivalent wrappers.
 Return `unknown` when a shared client wrapper likely owns timeouts outside
 scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review outbound client construction and request paths.

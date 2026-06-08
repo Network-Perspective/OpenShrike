@@ -16,10 +16,6 @@ Return `unknown` when:
 - the change is clearly non-behavioral, or
 - existing coverage proving the new behavior is not visible in scope.
 
-## Strategy
-
-`reasoning`
-
 ## What to inspect
 
 1. Review changed production files for behavioral changes.

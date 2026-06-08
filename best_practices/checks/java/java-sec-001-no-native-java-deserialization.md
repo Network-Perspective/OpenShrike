@@ -13,10 +13,6 @@ serialization-based remoting patterns.
 
 Return `unknown` when wrapper abstractions hide the serializer choice.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review `ObjectInputStream`, Java serialization APIs, XML decoders, and

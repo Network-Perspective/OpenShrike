@@ -92,17 +92,6 @@ not be part of the default baseline.
 - `unknown`: the rule does not apply, or the available evidence is not strong
   enough to justify a fail.
 
-## Strategy hints
-
-Checks declare one of three strategy hints:
-
-- `static`: a deterministic pattern or repository query should be enough.
-- `heuristic`: a structured search plus judgment is needed.
-- `reasoning`: the check depends on software design judgment.
-
-For the current MVP, all checks still run through the agent. The strategy hint
-exists to keep the library ready for future extraction into faster tooling.
-
 ## Required shape of a check
 
 Each check should define:
@@ -110,7 +99,6 @@ Each check should define:
 - ID and title.
 - Intent.
 - Applicability, including when to return `unknown`.
-- Strategy hint.
 - What to inspect.
 - Pass criteria.
 - Fail criteria.

@@ -14,10 +14,6 @@ external data.
 Return `unknown` when serialization code is referenced indirectly but the
 implementation is not visible.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Search for `BinaryFormatter`, `NetDataContractSerializer`, `LosFormatter`,

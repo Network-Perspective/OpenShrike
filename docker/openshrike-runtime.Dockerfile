@@ -9,13 +9,13 @@ WORKDIR /workspace/tool
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY tsconfig.json vitest.config.ts ./
+COPY tsconfig.json vitest.config.ts tsup.cli.config.ts ./
 COPY prompts ./prompts
 COPY src ./src
 COPY best_practices ./best_practices
 COPY docs ./docs
 
-RUN npm run build
+RUN npm run build:cli
 
 ENV PATH="/workspace/tool/node_modules/.bin:${PATH}"
 

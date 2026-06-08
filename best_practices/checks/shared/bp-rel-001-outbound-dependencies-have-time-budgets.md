@@ -13,10 +13,6 @@ polling, or blocking on external systems.
 Return `unknown` when the relevant client wrapper or timeout policy is outside
 visible scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Find outbound calls and waits introduced or changed in the diff.

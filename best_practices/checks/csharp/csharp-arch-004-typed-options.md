@@ -17,10 +17,6 @@ Return `unknown` when:
 - the repository does not use the options pattern and the change does not touch
   configuration structure.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Find repeated `IConfiguration["Section:Key"]` lookups or direct section

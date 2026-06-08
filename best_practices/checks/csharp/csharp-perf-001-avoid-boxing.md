@@ -17,10 +17,6 @@ example:
 
 Return `unknown` otherwise.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Look for value types being converted to `object` or non-generic interfaces

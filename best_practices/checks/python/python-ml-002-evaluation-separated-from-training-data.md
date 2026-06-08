@@ -12,10 +12,6 @@ model performance.
 
 Return `unknown` when the diff does not touch evaluation or metric reporting.
 
-## Strategy
-
-`reasoning`
-
 ## What to inspect
 
 1. Review how metrics are computed and reported.

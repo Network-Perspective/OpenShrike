@@ -13,10 +13,6 @@ other long-running service loops.
 
 Return `unknown` when no long-running worker code is in scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Find long-running loops and worker implementations.

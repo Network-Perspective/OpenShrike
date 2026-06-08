@@ -15,10 +15,6 @@ Return `unknown` when:
 - the project does not use a DI container, or
 - only framework bootstrap code is visible.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Search for `IServiceProvider`, `GetRequiredService`, `GetService`, and

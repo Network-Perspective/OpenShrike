@@ -14,10 +14,6 @@ handlers that accept external input.
 Return `unknown` when the boundary layer is not visible or validation is
 centralized outside the reviewed scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Identify changed external input DTOs or handlers.

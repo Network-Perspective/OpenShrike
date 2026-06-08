@@ -26,3 +26,4 @@ isolate.sh
 .openshrike-debug/*
 .openshrike/artifacts/*
 .npm-cache/*
+.vscode-test/*

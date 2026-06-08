@@ -12,10 +12,6 @@ Applies to PyTorch training, validation, testing, and inference loops.
 
 Return `unknown` when the diff does not touch loop control or module execution.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review train, validation, and inference loops.

@@ -12,10 +12,6 @@ Applies when the repository builds or ships a .NET container image.
 
 Return `unknown` when the container build definition is not visible.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Inspect `Dockerfile` or equivalent container build definition.

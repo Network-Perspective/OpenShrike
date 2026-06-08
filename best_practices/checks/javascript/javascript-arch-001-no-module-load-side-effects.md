@@ -13,10 +13,6 @@ Applies to Node.js services, CLIs, workers, and reusable packages.
 Return `unknown` when the repo is intentionally a single script with no module
 reuse.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review top-level module code in changed files.

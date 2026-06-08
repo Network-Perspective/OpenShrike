@@ -12,10 +12,6 @@ Applies when the diff introduces or changes raw SQL or query fragments.
 
 Return `unknown` when the final query rendering is hidden behind helpers.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review SQL strings and driver calls.

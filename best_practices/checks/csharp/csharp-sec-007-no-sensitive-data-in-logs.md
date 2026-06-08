@@ -13,10 +13,6 @@ personal data, request/response bodies, or third-party credentials.
 Return `unknown` when logging code is touched only indirectly and the payload
 shape is not visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review log statements and exception handling in the changed code.

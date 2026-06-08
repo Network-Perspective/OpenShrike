@@ -14,10 +14,6 @@ graphs.
 Return `unknown` when the repository is a tiny script or the assembly pattern is
 not visible.
 
-## Strategy
-
-`reasoning`
-
 ## What to inspect
 
 1. Review how changed code acquires collaborators.

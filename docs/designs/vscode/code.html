@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>OpenShrike Scan</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 16;
+        }
+        /* Custom scrollbar for webkit */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #464646; 
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555555; 
+        }
+        ::-webkit-scrollbar-thumb:active {
+            background: #555555; 
+        }
+        ::-webkit-scrollbar-corner {
+            background: transparent;
+        }
+    </style>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+                "surface-dim": "#1e1e1e",
+                "on-primary": "#ffffff",
+                "secondary-container": "#454950",
+                "primary-fixed": "#007fd4",
+                "on-primary-container": "#ffffff",
+                "surface-container-high": "#2d2d2d",
+                "status-error": "#f14c4c",
+                "secondary-fixed": "#dfe2eb",
+                "error": "#f14c4c",
+                "error-container": "#5a1d1d",
+                "on-primary-fixed-variant": "#005322",
+                "inverse-surface": "#cccccc",
+                "primary-fixed-dim": "#0e639c",
+                "primary-container": "#0e639c",
+                "primary": "#cccccc",
+                "on-tertiary-container": "#795f16",
+                "inverse-on-surface": "#293329",
+                "status-inconclusive": "#8B949E",
+                "on-secondary": "#2d3137",
+                "outline-variant": "#2b2d2f",
+                "on-secondary-fixed-variant": "#43474e",
+                "secondary": "#cccccc",
+                "surface-container": "#1e1e1e",
+                "on-secondary-fixed": "#181c22",
+                "secondary-fixed-dim": "#cccccc",
+                "inverse-primary": "#006e2f",
+                "tertiary": "#fffbf9",
+                "tertiary-fixed": "#ffdf96",
+                "tertiary-fixed-dim": "#e5c370",
+                "surface-container-highest": "#37373d",
+                "on-background": "#cccccc",
+                "on-tertiary-fixed": "#251a00",
+                "on-tertiary": "#3e2e00",
+                "outline": "#3b3b3b",
+                "surface-tint": "#00e46a",
+                "status-warning": "#cca700",
+                "surface-container-low": "#181818",
+                "on-primary-fixed": "#ffffff",
+                "on-tertiary-fixed-variant": "#5a4400",
+                "on-surface-variant": "#858585",
+                "tertiary-container": "#ffdb86",
+                "surface-container-lowest": "#1e1e1e",
+                "on-error": "#ffffff",
+                "surface": "#1e1e1e",
+                "background": "#1e1e1e",
+                "on-surface": "#cccccc",
+                "surface-bright": "#333333",
+                "border-subtle": "#454545",
+                "on-error-container": "#ffdad6",
+                "terminal-black": "#1e1e1e",
+                "surface-variant": "#252526",
+                "on-secondary-container": "#b5b8c1"
+        },
+        "borderRadius": {
+                "DEFAULT": "0.125rem",
+                "lg": "0.25rem",
+                "xl": "0.5rem",
+                "full": "0.75rem"
+        },
+        "spacing": {
+                "stack-sm": "8px",
+                "stack-md": "16px",
+                "gutter": "16px",
+                "unit": "4px",
+                "stack-xs": "4px",
+                "margin-panel": "12px"
+        },
+        "fontFamily": {
+                "label-caps": [
+                        "Segoe UI", "Ubuntu", "Helvetica Neue", "sans-serif"
+                ],
+                "headline-md": [
+                        "Segoe UI", "Ubuntu", "Helvetica Neue", "sans-serif"
+                ],
+                "status-sm": [
+                        "Consolas", "Monaco", "Courier New", "monospace"
+                ],
+                "body-md": [
+                        "Segoe UI", "Ubuntu", "Helvetica Neue", "sans-serif"
+                ],
+                "code-md": [
+                        "Consolas", "Monaco", "Courier New", "monospace"
+                ],
+                "headline-lg": [
+                        "Segoe UI", "Ubuntu", "Helvetica Neue", "sans-serif"
+                ]
+        },
+        "fontSize": {
+                "label-caps": [
+                        "11px",
+                        {
+                                "lineHeight": "16px",
+                                "letterSpacing": "0.05em",
+                                "fontWeight": "700"
+                        }
+                ],
+                "headline-md": [
+                        "20px",
+                        {
+                                "lineHeight": "28px",
+                                "fontWeight": "600"
+                        }
+                ],
+                "status-sm": [
+                        "12px",
+                        {
+                                "lineHeight": "16px",
+                                "fontWeight": "700"
+                        }
+                ],
+                "body-md": [
+                        "13px",
+                        {
+                                "lineHeight": "20px",
+                                "fontWeight": "400"
+                        }
+                ],
+                "code-md": [
+                        "13px",
+                        {
+                                "lineHeight": "20px",
+                                "fontWeight": "400"
+                        }
+                ],
+                "headline-lg": [
+                        "24px",
+                        {
+                                "lineHeight": "32px",
+                                "fontWeight": "700"
+                        }
+                ]
+        }
+},
+    },
+  }
+</script>
+</head>
+<body class="bg-terminal-black text-on-surface h-screen w-full overflow-hidden flex flex-col font-body-md text-body-md select-none cursor-default">
+<!-- Header area, representing TopAppBar (Title Bar) -->
+<header class="bg-surface-container-high dark:bg-surface-container-high flex justify-center items-center w-full h-[30px] flex-shrink-0 relative border-b border-border-subtle">
+<div class="absolute left-3 flex items-center space-x-4">
+<img alt="OpenShrike Logo" class="w-4 h-4 object-contain" src="https://lh3.googleusercontent.com/aida/ADBb0uggLgh5g6pjkOBAHEwyLZAijrsYukTK1rQMoyK8_M_pfDfRQ1FUrRWdcOTiJpQbV3ZXU0hU9iDWYEh9WPYJQM2Glj3W-a0VcBjiu7PtGyvuHDjFlJ83fSbxFjZdSCZpwgzxC4tAUO8khFnJc6zSfEZTQ5rt9W8SwgEGsjfccW0_enkSkYHH3gVj3oT9Vlpp667LHq4DQfqMMv-9aEJ4z5tAMsr2gODvFrCBdX-TN5p0G5tZ-h4W-Xf2bKQ"/>
+<nav class="hidden md:flex space-x-4 h-full items-center text-[13px]">
+<a class="text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest px-2 py-1 rounded transition-colors" href="#">File</a>
+<a class="text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest px-2 py-1 rounded transition-colors" href="#">Edit</a>
+<a class="text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest px-2 py-1 rounded transition-colors" href="#">Selection</a>
+<a class="text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest px-2 py-1 rounded transition-colors" href="#">View</a>
+<a class="text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest px-2 py-1 rounded transition-colors" href="#">Go</a>
+<a class="text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest px-2 py-1 rounded transition-colors" href="#">Run</a>
+<a class="text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest px-2 py-1 rounded transition-colors" href="#">Terminal</a>
+<a class="text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest px-2 py-1 rounded transition-colors" href="#">Help</a>
+</nav>
+</div>
+<span class="text-[13px] text-on-surface-variant">OpenShrike Scan - Visual Studio Code</span>
+<div class="absolute right-0 flex items-center h-full">
+<div class="flex space-x-1 h-full px-2">
+<button class="w-11 h-full flex justify-center items-center hover:bg-surface-container-highest text-on-surface-variant"><span class="material-symbols-outlined text-[16px]">minimize</span></button>
+<button class="w-11 h-full flex justify-center items-center hover:bg-surface-container-highest text-on-surface-variant"><span class="material-symbols-outlined text-[16px]">check_box_outline_blank</span></button>
+<button class="w-11 h-full flex justify-center items-center hover:bg-status-error hover:text-on-primary text-on-surface-variant"><span class="material-symbols-outlined text-[16px]">close</span></button>
+</div>
+</div>
+</header>
+<!-- Main Workspace -->
+<div class="flex flex-1 overflow-hidden">
+<!-- Activity Bar (Far Left Nav) -->
+<div class="w-[48px] bg-surface-container-high flex flex-col items-center py-2 flex-shrink-0 z-10 text-on-surface-variant border-r border-border-subtle">
+<div class="flex flex-col space-y-0 w-full">
+<a class="w-full flex justify-center py-3 hover:text-on-surface transition-colors relative cursor-pointer" href="#" title="Explorer">
+<span class="material-symbols-outlined text-[24px]">file_copy</span>
+</a>
+<a class="w-full flex justify-center py-3 hover:text-on-surface transition-colors relative cursor-pointer" href="#" title="Search">
+<span class="material-symbols-outlined text-[24px]">search</span>
+</a>
+<a class="w-full flex justify-center py-3 hover:text-on-surface transition-colors relative cursor-pointer" href="#" title="Source Control">
+<span class="material-symbols-outlined text-[24px]">share</span>
+</a>
+<a class="w-full flex justify-center py-3 hover:text-on-surface transition-colors relative cursor-pointer" href="#" title="Run and Debug">
+<span class="material-symbols-outlined text-[24px]">bug_report</span>
+</a>
+<a class="w-full flex justify-center py-3 hover:text-on-surface transition-colors relative cursor-pointer" href="#" title="Extensions">
+<span class="material-symbols-outlined text-[24px]">grid_view</span>
+</a>
+<a class="w-full flex justify-center py-3 text-on-surface relative cursor-pointer active:opacity-80" href="#" title="OpenShrike">
+<div class="absolute left-0 top-0 bottom-0 w-[2px] bg-primary-fixed"></div>
+<span class="material-symbols-outlined text-[24px]">security</span>
+</a>
+</div>
+<div class="mt-auto flex flex-col space-y-0 w-full">
+<a class="w-full flex justify-center py-3 hover:text-on-surface transition-colors cursor-pointer" href="#" title="Accounts">
+<span class="material-symbols-outlined text-[24px]">account_circle</span>
+</a>
+<a class="w-full flex justify-center py-3 hover:text-on-surface transition-colors cursor-pointer" href="#" title="Manage">
+<span class="material-symbols-outlined text-[24px]">settings</span>
+</a>
+</div>
+</div>
+<!-- Secondary Sidebar (OpenShrike Panel) -->
+<div class="w-[300px] bg-surface-variant flex flex-col flex-shrink-0 h-full overflow-hidden border-r border-border-subtle">
+<!-- Sidebar Header -->
+<div class="px-5 py-3 flex items-center justify-between text-[11px] uppercase tracking-wide border-b border-border-subtle">
+<h2 class="text-on-surface font-label-caps">OpenShrike Scan</h2>
+<div class="flex space-x-1">
+<button class="hover:bg-surface-container-highest p-1 rounded text-on-surface-variant hover:text-on-surface" title="Refresh">
+<span class="material-symbols-outlined text-[16px]">refresh</span>
+</button>
+<button class="hover:bg-surface-container-highest p-1 rounded text-on-surface-variant hover:text-on-surface" title="Collapse All">
+<span class="material-symbols-outlined text-[16px]">collapse_all</span>
+</button>
+</div>
+</div>
+<!-- Scan Summary Section -->
+<div class="flex-shrink-0 flex flex-col border-b border-border-subtle">
+<div class="flex items-center px-1 py-0.5 bg-surface-variant text-[11px] font-bold text-on-surface cursor-pointer hover:bg-surface-container-highest">
+<span class="material-symbols-outlined text-[16px] mr-1">keyboard_arrow_down</span>
+<span class="uppercase">Summary</span>
+</div>
+<div class="p-4 pt-2">
+<div class="grid grid-cols-2 gap-y-2 gap-x-4 mb-4 text-[12px]">
+<div>
+<div class="text-on-surface-variant mb-0.5">Target</div>
+<div class="truncate text-on-surface" title="/home/bl...(Fix__2)">/home/bl...(Fix__2)</div>
+</div>
+<div>
+<div class="text-on-surface-variant mb-0.5">Duration</div>
+<div class="text-on-surface">21.1s</div>
+</div>
+<div class="col-span-2">
+<div class="text-on-surface-variant mb-0.5">Tokens</div>
+<div class="text-on-surface">430K / 27K</div>
+</div>
+</div>
+<div class="mb-2">
+<span class="text-on-surface text-[12px]">24 TOTAL CHECKS SCANNED</span>
+</div>
+<!-- Progress Bar -->
+<div class="h-[3px] w-full flex mb-2 rounded-none overflow-hidden bg-surface-container-highest">
+<div class="bg-error h-full" style="width: 8.33%;"></div> <!-- 2 Failed -->
+<div class="bg-[#519aba] h-full" style="width: 12.5%;"></div> <!-- 3 Inconclusive -->
+<div class="bg-[#89d185] h-full" style="width: 79.17%;"></div> <!-- 19 Passed -->
+</div>
+<div class="flex flex-col space-y-1 text-[11px]">
+<div class="flex justify-between items-center"><span class="flex items-center text-error"><span class="material-symbols-outlined text-[12px] mr-1">cancel</span>2 Failed</span></div>
+<div class="flex justify-between items-center"><span class="flex items-center text-[#519aba]"><span class="material-symbols-outlined text-[12px] mr-1">warning</span>3 Inconclusive</span></div>
+<div class="flex justify-between items-center"><span class="flex items-center text-[#89d185]"><span class="material-symbols-outlined text-[12px] mr-1">check_circle</span>19 Passed</span></div>
+</div>
+<div class="mt-4 text-[12px] text-on-surface-variant border-t border-border-subtle pt-2">
+            Scope: uncommitted changes
+        </div>
+<div class="mt-2 text-[12px] text-primary-fixed bg-primary-fixed/10 p-1 px-2 border border-primary-fixed/20 flex items-center">
+<span class="material-symbols-outlined text-[14px] mr-2 animate-spin">progress_activity</span>
+<span class="truncate">Fixing bp-sec-001... (1 of 2)</span>
+</div>
+</div>
+</div>
+<!-- Flat List of Checks -->
+<div class="flex-1 overflow-y-auto">
+<div class="flex items-center px-1 py-0.5 bg-surface-variant text-[11px] font-bold text-on-surface cursor-pointer hover:bg-surface-container-highest">
+<span class="material-symbols-outlined text-[16px] mr-1">keyboard_arrow_down</span>
+<span class="uppercase">Checks (10 of 24)</span>
+</div>
+<div class="py-2">
+<!-- Warning Item -->
+<div class="px-5 flex items-center hover:bg-surface-container-highest cursor-pointer h-[26px]">
+<span class="material-symbols-outlined text-[#519aba] text-[14px] mr-1.5 shrink-0">warning</span>
+<span class="text-on-surface truncate mr-2 flex-1 font-body-md text-[13px]">Collection reads are bounded</span>
+<span class="text-on-surface-variant shrink-0 text-[11px] opacity-70">BP-API-002</span>
+</div>
+<!-- Pass Item -->
+<div class="px-5 flex items-center hover:bg-surface-container-highest cursor-pointer h-[26px]">
+<span class="material-symbols-outlined text-[#89d185] text-[14px] mr-1.5 shrink-0">check_circle</span>
+<span class="text-on-surface truncate mr-2 flex-1 font-body-md text-[13px]">Avoid hidden dependencies</span>
+<span class="text-on-surface-variant shrink-0 text-[11px] opacity-70">BP-ARCH-001</span>
+</div>
+<!-- Pass Item -->
+<div class="px-5 flex items-center hover:bg-surface-container-highest cursor-pointer h-[26px]">
+<span class="material-symbols-outlined text-[#89d185] text-[14px] mr-1.5 shrink-0">check_circle</span>
+<span class="text-on-surface truncate mr-2 flex-1 font-body-md text-[13px]">Dependency direction follows boundaries</span>
+<span class="text-on-surface-variant shrink-0 text-[11px] opacity-70">BP-ARCH-002</span>
+</div>
+<!-- Pass Item -->
+<div class="px-5 flex items-center hover:bg-surface-container-highest cursor-pointer h-[26px]">
+<span class="material-symbols-outlined text-[#89d185] text-[14px] mr-1.5 shrink-0">check_circle</span>
+<span class="text-on-surface truncate mr-2 flex-1 font-body-md text-[13px]">Composition stays in root</span>
+<span class="text-on-surface-variant shrink-0 text-[11px] opacity-70">BP-ARCH-003</span>
+</div>
+<!-- Pass Item -->
+<div class="px-5 flex items-center hover:bg-surface-container-highest cursor-pointer h-[26px]">
+<span class="material-symbols-outlined text-[#89d185] text-[14px] mr-1.5 shrink-0">check_circle</span>
+<span class="text-on-surface truncate mr-2 flex-1 font-body-md text-[13px]">Architectural decisions recorded</span>
+<span class="text-on-surface-variant shrink-0 text-[11px] opacity-70">BP-DOC-004</span>
+</div>
+<!-- Warning Item -->
+<div class="px-5 flex items-center hover:bg-surface-container-highest cursor-pointer h-[26px]">
+<span class="material-symbols-outlined text-[#519aba] text-[14px] mr-1.5 shrink-0">warning</span>
+<span class="text-on-surface truncate mr-2 flex-1 font-body-md text-[13px]">Deployment config agnostic</span>
+<span class="text-on-surface-variant shrink-0 text-[11px] opacity-70">BP-OPS-005</span>
+</div>
+<!-- Pass Item -->
+<div class="px-5 flex items-center hover:bg-surface-container-highest cursor-pointer h-[26px]">
+<span class="material-symbols-outlined text-[#89d185] text-[14px] mr-1.5 shrink-0">check_circle</span>
+<span class="text-on-surface truncate mr-2 flex-1 font-body-md text-[13px]">Outbound deps have time budgets</span>
+<span class="text-on-surface-variant shrink-0 text-[11px] opacity-70">BP-REL-001</span>
+</div>
+<!-- Warning Item -->
+<div class="px-5 flex items-center hover:bg-surface-container-highest cursor-pointer h-[26px]">
+<span class="material-symbols-outlined text-[#519aba] text-[14px] mr-1.5 shrink-0">warning</span>
+<span class="text-on-surface truncate mr-2 flex-1 font-body-md text-[13px]">Retries are bounded</span>
+<span class="text-on-surface-variant shrink-0 text-[11px] opacity-70">BP-REL-002</span>
+</div>
+<!-- ACTIVE ITEM (Failed) -->
+<div class="px-5 flex items-center bg-surface-container-highest cursor-pointer h-[26px] relative text-on-surface">
+<div class="absolute left-0 top-0 bottom-0 w-[2px] bg-primary-fixed"></div>
+<span class="material-symbols-outlined text-[#3794ff] text-[14px] mr-1.5 shrink-0">sync</span>
+<span class="text-on-surface truncate mr-2 flex-1 font-body-md text-[13px] font-bold">External input is validated</span>
+<span class="text-on-surface-variant shrink-0 text-[11px] opacity-70">BP-SEC-001</span>
+</div>
+<!-- Pass Item -->
+<div class="px-5 flex items-center hover:bg-surface-container-highest cursor-pointer h-[26px]">
+<span class="material-symbols-outlined text-[#89d185] text-[14px] mr-1.5 shrink-0">check_circle</span>
+<span class="text-on-surface truncate mr-2 flex-1 font-body-md text-[13px]">Secrets are not committed</span>
+<span class="text-on-surface-variant shrink-0 text-[11px] opacity-70">BP-SEC-002</span>
+</div>
+<!-- Fail Item -->
+<div class="px-5 flex items-center hover:bg-surface-container-highest cursor-pointer h-[26px]">
+<span class="material-symbols-outlined text-error text-[14px] mr-1.5 shrink-0">cancel</span>
+<span class="text-on-surface truncate mr-2 flex-1 font-body-md text-[13px]">External data not cast directly</span>
+<span class="text-on-surface-variant shrink-0 text-[11px] opacity-70">TS-ARCH-001</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Main Editor Area -->
+<div class="flex-1 bg-terminal-black flex flex-col relative overflow-hidden">
+<!-- Editor Tabs -->
+<div class="flex bg-surface-variant h-[35px] shrink-0 overflow-x-auto select-none border-b border-border-subtle">
+<div class="flex items-center px-3 bg-terminal-black text-primary-fixed border-t border-t-primary-fixed cursor-pointer text-[13px] group border-r border-border-subtle min-w-fit">
+<span class="material-symbols-outlined text-[16px] text-[#519aba] mr-2">description</span>
+<span class="text-on-surface italic">BP-SEC-001 Details</span>
+<span class="material-symbols-outlined text-[14px] ml-3 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-surface-container-highest text-on-surface">close</span>
+</div>
+<!-- Editor Actions -->
+<div class="ml-auto flex items-center px-3 space-x-2">
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest" title="Split Editor Right">
+<span class="material-symbols-outlined text-[16px]">vertical_split</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest" title="More Actions">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</div>
+</div>
+<!-- Breadcrumbs -->
+<div class="flex items-center px-4 h-[22px] bg-terminal-black text-on-surface-variant text-[13px] shrink-0 z-10 border-b border-border-subtle shadow-[0_2px_4px_rgba(0,0,0,0.1)]">
+<span class="hover:text-on-surface cursor-pointer">OpenShrike</span>
+<span class="material-symbols-outlined text-[14px] mx-1">chevron_right</span>
+<span class="hover:text-on-surface cursor-pointer">Scans</span>
+<span class="material-symbols-outlined text-[14px] mx-1">chevron_right</span>
+<span class="hover:text-on-surface cursor-pointer text-on-surface">BP-SEC-001 Details</span>
+</div>
+<!-- Content Canvas -->
+<div class="flex-1 p-8 overflow-y-auto text-on-surface bg-terminal-black">
+<div class="max-w-5xl mx-auto">
+<div class="flex items-start justify-between mb-8 border-b border-border-subtle pb-6">
+<div>
+<h1 class="text-headline-lg font-headline-lg mb-3 text-on-surface">External input is validated at trust boundaries</h1>
+<div class="flex space-x-3 text-[12px] font-code-md">
+<span class="bg-surface-variant text-on-surface px-2 py-1 rounded-sm border border-border-subtle">ID: BP-SEC-001</span>
+<span class="text-on-surface-variant px-2 py-1 flex items-center">
+        Confidence: High
+    </span>
+</div>
+</div>
+<div class="flex space-x-3">
+<button class="bg-surface-container-high border border-border-subtle text-on-surface px-4 py-1.5 text-[13px] hover:bg-surface-container-highest flex items-center rounded transition-colors font-medium">
+<span class="material-symbols-outlined text-[16px] mr-1.5">refresh</span>
+                Recheck
+            </button>
+<button class="bg-primary-container text-on-primary-container px-4 py-1.5 text-[13px] hover:bg-primary-fixed-dim flex items-center rounded transition-colors font-bold shadow-sm">
+<span class="material-symbols-outlined text-[16px] mr-1.5">auto_fix</span>
+                Auto-Fix
+            </button>
+</div>
+</div>
+<div class="grid grid-cols-1 gap-8">
+<!-- Context Column -->
+<div class="space-y-8">
+<!-- Rationale -->
+<div class="text-[14px] leading-relaxed">
+<h3 class="text-[11px] uppercase text-on-surface-variant font-bold tracking-wider mb-3">Why it matters</h3>
+<p class="text-on-surface/90">Data crossing a trust boundary must be strictly validated before processing. Failure to validate external input can lead to injection attacks, data corruption, or unexpected application states. Ensure all entry points utilize the centralized validation schema.</p>
+</div>
+<!-- Remediation -->
+<div class="text-[14px] leading-relaxed">
+<h3 class="text-[11px] uppercase text-on-surface-variant font-bold tracking-wider mb-3">Remediation</h3>
+<p class="text-on-surface/90">Implement a validation schema using a library like Zod or Joi to sanitize incoming request bodies before they reach the business logic layer.</p>
+</div>
+<!-- Evidence / Code Block -->
+<div>
+<div class="text-[11px] uppercase text-on-surface-variant font-bold tracking-wider mb-3">Evidence</div>
+<div class="bg-terminal-black border border-border-subtle rounded-DEFAULT overflow-hidden shadow-sm">
+<div class="flex items-center px-3 py-1 bg-surface-variant border-b border-border-subtle text-[11px] text-on-surface-variant font-code-md">
+<span class="material-symbols-outlined text-[14px] mr-1">code</span>
+    src/api/handlers.ts:42
+</div>
+<div class="p-3 font-code-md text-[13px] overflow-x-auto flex">
+<div class="flex flex-col text-on-surface-variant/50 text-right pr-4 select-none mr-4 border-r border-border-subtle">
+<span>41</span>
+<span>42</span>
+<span>43</span>
+<span>44</span>
+<span>45</span>
+<span>46</span>
+<span>47</span>
+</div>
+<div class="flex-1 overflow-x-auto">
+<pre class="m-0"><code class="language-typescript text-on-surface">
+<span class="text-[#c586c0]">export</span> <span class="text-[#c586c0]">async</span> <span class="text-[#569cd6]">function</span> <span class="text-[#dcdcaa]">processUserData</span>(req: Request, res: Response) {
+  <span class="text-[#6a9955]">// FIXME: Input 'req.body' is used without validation schema</span>
+<div class="bg-error-container/40 -ml-3 pl-3 border-l-4 border-error w-full inline-block">  <span class="text-[#569cd6]">const</span> userData <span class="text-[#d4d4d4]">=</span> req.body <span class="text-[#569cd6]">as</span> UserDataPayload;</div>  
+  <span class="text-[#c586c0]">await</span> database.users.<span class="text-[#dcdcaa]">insert</span>(userData);
+  <span class="text-[#c586c0]">return</span> res.<span class="text-[#dcdcaa]">status</span>(<span class="text-[#b5cea8]">200</span>).<span class="text-[#dcdcaa]">send</span>({ success: <span class="text-[#569cd6]">true</span> });
+}
+</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer (Status Bar) -->
+<footer class="bg-primary-container text-on-primary-container border-t-0 fixed bottom-0 w-full flex justify-between items-center px-2 z-50 h-[22px] text-[12px] select-none font-code-md">
+<div class="flex items-center h-full space-x-3">
+<div class="flex items-center space-x-1 cursor-pointer hover:bg-primary-fixed-dim px-1 h-full">
+<span class="material-symbols-outlined text-[14px]">remote_gen</span>
+<span>WSL: Ubuntu</span>
+</div>
+<div class="flex items-center space-x-1 cursor-pointer hover:bg-primary-fixed-dim px-1 h-full">
+<span class="material-symbols-outlined text-[14px]">error</span>
+<span>2</span>
+<span class="material-symbols-outlined text-[14px] ml-1">warning</span>
+<span>3</span>
+</div>
+<div class="flex items-center space-x-1 cursor-pointer hover:bg-primary-fixed-dim px-1 h-full font-bold">
+<span class="material-symbols-outlined text-[14px]">security</span>
+<span>OpenShrike: 19 Passed, 2 Failed, 1 Warning</span>
+</div>
+</div>
+<div class="flex h-full items-center space-x-3 text-on-primary-container">
+<div class="cursor-pointer hover:bg-primary-fixed-dim px-1 h-full flex items-center">
+<span>Ln 44, Col 3</span>
+</div>
+<div class="cursor-pointer hover:bg-primary-fixed-dim px-1 h-full flex items-center">
+<span>Spaces: 2</span>
+</div>
+<div class="cursor-pointer hover:bg-primary-fixed-dim px-1 h-full flex items-center">
+<span>UTF-8</span>
+</div>
+<div class="cursor-pointer hover:bg-primary-fixed-dim px-1 h-full flex items-center">
+<span>LF</span>
+</div>
+<div class="cursor-pointer hover:bg-primary-fixed-dim px-1 h-full flex items-center">
+<span>TypeScript</span>
+</div>
+<div class="cursor-pointer hover:bg-primary-fixed-dim px-1 h-full flex items-center">
+<span class="material-symbols-outlined text-[14px] mr-1">check_circle</span>
+<span>Prettier</span>
+</div>
+<div class="cursor-pointer hover:bg-primary-fixed-dim px-1 h-full flex items-center">
+<span class="material-symbols-outlined text-[14px]">notifications</span>
+</div>
+</div>
+</footer>
+</body></html>

@@ -12,10 +12,6 @@ I/O in Go code.
 
 Return `unknown` when the changed code is purely synchronous and in-memory.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review changed public functions and I/O calls.

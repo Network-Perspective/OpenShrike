@@ -15,10 +15,6 @@ Return `unknown` when:
 - the project is a library with no application startup path, or
 - container construction is not visible in scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Find `Program`, `Startup`, host builder code, or equivalent composition

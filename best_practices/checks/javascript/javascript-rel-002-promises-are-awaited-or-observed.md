@@ -13,10 +13,6 @@ Applies to asynchronous JavaScript and TypeScript code using promises.
 Return `unknown` when a framework or utility may intentionally own the promise
 lifecycle outside visible scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review async functions and promise-producing calls in the diff.

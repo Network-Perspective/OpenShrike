@@ -20,10 +20,6 @@ Return `unknown` when:
 - the diff is a broad refactor, migration, or platform change, or
 - the review scope is too small to identify the primary behavior under change.
 
-## Strategy
-
-`reasoning`
-
 ## What to inspect
 
 1. Identify the primary use case or behavior in the diff.

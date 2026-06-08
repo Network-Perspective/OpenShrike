@@ -11,10 +11,6 @@ Applies to unit, integration, and contract tests in the normal CI path.
 
 Return `unknown` when the repository's test taxonomy is not visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Search test code for real URLs, cloud SDK clients, sockets, or DNS names.

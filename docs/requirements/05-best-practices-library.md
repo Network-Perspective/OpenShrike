@@ -11,26 +11,12 @@ opencode skills to keep context small and runtime efficient.
 ## Structure of a best-practice entry (example shape)
 - ID and title
 - Scope and applicability rules
-- Strategy hint: `static`, `heuristic`, or `reasoning` (see below)
 - Evidence required (files, tests, metrics)
 - Risk level and rationale
 - Remediation guidance
 - Confidence guidance (HIGH / MEDIUM / LOW — see below)
 - References and provenance
 - Output contract (status + confidence + evidence summary)
-
-## Strategy hints
-Each check declares an execution strategy hint:
-- **static**: Resolvable with grep, AST analysis, or embedded CLI commands.
-  The skill should include the concrete commands to run.
-- **heuristic**: Needs structured queries with some judgment (e.g., dependency
-  graph analysis, coverage gap detection).
-- **reasoning**: Genuinely needs LLM evaluation (e.g., ADR completeness,
-  API design quality).
-
-For MVP, all checks run through opencode regardless of strategy. The hint
-informs future optimization — static checks can be extracted to fast,
-deterministic tooling without rearchitecting.
 
 ## Confidence levels
 Checks must report confidence as one of three levels (not a numeric score):
@@ -98,15 +84,15 @@ Remediation: Move values to environment configuration or secrets management.
 
 ## Check authoring and testing workflow
 - Write a check as a markdown file with step-by-step evaluation, pass/fail
-  examples, confidence guidance, and strategy hint.
+  examples, and confidence guidance.
 - Create or identify test fixtures: a known-good repo/snippet and a known-bad
   repo/snippet for the check.
 - Run the check in isolation against both fixtures using the CLI:
   `shrike scan --check <check-id> --path ./test-fixtures/<fixture>`
 - Verify the output JSON: the check should pass on the good fixture and fail
   on the bad fixture with appropriate confidence and evidence.
-- For static-strategy checks, verify that the embedded CLI commands produce
-  the expected results independently of the LLM.
+- If the check includes concrete repository queries or commands, verify they
+  produce the expected results independently of the LLM.
 - Only add the check to a policy after it passes the fixture validation.
 
 ## Library growth model

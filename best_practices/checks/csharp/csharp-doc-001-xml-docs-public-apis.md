@@ -11,10 +11,6 @@ Applies only to externally consumed libraries and SDKs.
 
 Return `unknown` for internal applications and services.
 
-## Strategy
-
-`reasoning`
-
 ## What to inspect
 
 1. Determine whether the project is an externally consumed library.

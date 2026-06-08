@@ -12,10 +12,6 @@ grow beyond a small fixed set.
 
 Return `unknown` when the dataset size is inherently fixed or not visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review changed list or search endpoints.

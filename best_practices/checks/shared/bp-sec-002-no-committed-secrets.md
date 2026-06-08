@@ -12,10 +12,6 @@ documentation examples.
 
 Return `unknown` when a value looks secret-like but may be an inert sample.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review changed config and script files for plaintext credentials, API keys,

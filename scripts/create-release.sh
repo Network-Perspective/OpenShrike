@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/create-release.sh [patch|minor|major|<version>]
+  scripts/create-release.sh [patch|minor|major|<version>] [--push|--no-push]
 
 Defaults:
   patch
@@ -14,20 +14,50 @@ Behavior:
   - stages all current changes
   - creates commit: chore(release): v<version>
   - creates annotated tag: v<version>
+  - prompts to push the branch and tag to origin
 
 Examples:
   scripts/create-release.sh
   scripts/create-release.sh minor
   scripts/create-release.sh 0.3.0
+  scripts/create-release.sh --push minor
+  scripts/create-release.sh 0.3.0 --no-push
 EOF
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+VERSION_SPEC="patch"
+PUSH_MODE="prompt"
 
-VERSION_SPEC="${1:-patch}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --push)
+      PUSH_MODE="always"
+      shift
+      ;;
+    --no-push)
+      PUSH_MODE="never"
+      shift
+      ;;
+    patch|minor|major)
+      VERSION_SPEC="$1"
+      shift
+      ;;
+    *)
+      if [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        VERSION_SPEC="$1"
+        shift
+      else
+        echo "Unknown argument: $1" >&2
+        usage >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -119,10 +149,42 @@ fi
 git commit -m "$COMMIT_MESSAGE"
 git tag -a "$TAG_NAME" -m "Release ${TAG_NAME}"
 
+PUSHED="false"
+
+push_release_refs() {
+  echo
+  echo "Pushing ${CURRENT_BRANCH} and ${TAG_NAME} to origin..."
+  git push origin "${CURRENT_BRANCH}" --follow-tags
+  PUSHED="true"
+}
+
+if [[ "$PUSH_MODE" == "always" ]]; then
+  push_release_refs
+elif [[ "$PUSH_MODE" == "prompt" && -t 0 && -t 1 ]]; then
+  echo
+  read -r -p "Push ${CURRENT_BRANCH} and ${TAG_NAME} to origin now? [y/N] " PUSH_REPLY
+  case "${PUSH_REPLY,,}" in
+    y|yes)
+      push_release_refs
+      ;;
+  esac
+fi
+
 echo
 echo "Release prepared."
 echo "Commit: ${COMMIT_MESSAGE}"
 echo "Tag:    ${TAG_NAME}"
+if [[ "$PUSHED" == "true" ]]; then
+  echo "Pushed: yes"
+else
+  echo "Pushed: no"
+fi
 echo
 echo "Next step:"
-echo "  git push origin ${CURRENT_BRANCH} --follow-tags"
+if [[ "$PUSHED" != "true" ]]; then
+  echo "  1. git push origin ${CURRENT_BRANCH} --follow-tags"
+  echo "  2. Create or publish a GitHub release for ${TAG_NAME}"
+else
+  echo "  Create or publish a GitHub release for ${TAG_NAME}"
+fi
+echo "  (publishing the release triggers .github/workflows/release-bundles.yml)"

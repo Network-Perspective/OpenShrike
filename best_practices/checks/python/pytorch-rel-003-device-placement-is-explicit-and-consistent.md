@@ -14,10 +14,6 @@ data between devices.
 Return `unknown` when the code is clearly CPU-only or device handling is outside
 scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review model creation, batch preparation, and forward passes.

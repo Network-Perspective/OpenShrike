@@ -13,10 +13,6 @@ Applies to production-facing application and service code that emits logs.
 Return `unknown` when the code change does not touch logging or operational
 flows.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review new or changed log statements.

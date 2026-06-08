@@ -13,10 +13,6 @@ inform product or release decisions.
 
 Return `unknown` when the diff does not affect experiment execution.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Check whether seeds, config, dataset versions, and artifact outputs are

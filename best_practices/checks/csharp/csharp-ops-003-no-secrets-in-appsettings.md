@@ -14,10 +14,6 @@ values, and other committed configuration artifacts.
 Return `unknown` when only generated samples are visible and the real config
 path is elsewhere.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review committed settings files.

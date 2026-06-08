@@ -13,10 +13,6 @@ or otherwise nondeterministic behaviors.
 
 Return `unknown` when the changed tests are not time- or coordination-sensitive.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review changed tests for direct use of the real clock, arbitrary sleeps,

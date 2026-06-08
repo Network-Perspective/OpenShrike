@@ -12,10 +12,6 @@ authentication, billing, personal data, payload capture, or credentials.
 
 Return `unknown` when the payload shape of logged objects is not visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review new log and trace statements.

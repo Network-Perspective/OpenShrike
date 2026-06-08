@@ -12,10 +12,6 @@ Applies to code that trains, validates, or cross-validates classical ML models.
 
 Return `unknown` when the diff does not touch data preparation or evaluation.
 
-## Strategy
-
-`reasoning`
-
 ## What to inspect
 
 1. Review split logic and preprocessing pipelines.

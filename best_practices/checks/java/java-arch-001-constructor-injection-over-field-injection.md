@@ -13,10 +13,6 @@ services.
 Return `unknown` when the code is not container-managed or the injection model
 is not visible.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review changed service, controller, handler, and component classes.

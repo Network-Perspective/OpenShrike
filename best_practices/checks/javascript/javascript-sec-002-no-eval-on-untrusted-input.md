@@ -14,10 +14,6 @@ or generated functions.
 Return `unknown` when the evaluated source is wrapped behind helpers out of
 scope.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review `eval`, `new Function`, `vm`, and similar dynamic execution APIs.

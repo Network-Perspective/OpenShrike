@@ -13,10 +13,6 @@ Applies to public or cross-team HTTP APIs.
 Return `unknown` for internal-only endpoints where error-shape requirements are
 not visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review changed endpoint error paths.

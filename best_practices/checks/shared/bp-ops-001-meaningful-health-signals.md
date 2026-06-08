@@ -13,10 +13,6 @@ processes with external dependencies.
 
 Return `unknown` for libraries and tiny one-shot tools.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review deployment-facing services and their critical dependencies.

@@ -1,13 +1,14 @@
 name: release-bundles
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types:
+      - published
   workflow_dispatch:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build:
@@ -35,6 +36,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -53,13 +56,60 @@ jobs:
           path: .artifacts/publish/${{ matrix.target }}/${{ matrix.asset }}
           if-no-files-found: error
 
+  package-publishables:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Read package version
+        id: package
+        shell: bash
+        run: echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+
+      - name: Build publishable artifacts
+        shell: bash
+        run: |
+          npm ci
+          npm run build
+          npm run prepare:npm-package
+          npm pack .artifacts/npm/package --pack-destination .artifacts/npm
+          npm exec --yes @vscode/vsce@3 -- package --out ".artifacts/vscode/networkperspective.openshrike-${{ steps.package.outputs.version }}.vsix"
+
+      - name: Upload release publishables
+        uses: actions/upload-artifact@v7
+        with:
+          name: openshrike-release-publishables
+          path: |
+            .artifacts/npm/*.tgz
+            .artifacts/vscode/*.vsix
+          if-no-files-found: error
+
+      - name: Upload npm package directory
+        uses: actions/upload-artifact@v7
+        with:
+          name: openshrike-npm-package
+          path: .artifacts/npm/package
+          if-no-files-found: error
+
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    if: github.event_name == 'release'
+    needs:
+      - build
+      - package-publishables
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download bundle artifacts
+      - name: Download release artifacts
         uses: actions/download-artifact@v7
         with:
           path: .artifacts/release
@@ -69,8 +119,82 @@ jobs:
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ github.event.release.tag_name }}
           files: |
-            .artifacts/release/*.tar.gz
-            .artifacts/release/*.zip
+            .artifacts/release/**/*.tar.gz
+            .artifacts/release/**/*.zip
+            .artifacts/release/**/*.tgz
+            .artifacts/release/**/*.vsix
           fail_on_unmatched_files: true
-          generate_release_notes: true
+
+  publish-npm:
+    if: github.event_name == 'release'
+    needs: package-publishables
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Download npm package directory
+        uses: actions/download-artifact@v7
+        with:
+          name: openshrike-npm-package
+          path: .artifacts/npm
+
+      - name: Locate staged npm package
+        id: npm-package
+        shell: bash
+        run: |
+          package_json="$(find .artifacts/npm -path '*/package.json' -print -quit)"
+          if [[ -z "$package_json" ]]; then
+            echo "Could not locate staged npm package.json" >&2
+            exit 1
+          fi
+          echo "dir=$(dirname "$package_json")" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          scope: '@networkperspective'
+
+      - name: Publish to npm with trusted publishing
+        if: ${{ secrets.NPM_TOKEN == '' }}
+        working-directory: ${{ steps.npm-package.outputs.dir }}
+        run: npm publish --access public --provenance
+
+      - name: Publish to npm with token
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        working-directory: ${{ steps.npm-package.outputs.dir }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+  publish-vscode:
+    if: github.event_name == 'release'
+    needs: package-publishables
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: openshrike-release-publishables
+          path: .artifacts/publishables
+
+      - name: Publish to VS Code Marketplace
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          shopt -s nullglob
+          packages=(.artifacts/publishables/*.vsix)
+          if [[ "${#packages[@]}" -ne 1 ]]; then
+            echo "Expected exactly one VSIX package, found ${#packages[@]}" >&2
+            exit 1
+          fi
+          npm exec --yes @vscode/vsce@3 -- publish --packagePath "${packages[0]}"

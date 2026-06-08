@@ -6,6 +6,7 @@ Scope:
 
 - root install entry points: `install`, `install.ps1`
 - release bundle packaging: `scripts/publish.sh`
+- npm package staging: `scripts/prepare-npm-package.mjs`
 - local release preparation: `scripts/create-release.sh`
 - GitHub release automation: `.github/workflows/release-bundles.yml`
 
@@ -14,20 +15,21 @@ Primary implementation:
 - `install`
 - `install.ps1`
 - `scripts/publish.sh`
+- `scripts/prepare-npm-package.mjs`
 - `scripts/create-release.sh`
 - `.github/workflows/release-bundles.yml`
 
 ## Summary
 
-OpenShrike now ships two user-facing bootstrap installers:
+OpenShrike now ships three release channels:
 
-1. `install` for Unix shells, intended for `curl ... | bash`
-2. `install.ps1` for PowerShell on Windows
+1. GitHub release bundles consumed by `install` and `install.ps1`
+2. the scoped npm CLI package `@networkperspective/openshrike`
+3. the VS Code Marketplace extension `networkperspective.openshrike`
 
-Both installers try to download a prebuilt release bundle from the repository's
-GitHub Releases first. If a matching asset is not available, they fall back to
-building a release-shaped bundle from the tagged source archive on the target
-machine.
+The bootstrap installers still download prebuilt GitHub release bundles first
+and fall back to building a release-shaped bundle from the tagged source archive
+on the target machine when needed.
 
 The release bundle is a self-contained application directory with:
 
@@ -40,6 +42,10 @@ The release bundle is a self-contained application directory with:
 The installer is intentionally not an npm-global installer. It installs a
 versioned application directory under a user-owned location and writes a small
 launcher shim onto the user's `PATH`.
+
+The npm package is published as a separate scoped manifest so the CLI can live
+under the `@networkperspective` organization without changing the VS Code
+extension identifier.
 
 ## Unix Installer
 
@@ -142,7 +148,9 @@ the runtime wrapper resolve the correct binary on the target machine.
 
 Workflow: `.github/workflows/release-bundles.yml`
 
-On `v*` tags, the workflow builds and uploads release assets for:
+When a GitHub release is published, the workflow:
+
+1. builds and uploads release bundle assets for:
 
 - `linux-x64`
 - `linux-arm64`
@@ -150,15 +158,27 @@ On `v*` tags, the workflow builds and uploads release assets for:
 - `darwin-arm64`
 - `windows-x64`
 
-Each job runs `scripts/publish.sh --target <target>` on the matching
-GitHub-hosted runner and publishes the resulting archive into the tagged GitHub
-Release.
+2. stages a separate npm package directory via
+   `scripts/prepare-npm-package.mjs`,
+3. packages a VSIX for the VS Code Marketplace,
+4. uploads the bundle archives, npm tarball, and VSIX into the published GitHub
+   Release,
+5. publishes the npm package, and
+6. publishes the VS Code extension.
+
+The workflow supports two npm authentication models:
+
+- recommended: npm trusted publishing from GitHub Actions,
+- fallback: `NPM_TOKEN` for a granular npm publish token.
+
+The VS Code publish path uses `VSCE_PAT`.
 
 ## Local Release Preparation
 
 Helper: `scripts/create-release.sh`
 
-This helper exists to leave only `git push` as a manual step.
+This helper exists to leave only GitHub release publication as a manual step
+when the user confirms the optional `git push`.
 
 Default behavior:
 
@@ -166,13 +186,16 @@ Default behavior:
 2. run `npm version <computed-version> --no-git-tag-version`,
 3. stage the full repository with `git add -A`,
 4. create commit `chore(release): v<version>`,
-5. create annotated tag `v<version>`.
+5. create annotated tag `v<version>`,
+6. prompt whether it should push the current branch and tag to `origin`.
 
 The script also accepts:
 
 - `minor`
 - `major`
 - an explicit version such as `0.3.0`
+- `--push` to skip the prompt and push immediately
+- `--no-push` to skip the prompt and leave push as a manual step
 
 It intentionally stages all current changes, including new files, because the
 goal is to turn the current release-ready worktree into a tagged release
@@ -185,3 +208,5 @@ commit.
 - Linux and macOS use symlink-based activation; Windows uses rewritten shims.
 - The fallback source build path is present so the installer still works before
   a release asset exists for a target or version.
+- The repository root remains `private: true` so npm publication happens only
+  from the generated scoped package directory.

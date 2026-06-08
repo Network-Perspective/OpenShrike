@@ -14,10 +14,6 @@ outlive the initiating request.
 Return `unknown` when the changed code is purely synchronous or trivially
 bounded.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Find public async methods, handlers, workers, and loops introduced or

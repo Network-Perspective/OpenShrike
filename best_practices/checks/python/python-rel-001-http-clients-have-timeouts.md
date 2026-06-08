@@ -13,10 +13,6 @@ clients.
 
 Return `unknown` when a wrapper likely owns the timeout but is outside scope.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review outbound HTTP calls or client construction.

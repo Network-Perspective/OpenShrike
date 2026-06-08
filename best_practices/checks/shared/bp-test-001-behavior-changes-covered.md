@@ -14,10 +14,6 @@ contract.
 Return `unknown` when the change is clearly non-behavioral or when existing test
 coverage may exist outside visible scope.
 
-## Strategy
-
-`reasoning`
-
 ## What to inspect
 
 1. Review production changes for altered behavior.

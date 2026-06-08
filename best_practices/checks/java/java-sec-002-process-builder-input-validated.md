@@ -12,10 +12,6 @@ Applies when the code launches external processes through `ProcessBuilder`,
 
 Return `unknown` when the source of arguments is not visible.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Review changed process-launch code.

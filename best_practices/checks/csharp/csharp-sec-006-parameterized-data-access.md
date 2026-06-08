@@ -13,10 +13,6 @@ ORM raw-query APIs.
 Return `unknown` when the query builder abstraction exists but the final command
 generation is outside scope.
 
-## Strategy
-
-`static`
-
 ## What to inspect
 
 1. Search for `CommandText`, `SqlCommand`, Dapper query strings,

@@ -18,10 +18,6 @@ Applies when the diff introduces a meaningful architectural decision, such as:
 
 Return `unknown` when the change is too small to justify an ADR-level record.
 
-## Strategy
-
-`reasoning`
-
 ## What to inspect
 
 1. Review whether the PR introduces an enduring design decision rather than a

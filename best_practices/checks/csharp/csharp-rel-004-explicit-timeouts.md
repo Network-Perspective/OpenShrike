@@ -14,10 +14,6 @@ artificial waits in production code.
 Return `unknown` when the caller's bounded cancellation flow is clearly present
 but the actual timeout source is outside scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Find outbound calls, `Task.Delay`, wait loops, and long-running async

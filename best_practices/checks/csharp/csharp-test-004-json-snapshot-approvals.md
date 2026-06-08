@@ -15,10 +15,6 @@ Return `unknown` when:
 - the payload is small and targeted assertions are clearer, or
 - the test is not about the serialized contract.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Find tests asserting serialized JSON or HTTP payload bodies.

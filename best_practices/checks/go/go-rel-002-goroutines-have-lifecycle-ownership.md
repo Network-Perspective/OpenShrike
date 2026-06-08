@@ -13,10 +13,6 @@ channel-driven concurrent work.
 Return `unknown` when the goroutine lifecycle is likely owned elsewhere outside
 the visible scope.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review `go func()` launches and worker loops.

@@ -13,10 +13,6 @@ module or service boundary.
 
 Return `unknown` when the error contract is owned elsewhere and not visible.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Review changed error paths at external boundaries.

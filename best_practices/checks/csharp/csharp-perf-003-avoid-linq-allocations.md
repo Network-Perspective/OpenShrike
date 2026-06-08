@@ -13,10 +13,6 @@ that runs over large collections on critical paths.
 
 Return `unknown` for ordinary business logic.
 
-## Strategy
-
-`heuristic`
-
 ## What to inspect
 
 1. Find LINQ chains inside tight loops or high-volume request paths.
