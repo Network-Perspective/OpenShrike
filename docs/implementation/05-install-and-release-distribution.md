@@ -166,10 +166,8 @@ When a GitHub release is published, the workflow:
 5. publishes the npm package, and
 6. publishes the VS Code extension.
 
-The workflow supports two npm authentication models:
-
-- recommended: npm trusted publishing from GitHub Actions,
-- fallback: `NPM_TOKEN` for a granular npm publish token.
+The workflow uses npm trusted publishing from GitHub Actions for npm release
+publication. It does not use an `NPM_TOKEN` fallback.
 
 The VS Code publish path uses `VSCE_PAT`.
 
