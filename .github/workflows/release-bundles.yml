@@ -160,9 +160,12 @@ jobs:
           registry-url: https://registry.npmjs.org
           scope: '@networkperspective'
 
+      - name: Upgrade npm for trusted publishing
+        run: npm install --global npm@^11.5.1
+
       - name: Publish to npm
         working-directory: ${{ steps.npm-package.outputs.dir }}
-        run: npm publish --access public --provenance
+        run: npm publish --access public
 
   publish-vscode:
     if: github.event_name == 'release'

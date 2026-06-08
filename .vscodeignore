@@ -1,8 +1,16 @@
 .github/**
 .vscode/**
+.agents/**
+.codex/**
+.ignore/**
 .artifacts/**
+.openshrike/**
+.openshrike-debug/**
+archive/**
 coverage/**
 docker/**
+node_modules/.package-lock.json
+node_modules/opencode-ai/bin/.opencode
 scripts/**
 src/**
 tests/**

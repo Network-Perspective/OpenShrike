@@ -167,7 +167,8 @@ When a GitHub release is published, the workflow:
 6. publishes the VS Code extension.
 
 The workflow uses npm trusted publishing from GitHub Actions for npm release
-publication. It does not use an `NPM_TOKEN` fallback.
+publication, and upgrades npm in the publish job to satisfy the current trusted
+publishing CLI requirement. It does not use an `NPM_TOKEN` fallback.
 
 The VS Code publish path uses `VSCE_PAT`.
 
