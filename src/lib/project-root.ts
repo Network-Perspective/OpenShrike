@@ -12,7 +12,7 @@ export interface FindToolRootOptions {
 export function findToolRoot(options: FindToolRootOptions = {}): string {
   const candidates = [
     options.envToolRoot === undefined ? process.env.OPENSHRIKE_TOOL_ROOT ?? null : options.envToolRoot,
-    getModuleDirectory(options.moduleUrl === undefined ? import.meta.url : options.moduleUrl),
+    getModuleDirectory(options.moduleUrl === undefined ? null : options.moduleUrl),
     options.cwd === undefined ? process.cwd() : options.cwd,
     getScriptDirectory(options.argv1 === undefined ? process.argv[1] ?? null : options.argv1)
   ].filter((value): value is string => Boolean(value));

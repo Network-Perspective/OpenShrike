@@ -29,6 +29,7 @@ interface CommandHelpSpec {
 }
 
 export async function runCli(argv: string[] = process.argv): Promise<number> {
+  process.env.OPENSHRIKE_TOOL_ROOT ??= path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const program = createProgram(argv);
   process.exitCode = 0;
 

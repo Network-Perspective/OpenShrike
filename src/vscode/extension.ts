@@ -17,6 +17,7 @@ export interface OpenShrikeExtensionApi {
 
 export function activate(context: vscode.ExtensionContext): OpenShrikeExtensionApi {
   try {
+    process.env.OPENSHRIKE_TOOL_ROOT ??= context.extension.extensionPath;
     const workspaceTarget = resolveWorkspaceTarget();
     console.info('[OpenShrike] Activating extension', workspaceTarget);
 
