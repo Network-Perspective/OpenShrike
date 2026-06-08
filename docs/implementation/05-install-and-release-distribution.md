@@ -7,6 +7,8 @@ Scope:
 - root install entry points: `install`, `install.ps1`
 - release bundle packaging: `scripts/publish.sh`
 - npm package staging: `scripts/prepare-npm-package.mjs`
+- local npm publish helper: `scripts/publish-npm.sh`
+- local VS Code publish helper: `scripts/publish-vscode.sh`
 - local release preparation: `scripts/create-release.sh`
 - GitHub release automation: `.github/workflows/release-bundles.yml`
 
@@ -16,6 +18,8 @@ Primary implementation:
 - `install.ps1`
 - `scripts/publish.sh`
 - `scripts/prepare-npm-package.mjs`
+- `scripts/publish-npm.sh`
+- `scripts/publish-vscode.sh`
 - `scripts/create-release.sh`
 - `.github/workflows/release-bundles.yml`
 
@@ -199,6 +203,34 @@ The script also accepts:
 It intentionally stages all current changes, including new files, because the
 goal is to turn the current release-ready worktree into a tagged release
 commit.
+
+## Local Publish Helpers
+
+Helper: `scripts/publish-npm.sh`
+
+This helper is intended for manual npm publication, including the first
+bootstrap publish before npm trusted publishing is configured for CI.
+
+Default behavior:
+
+1. verifies that `npm login` is active with `npm whoami`,
+2. runs `npm ci`,
+3. runs `npm run build:cli`,
+4. stages the scoped npm package directory with
+   `scripts/prepare-npm-package.mjs`, and
+5. publishes `.artifacts/npm/package` with `npm publish --access public`.
+
+Helper: `scripts/publish-vscode.sh`
+
+This helper is intended for manual VS Code Marketplace publication.
+
+Default behavior:
+
+1. requires `VSCE_PAT` in the environment,
+2. runs `npm ci`,
+3. runs `npm run build`,
+4. packages a VSIX under `.artifacts/vscode/`, and
+5. publishes it with `@vscode/vsce`.
 
 ## Intentional Constraints
 

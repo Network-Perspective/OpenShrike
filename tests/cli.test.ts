@@ -2,6 +2,7 @@ import {execFileSync} from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 const mockExecuteFixCommand = vi.fn();
@@ -30,7 +31,7 @@ vi.mock('../src/commands/scan.js', () => ({
   executeScanCommand: mockExecuteScanCommand
 }));
 
-const {runCli} = await import('../src/cli.js');
+const {isExecutedAsScript, runCli} = await import('../src/cli.js');
 
 const tempDirectories: string[] = [];
 let stdoutWriteSpy: ReturnType<typeof vi.spyOn>;
@@ -63,6 +64,15 @@ describe('runCli', () => {
     expect(mockExecuteScanCommand).not.toHaveBeenCalled();
     expect(renderedOutput(stdoutWriteSpy)).toContain('Usage: shrike');
     expect(renderedOutput(stdoutWriteSpy)).toContain('Commands:');
+  });
+
+  it('treats `help` as a successful help flow without rendering an error block', async () => {
+    const exitCode = await runCli(['node', 'shrike', 'help']);
+
+    expect(exitCode).toBe(0);
+    expect(mockExecuteScanCommand).not.toHaveBeenCalled();
+    expect(renderedOutput(stdoutWriteSpy)).toContain('Usage: shrike');
+    expect(renderedOutput(stdoutWriteSpy)).not.toContain('# OpenShrike Error');
   });
 
   it('renders grouped scan help with the renamed flags and a discovered default target', async () => {
@@ -228,6 +238,18 @@ describe('runCli', () => {
         promptForFullScanWhenScopeEmpty: true
       }
     );
+  });
+
+  it('treats a symlinked launcher path as script execution', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-cli-symlink-'));
+    tempDirectories.push(tempRoot);
+    const realScriptPath = path.join(tempRoot, 'cli.js');
+    const symlinkPath = path.join(tempRoot, 'shrike');
+
+    await fs.writeFile(realScriptPath, '#!/usr/bin/env node\n', 'utf8');
+    await fs.symlink(realScriptPath, symlinkPath);
+
+    expect(isExecutedAsScript(pathToFileURL(realScriptPath).href, symlinkPath)).toBe(true);
   });
 });
 

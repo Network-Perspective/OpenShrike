@@ -1,6 +1,6 @@
 {
   "name": "openshrike",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "publisher": "networkperspective",
   "displayName": "OpenShrike",
@@ -230,6 +230,8 @@
     "dev:extension": "tsup --config tsup.extension.config.ts --watch",
     "prepare:npm-package": "node scripts/prepare-npm-package.mjs",
     "pack:npm": "npm run build:cli && npm run prepare:npm-package && npm pack .artifacts/npm/package --pack-destination .artifacts/npm",
+    "publish:npm": "scripts/publish-npm.sh",
+    "publish:vscode": "scripts/publish-vscode.sh",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:extension-host": "node tests/extension-host/run.mjs",

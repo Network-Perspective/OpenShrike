@@ -245,10 +245,7 @@ function discoverDefaultPullRequestTargetWithLookupSync(
   lookup: (candidate: string) => boolean
 ): string | null {
   try {
-    execFileSync('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree'], {
-      encoding: 'utf8',
-      stdio: 'pipe'
-    });
+    execGitSync(repoPath, ['rev-parse', '--is-inside-work-tree']);
   } catch {
     return null;
   }
@@ -273,14 +270,38 @@ async function gitReferenceExists(repoPath: string, reference: string): Promise<
 
 function gitReferenceExistsSync(repoPath: string, reference: string): boolean {
   try {
-    execFileSync('git', ['-C', repoPath, 'rev-parse', '--verify', '--quiet', reference], {
-      encoding: 'utf8',
-      stdio: 'pipe'
-    });
+    execGitSync(repoPath, ['rev-parse', '--verify', '--quiet', reference]);
     return true;
   } catch {
     return false;
   }
+}
+
+function execGitSync(repoPath: string, args: string[]): string {
+  try {
+    return execFileSync('git', ['-C', repoPath, ...args], {
+      encoding: 'utf8',
+      stdio: 'pipe'
+    });
+  } catch (error) {
+    if (isZeroExitExecFileError(error)) {
+      return error.stdout;
+    }
+
+    throw error;
+  }
+}
+
+function isZeroExitExecFileError(error: unknown): error is {
+  status: 0;
+  stdout: string;
+} {
+  return typeof error === 'object'
+    && error !== null
+    && 'status' in error
+    && 'stdout' in error
+    && (error as {status?: unknown}).status === 0
+    && typeof (error as {stdout?: unknown}).stdout === 'string';
 }
 
 function buildDiffArgs(diffSpec: string): string[] {
