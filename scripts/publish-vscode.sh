@@ -15,13 +15,14 @@ Defaults:
   package path: .artifacts/vscode/networkperspective.openshrike-<version>.vsix
 
 Environment:
-  VSCE_PAT                                 Required Visual Studio Marketplace access token
+  VSCE_PAT                                 Optional Visual Studio Marketplace access token
 
 Behavior:
   - runs `npm ci`
   - runs `npm run build`
   - packages a VSIX with `@vscode/vsce`
   - publishes the VSIX with `@vscode/vsce`
+  - uses `VSCE_PAT` when available, otherwise falls back to Azure identity
 
 Examples:
   scripts/publish-vscode.sh
@@ -67,11 +68,6 @@ command -v npm >/dev/null 2>&1 || {
   exit 1
 }
 
-if [[ -z "${VSCE_PAT:-}" ]]; then
-  echo "VSCE_PAT is required to publish the VS Code extension." >&2
-  exit 1
-fi
-
 PACKAGE_VERSION="$(node -p "require('./package.json').version")"
 
 if [[ -z "$PACKAGE_PATH" ]]; then
@@ -96,4 +92,13 @@ if [[ ! -f "$PACKAGE_PATH" ]]; then
 fi
 
 echo "Publishing VS Code extension from $PACKAGE_PATH"
-npm exec --yes @vscode/vsce@3 -- publish --packagePath "$PACKAGE_PATH"
+PUBLISH_ARGS=(publish --packagePath "$PACKAGE_PATH")
+
+if [[ -n "${VSCE_PAT:-}" ]]; then
+  echo "Using VSCE_PAT for Visual Studio Marketplace authentication"
+else
+  echo "VSCE_PAT is not set; falling back to Azure identity authentication"
+  PUBLISH_ARGS+=(--azure-credential)
+fi
+
+npm exec --yes @vscode/vsce@3 -- "${PUBLISH_ARGS[@]}"

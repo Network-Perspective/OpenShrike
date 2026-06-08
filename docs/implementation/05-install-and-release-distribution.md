@@ -226,11 +226,13 @@ This helper is intended for manual VS Code Marketplace publication.
 
 Default behavior:
 
-1. requires `VSCE_PAT` in the environment,
-2. runs `npm ci`,
-3. runs `npm run build`,
-4. packages a VSIX under `.artifacts/vscode/`, and
-5. publishes it with `@vscode/vsce`.
+1. uses `VSCE_PAT` when it is present,
+2. when `VSCE_PAT` is unset, falls back to Azure identity with
+   `@vscode/vsce --azure-credential`,
+3. runs `npm ci`,
+4. runs `npm run build`,
+5. packages a VSIX under `.artifacts/vscode/`, and
+6. publishes it with `@vscode/vsce`.
 
 ## Intentional Constraints
 

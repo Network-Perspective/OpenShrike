@@ -190,10 +190,10 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
-          shopt -s nullglob
-          packages=(.artifacts/publishables/*.vsix)
+          mapfile -t packages < <(find .artifacts/publishables -type f -name '*.vsix' | sort)
           if [[ "${#packages[@]}" -ne 1 ]]; then
             echo "Expected exactly one VSIX package, found ${#packages[@]}" >&2
+            find .artifacts/publishables -maxdepth 4 -type f | sort >&2
             exit 1
           fi
           npm exec --yes @vscode/vsce@3 -- publish --packagePath "${packages[0]}"
