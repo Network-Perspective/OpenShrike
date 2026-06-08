@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
+import {realpathSync} from 'node:fs';
 import path from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath} from 'node:url';
 import {Command, CommanderError, Option} from 'commander';
 import {executeFixCommand} from './commands/fix.js';
 import {executeInternalFixWorkerCommand} from './commands/fix-worker.js';
@@ -40,7 +41,7 @@ export async function runCli(argv: string[] = process.argv): Promise<number> {
     await program.parseAsync(argv);
     return process.exitCode ?? 0;
   } catch (error) {
-    if (error instanceof CommanderError && error.code === 'commander.helpDisplayed') {
+    if (isCommanderHelpError(error)) {
       return 0;
     }
 
@@ -441,12 +442,22 @@ function assignIfDefined<K extends keyof ScanCommandOptions>(
   }
 }
 
-function isExecutedAsScript(moduleUrl: string, argvEntry: string | undefined): boolean {
+function isCommanderHelpError(error: unknown): error is CommanderError {
+  return error instanceof CommanderError
+    && error.exitCode === 0
+    && error.code.startsWith('commander.help');
+}
+
+export function isExecutedAsScript(moduleUrl: string, argvEntry: string | undefined): boolean {
   if (!argvEntry) {
     return false;
   }
 
-  return pathToFileURL(path.resolve(argvEntry)).href === moduleUrl;
+  try {
+    return realpathSync(path.resolve(argvEntry)) === realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
 }
 
 if (isExecutedAsScript(import.meta.url, process.argv[1])) {
