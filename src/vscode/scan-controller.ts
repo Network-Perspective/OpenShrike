@@ -47,6 +47,8 @@ interface TokenUsageState {
 }
 
 const ACTIVE_RUN_RENDER_INTERVAL_MS = 100;
+const UNINITIALIZED_STATUS_LABEL = 'Initialization required';
+const UNINITIALIZED_OPERATION_LABEL = 'Run `shrike init` in the integrated terminal to initialize this repository.';
 
 export class OpenShrikeScanController {
   private context: ScanContext | null = null;
@@ -65,6 +67,7 @@ export class OpenShrikeScanController {
     scanScope: 'uncommitted',
     scanTarget: null
   };
+  private workspaceInitialized = true;
   private runtimeMode: RuntimeMode | null = null;
   private parallelism: ParallelismValue | null = null;
   private outputLines: string[] = [];
@@ -734,11 +737,13 @@ export class OpenShrikeScanController {
       : createEmptyScanState({
           workspaceName: workspace.name,
           workspacePath: workspace.path,
-          statusLabel: this.statusLabel,
+          statusLabel: this.workspaceInitialized ? this.statusLabel : UNINITIALIZED_STATUS_LABEL,
           outputLines: this.outputLines,
           scopeLabel: this.scopeLabel,
+          activeOperationLabel: this.workspaceInitialized ? this.activeOperationLabel : UNINITIALIZED_OPERATION_LABEL,
           ...(this.runtimeMode ? {runtimeModeLabel: this.runtimeMode} : {}),
-          ...(this.parallelism !== null ? {parallelismLabel: String(this.parallelism)} : {})
+          ...(this.parallelism !== null ? {parallelismLabel: String(this.parallelism)} : {}),
+          isInitialized: this.workspaceInitialized
         });
 
     this.model.setState(state);
@@ -1125,6 +1130,7 @@ export class OpenShrikeScanController {
     this.scopeLabel = await resolveScopeSelectionLabel(workspace.path, this.scopeSelection);
     this.runtimeMode = defaults.runtimeMode;
     this.parallelism = defaults.parallelism;
+    this.workspaceInitialized = defaults.isInitialized;
   }
 
   private async resolveDisplayedScopeLabel(

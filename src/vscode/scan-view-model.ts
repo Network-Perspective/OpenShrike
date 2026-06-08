@@ -61,6 +61,7 @@ export interface ScanViewModel {
   warnings: string[];
   canCancel: boolean;
   hasFindings: boolean;
+  isInitialized: boolean;
 }
 
 export function buildScanViewModel(input: {
@@ -73,31 +74,7 @@ export function buildScanViewModel(input: {
   const items = buildFindingItems(sortedFindings, selectedFindingId);
   const selectedFinding = state.findings.find(finding => finding.id === selectedFindingId) ?? null;
   const statusBarText = buildStatusBarText(state);
-  const statusBarTooltipLines = [
-    `${state.statusLabel}`,
-    `${state.counts.total} total checks`,
-    `${state.counts.completed} completed`,
-    `${state.counts.fail} failed`,
-    `${state.counts.unknown} inconclusive`,
-    `${state.counts.pass} passed`,
-    `Runtime: ${state.runtimeModeLabel}`,
-    `Parallelism: ${state.parallelismLabel}`,
-    state.canCancel ? 'Click to cancel the active scan.' : 'Click to open the OpenShrike output channel.'
-  ];
-
-  if (state.counts.fixing > 0) {
-    statusBarTooltipLines.splice(2, 0, `${state.counts.fixing} fixing`);
-  }
-
-  if (state.counts.running > 0) {
-    statusBarTooltipLines.splice(2, 0, `${state.counts.running} in progress`);
-  }
-
-  if (state.counts.pending > 0) {
-    statusBarTooltipLines.splice(2, 0, `${state.counts.pending} pending`);
-  }
-
-  const statusBarTooltip = statusBarTooltipLines.join('\n');
+  const statusBarTooltip = buildStatusBarTooltip(state);
 
   return {
     workspaceName: state.workspaceName,
@@ -142,11 +119,16 @@ export function buildScanViewModel(input: {
     lastScanPath: state.lastScanPath,
     warnings: [...state.warnings],
     canCancel: state.canCancel,
-    hasFindings: state.findings.length > 0
+    hasFindings: state.findings.length > 0,
+    isInitialized: state.isInitialized
   };
 }
 
 function buildStatusBarText(state: ScanState): string {
+  if (!state.isInitialized) {
+    return '$(warning) OpenShrike: Init Required';
+  }
+
   switch (state.statusKind) {
     case 'running':
       return `$(sync~spin) OpenShrike: ${state.counts.completed}/${state.counts.total}`;
@@ -163,6 +145,41 @@ function buildStatusBarText(state: ScanState): string {
     case 'idle':
       return '$(shield) OpenShrike: Ready';
   }
+}
+
+function buildStatusBarTooltip(state: ScanState): string {
+  if (!state.isInitialized) {
+    return [
+      'Repository not initialized for OpenShrike.',
+      'Run `shrike init` in the integrated terminal, then return here and run a scan.'
+    ].join('\n');
+  }
+
+  const statusBarTooltipLines = [
+    `${state.statusLabel}`,
+    `${state.counts.total} total checks`,
+    `${state.counts.completed} completed`,
+    `${state.counts.fail} failed`,
+    `${state.counts.unknown} inconclusive`,
+    `${state.counts.pass} passed`,
+    `Runtime: ${state.runtimeModeLabel}`,
+    `Parallelism: ${state.parallelismLabel}`,
+    state.canCancel ? 'Click to cancel the active scan.' : 'Click to open the OpenShrike output channel.'
+  ];
+
+  if (state.counts.fixing > 0) {
+    statusBarTooltipLines.splice(2, 0, `${state.counts.fixing} fixing`);
+  }
+
+  if (state.counts.running > 0) {
+    statusBarTooltipLines.splice(2, 0, `${state.counts.running} in progress`);
+  }
+
+  if (state.counts.pending > 0) {
+    statusBarTooltipLines.splice(2, 0, `${state.counts.pending} pending`);
+  }
+
+  return statusBarTooltipLines.join('\n');
 }
 
 function buildFindingItems(

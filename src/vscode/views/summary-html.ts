@@ -267,6 +267,47 @@ export function renderSummaryHtml(viewModel: ScanViewModel): string {
             background: rgba(204, 167, 0, 0.08);
             color: var(--text-main);
           }
+
+          .setup-card {
+            display: grid;
+            gap: 10px;
+            padding: 14px;
+            border: 1px solid var(--activity-border);
+            background: var(--surface-2);
+          }
+
+          .setup-title {
+            color: var(--text-strong);
+            font-size: 13px;
+            font-weight: 600;
+          }
+
+          .setup-copy {
+            color: var(--text-muted);
+          }
+
+          .setup-copy code {
+            font-family: var(--vscode-editor-font-family, var(--vscode-font-family));
+            color: var(--text-strong);
+          }
+
+          .setup-action {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: fit-content;
+            min-height: 28px;
+            padding: 0 12px;
+            border-radius: 6px;
+            background: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            text-decoration: none;
+            font-weight: 600;
+          }
+
+          .setup-action:hover {
+            background: var(--vscode-button-hoverBackground);
+          }
         </style>
       </head>
       <body>
@@ -283,58 +324,7 @@ export function renderSummaryHtml(viewModel: ScanViewModel): string {
             </div>
           </header>
 
-          <section class="metrics">
-            <div class="metric-card">
-              <span class="metric-label">Target</span>
-              <span class="metric-value">${escapeHtml(viewModel.targetLabel)}</span>
-            </div>
-            <div class="metric-card">
-              <span class="metric-label">Tokens In / Out</span>
-              <span class="metric-value">${escapeHtml(viewModel.tokensLabel)}</span>
-            </div>
-            <div class="metric-card">
-              <span class="metric-label">Duration</span>
-              <span class="metric-value">${escapeHtml(viewModel.durationLabel)}</span>
-            </div>
-            <div class="metric-card">
-              <span class="metric-label">Generated</span>
-              <span class="metric-value">${escapeHtml(viewModel.generatedAtLabel)}</span>
-            </div>
-            <div class="metric-card">
-              <span class="metric-label">Runtime</span>
-              <span class="metric-value">${escapeHtml(viewModel.runtimeModeLabel)}</span>
-            </div>
-            <div class="metric-card">
-              <span class="metric-label">Parallelism</span>
-              <span class="metric-value">${escapeHtml(viewModel.parallelismLabel)}</span>
-            </div>
-          </section>
-
-          <div class="total">${escapeHtml(totalLabel)}</div>
-          <div class="subcopy">Selection: ${escapeHtml(viewModel.scanTargetLabel)}</div>
-
-          ${viewModel.warnings.length > 0 ? `<section class="warning-list">${viewModel.warnings.map(warning => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}</section>` : ''}
-
-          <div class="progress" aria-label="Scan result distribution">
-            <div class="progress-segment fail"></div>
-            <div class="progress-segment unknown"></div>
-            <div class="progress-segment pass"></div>
-          </div>
-
-          <section class="status-list">
-            ${renderStatusRow('fail', counts.fail, 'Failed')}
-            ${renderStatusRow('unknown', counts.unknown, 'Inconclusive')}
-            ${renderStatusRow('pass', counts.pass, 'Passed')}
-          </section>
-
-          <div class="activity">
-            <span class="activity-icon"></span>
-            <span>${escapeHtml(viewModel.activeOperationLabel)}</span>
-          </div>
-
-          <div class="footer">
-            Last scan snapshot: <a href="${createCommandUri('openshrike.openLastScan')}">${escapeHtml(viewModel.lastScanPath)}</a>
-          </div>
+          ${viewModel.isInitialized ? renderScanSummary(viewModel, totalLabel, counts) : renderInitializationPrompt(viewModel)}
         </main>
       </body>
     </html>
@@ -354,6 +344,10 @@ function renderStatusRow(status: 'fail' | 'unknown' | 'pass', count: number, lab
 }
 
 function renderScopeControl(viewModel: ScanViewModel): string {
+  if (!viewModel.isInitialized) {
+    return '';
+  }
+
   const label = escapeHtml(`Scope: ${viewModel.scopeLabel}`);
   const isBusy = viewModel.statusKind === 'running' || viewModel.statusKind === 'cancelling';
 
@@ -362,6 +356,85 @@ function renderScopeControl(viewModel: ScanViewModel): string {
   }
 
   return `<a class="scope-chip" href="${createCommandUri('openshrike.runScanWithScopeOverride')}" title="Choose the scope for future scans">${label}</a>`;
+}
+
+function renderScanSummary(
+  viewModel: ScanViewModel,
+  totalLabel: string,
+  counts: ScanViewModel['counts']
+): string {
+  return `
+    <section class="metrics">
+      <div class="metric-card">
+        <span class="metric-label">Target</span>
+        <span class="metric-value">${escapeHtml(viewModel.targetLabel)}</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Tokens In / Out</span>
+        <span class="metric-value">${escapeHtml(viewModel.tokensLabel)}</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Duration</span>
+        <span class="metric-value">${escapeHtml(viewModel.durationLabel)}</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Generated</span>
+        <span class="metric-value">${escapeHtml(viewModel.generatedAtLabel)}</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Runtime</span>
+        <span class="metric-value">${escapeHtml(viewModel.runtimeModeLabel)}</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Parallelism</span>
+        <span class="metric-value">${escapeHtml(viewModel.parallelismLabel)}</span>
+      </div>
+    </section>
+
+    <div class="total">${escapeHtml(totalLabel)}</div>
+    <div class="subcopy">Selection: ${escapeHtml(viewModel.scanTargetLabel)}</div>
+
+    ${viewModel.warnings.length > 0 ? `<section class="warning-list">${viewModel.warnings.map(warning => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}</section>` : ''}
+
+    <div class="progress" aria-label="Scan result distribution">
+      <div class="progress-segment fail"></div>
+      <div class="progress-segment unknown"></div>
+      <div class="progress-segment pass"></div>
+    </div>
+
+    <section class="status-list">
+      ${renderStatusRow('fail', counts.fail, 'Failed')}
+      ${renderStatusRow('unknown', counts.unknown, 'Inconclusive')}
+      ${renderStatusRow('pass', counts.pass, 'Passed')}
+    </section>
+
+    <div class="activity">
+      <span class="activity-icon"></span>
+      <span>${escapeHtml(viewModel.activeOperationLabel)}</span>
+    </div>
+
+    <div class="footer">
+      Last scan snapshot: <a href="${createCommandUri('openshrike.openLastScan')}">${escapeHtml(viewModel.lastScanPath)}</a>
+    </div>
+  `;
+}
+
+function renderInitializationPrompt(viewModel: ScanViewModel): string {
+  const hasWorkspace = viewModel.workspaceName !== 'No Workspace Open';
+  const action = hasWorkspace
+    ? `<a class="setup-action" href="${createCommandUri('openshrike.runInitInTerminal', [viewModel.workspacePath])}">Run shrike init</a>`
+    : '';
+  const copy = hasWorkspace
+    ? 'The current repository is not initialized for OpenShrike. Start <code>shrike init</code> in the integrated terminal, complete the setup flow, then return here and run a scan.'
+    : 'Open a workspace folder before initializing OpenShrike.';
+
+  return `
+    <section class="setup-card">
+      <div class="setup-title">Repository initialization required</div>
+      <div class="setup-copy">${copy}</div>
+      ${action}
+    </section>
+  `;
 }
 
 function renderStatusIcon(status: 'fail' | 'unknown' | 'pass'): string {

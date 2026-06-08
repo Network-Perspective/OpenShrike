@@ -80,7 +80,8 @@ export function createScanStateFromResults(input: {
     outputLines: [...input.outputLines],
     lastScanPath: input.lastScanPath,
     warnings: [...input.warnings],
-    canCancel: input.canCancel
+    canCancel: input.canCancel,
+    isInitialized: true
   };
 }
 

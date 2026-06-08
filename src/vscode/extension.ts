@@ -52,8 +52,7 @@ export function activate(context: vscode.ExtensionContext): OpenShrikeExtensionA
       model,
       controller,
       output,
-      detailPanel,
-      extensionPath: context.extensionPath
+      detailPanel
     });
 
     void controller.initialize(workspaceTarget).then(async () => {

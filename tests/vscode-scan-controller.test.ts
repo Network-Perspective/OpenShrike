@@ -76,6 +76,28 @@ afterEach(async () => {
 });
 
 describe('OpenShrike scan controller', () => {
+  it('surfaces uninitialized repositories without crashing the initial view', async () => {
+    const workspacePath = await createUninitializedWorkspace();
+    const workspace = {
+      name: 'Workspace',
+      path: workspacePath
+    };
+    const model = new OpenShrikeExtensionModel(createEmptyScanState({
+      workspaceName: workspace.name,
+      workspacePath
+    }), null);
+    const controller = new OpenShrikeScanController(model);
+
+    await controller.initialize(workspace);
+
+    const state = model.getState();
+    expect(state.statusKind).toBe('idle');
+    expect(state.isInitialized).toBe(false);
+    expect(state.statusLabel).toBe('Initialization required');
+    expect(state.activeOperationLabel).toContain('shrike init');
+    expect(state.counts.total).toBe(0);
+  });
+
   it('uses configured workspace defaults in the idle state', async () => {
     const workspacePath = await createWorkspace({
       runtime: {
@@ -541,6 +563,12 @@ async function createWorkspace(overrides: {
     'utf8'
   );
 
+  return workspacePath;
+}
+
+async function createUninitializedWorkspace(): Promise<string> {
+  const workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-vscode-controller-uninitialized-'));
+  tempDirectories.push(workspacePath);
   return workspacePath;
 }
 

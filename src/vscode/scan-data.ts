@@ -64,6 +64,7 @@ export interface ScanState {
   lastScanPath: string;
   warnings: string[];
   canCancel: boolean;
+  isInitialized: boolean;
 }
 
 const DEFAULT_SELECTED_FINDING_ID = 'BP-SEC-001';
@@ -351,7 +352,8 @@ export function createSampleScanState(input: {
     ],
     lastScanPath: '.openshrike/last-scan.md',
     warnings: [],
-    canCancel: false
+    canCancel: false,
+    isInitialized: true
   };
 }
 
@@ -363,6 +365,8 @@ export function createEmptyScanState(input: {
   scopeLabel?: string;
   runtimeModeLabel?: string;
   parallelismLabel?: string;
+  activeOperationLabel?: string;
+  isInitialized?: boolean;
 }): ScanState {
   return {
     workspaceName: input.workspaceName,
@@ -388,12 +392,13 @@ export function createEmptyScanState(input: {
       total: 0,
       visible: 0
     },
-    activeOperationLabel: 'Run OpenShrike: Run Scan or Load Last Scan.',
+    activeOperationLabel: input.activeOperationLabel ?? 'Run OpenShrike: Run Scan or Load Last Scan.',
     findings: [],
     outputLines: input.outputLines ?? [],
     lastScanPath: '.openshrike/last-scan.md',
     warnings: [],
-    canCancel: false
+    canCancel: false,
+    isInitialized: input.isInitialized ?? true
   };
 }
 

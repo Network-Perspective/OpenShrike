@@ -23,6 +23,7 @@ export interface WorkspaceScanDefaults {
   scopeLabel: string;
   runtimeMode: RuntimeMode;
   parallelism: ParallelismValue;
+  isInitialized: boolean;
 }
 
 export async function resolveWorkspaceScanDefaults(repoPath: string): Promise<WorkspaceScanDefaults> {
@@ -36,7 +37,8 @@ export async function resolveWorkspaceScanDefaults(repoPath: string): Promise<Wo
     scopeSelection,
     scopeLabel: await resolveScopeSelectionLabel(repoPath, scopeSelection),
     runtimeMode: loadedProjectConfig?.config.runtime.mode ?? DEFAULT_RUNTIME_MODE,
-    parallelism: loadedProjectConfig?.config.runtime.parallelism ?? DEFAULT_PARALLELISM
+    parallelism: loadedProjectConfig?.config.runtime.parallelism ?? DEFAULT_PARALLELISM,
+    isInitialized: loadedProjectConfig !== null
   };
 }
 

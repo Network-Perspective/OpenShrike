@@ -116,6 +116,28 @@ describe('VS Code summary HTML', () => {
     expect(html).toContain('Scope: uncommitted changes');
   });
 
+  it('renders an initialization prompt instead of scan metrics for uninitialized repositories', () => {
+    const viewModel = buildScanViewModel({
+      state: createEmptyScanState({
+        workspaceName: 'Workspace',
+        workspacePath: '/tmp/workspace',
+        statusLabel: 'Initialization required',
+        activeOperationLabel: 'Run `shrike init` in the integrated terminal to initialize this repository.',
+        isInitialized: false
+      }),
+      selectedFindingId: null,
+      sortMode: 'status'
+    });
+    const html = renderSummaryHtml(viewModel);
+
+    expect(html).toContain('Repository initialization required');
+    expect(html).toContain('The current repository is not initialized for OpenShrike.');
+    expect(html).toContain('command:openshrike.runInitInTerminal');
+    expect(html).toContain('Run shrike init');
+    expect(html).not.toContain('command:openshrike.runScanWithScopeOverride');
+    expect(html).not.toContain('Last scan snapshot:');
+  });
+
   it('keeps zero-complete cancelled scans out of the fully scanned copy', () => {
     const state = createScanStateFromResults({
       workspaceName: 'Workspace',
@@ -214,6 +236,25 @@ describe('VS Code view model', () => {
     expect(viewModel.selectedFinding?.id).toBe('BP-SEC-001');
     expect(viewModel.statusBarText).toBe('$(sync~spin) OpenShrike: 24/24');
     expect(viewModel.canCancel).toBe(false);
+  });
+
+  it('marks uninitialized repositories in the status bar copy', () => {
+    const state = createEmptyScanState({
+      workspaceName: 'Workspace',
+      workspacePath: '/tmp/workspace',
+      statusLabel: 'Initialization required',
+      activeOperationLabel: 'Run `shrike init` in the integrated terminal to initialize this repository.',
+      isInitialized: false
+    });
+    const viewModel = buildScanViewModel({
+      state,
+      selectedFindingId: null,
+      sortMode: 'status'
+    });
+
+    expect(viewModel.statusBarText).toBe('$(warning) OpenShrike: Init Required');
+    expect(viewModel.statusBarTooltip).toContain('Repository not initialized for OpenShrike.');
+    expect(viewModel.isInitialized).toBe(false);
   });
 });
 

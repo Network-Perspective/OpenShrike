@@ -21,7 +21,6 @@ export function registerExtensionCommands(
     output: OpenShrikeOutputChannel;
     detailPanel: OpenShrikeDetailPanel;
     controller: OpenShrikeScanController;
-    extensionPath: string;
   }
 ): void {
   const register = (command: string, callback: () => unknown | Thenable<unknown>) => {
@@ -124,6 +123,10 @@ export function registerExtensionCommands(
       return vscode.window.showWarningMessage('Open a workspace folder before loading OpenShrike scan results.');
     }
 
+    if (!await ensureWorkspaceInitialized(workspace.path)) {
+      return undefined;
+    }
+
     return await runLongOperation('Load OpenShrike Last Scan', dependencies, async () => {
       await dependencies.controller.loadLastScan(workspace);
       return await revealSelectionAfterDataLoad(dependencies.model, dependencies.detailPanel);
@@ -158,10 +161,7 @@ export function registerExtensionCommands(
   register('openshrike.openCheckMarkdown', () => openSelectedCheckMarkdown(dependencies.model));
 
   context.subscriptions.push(vscode.commands.registerCommand('openshrike.runInitInTerminal', (workspacePath?: unknown) => {
-    return runInitInTerminal(
-      dependencies.extensionPath,
-      typeof workspacePath === 'string' ? workspacePath : undefined
-    );
+    return runInitInTerminal(typeof workspacePath === 'string' ? workspacePath : undefined);
   }));
 
   context.subscriptions.push(vscode.commands.registerCommand('openshrike.selectFinding', (findingId?: unknown) => {
@@ -183,7 +183,7 @@ export function registerExtensionCommands(
   }));
 }
 
-function runInitInTerminal(extensionPath: string, workspacePath?: string): Thenable<unknown> | undefined {
+function runInitInTerminal(workspacePath?: string): Thenable<unknown> | undefined {
   const workspaceRoot = workspacePath ?? resolveWorkspaceRootPath();
   if (!workspaceRoot) {
     return vscode.window.showWarningMessage('Open a workspace folder before running OpenShrike init.');
@@ -193,11 +193,12 @@ function runInitInTerminal(extensionPath: string, workspacePath?: string): Thena
     name: 'OpenShrike Init',
     cwd: workspaceRoot
   });
-  const cliPath = path.join(extensionPath, 'dist', 'cli.js');
   terminal.show();
-  terminal.sendText(`${quoteForShell(process.execPath)} ${quoteForShell(cliPath)} init`, true);
+  terminal.sendText('shrike init', true);
 
-  return vscode.window.showInformationMessage('OpenShrike init was started in the integrated terminal.');
+  return vscode.window.showInformationMessage(
+    'Started `shrike init` in the integrated terminal. Return to OpenShrike and run a scan when initialization completes.'
+  );
 }
 
 function openSelectedCheckMarkdown(model: OpenShrikeExtensionModel): Thenable<unknown> | Promise<unknown> {
@@ -296,10 +297,6 @@ function clampLineNumber(lineNumber: number, lineCount: number): number {
   return Math.max(0, Math.min(lineCount - 1, lineNumber - 1));
 }
 
-function quoteForShell(value: string): string {
-  return `"${value.replaceAll('"', '\\"')}"`;
-}
-
 async function ensureWorkspaceInitialized(workspacePath: string): Promise<boolean> {
   const projectConfig = await loadProjectConfigForRepo(workspacePath).catch(() => null);
   if (projectConfig) {
@@ -307,10 +304,10 @@ async function ensureWorkspaceInitialized(workspacePath: string): Promise<boolea
   }
 
   const selection = await vscode.window.showWarningMessage(
-    'OpenShrike is not initialized for this repository. Run `shrike init` in the integrated terminal first.',
-    'Run Init In Terminal'
+    'The current repository is not initialized for OpenShrike. Run `shrike init` in the integrated terminal first.',
+    'Run shrike init'
   );
-  if (selection === 'Run Init In Terminal') {
+  if (selection === 'Run shrike init') {
     await vscode.commands.executeCommand('openshrike.runInitInTerminal', workspacePath);
   }
 
