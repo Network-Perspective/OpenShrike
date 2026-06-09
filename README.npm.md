@@ -29,7 +29,11 @@ shrike scan
 If you want the VS Code UI, install `networkperspective.openshrike` from the
 Visual Studio Code Marketplace.
 
+```bash
+code --install-extension networkperspective.openshrike
+```
 ## Links
 
 - GitHub: https://github.com/Network-Perspective/OpenShrike
 - Website: https://network-perspective.github.io/OpenShrike/
+- VSCode: https://marketplace.visualstudio.com/items?itemName=NetworkPerspective.openshrike
