@@ -16,8 +16,10 @@ src/**
 tests/**
 website/**
 docs/**
-!docs/openshrike-logo.png
+!docs/openshrike-icon.png
+README.md
 README.npm.md
+*.vsix
 install
 install.ps1
 shrike

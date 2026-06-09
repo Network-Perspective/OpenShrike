@@ -83,7 +83,7 @@ if [[ "$SKIP_BUILD" != "true" ]]; then
   mkdir -p "$(dirname "$PACKAGE_PATH")"
   npm ci
   npm run build
-  npm exec --yes @vscode/vsce@3 -- package --out "$PACKAGE_PATH"
+  npm exec --yes @vscode/vsce@3 -- package --readme-path README.vscode.md --out "$PACKAGE_PATH"
 fi
 
 if [[ ! -f "$PACKAGE_PATH" ]]; then

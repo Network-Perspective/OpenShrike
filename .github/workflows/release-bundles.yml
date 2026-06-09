@@ -87,7 +87,7 @@ jobs:
           npm pack .artifacts/npm/package --pack-destination .artifacts/npm
           vsix_path="$PWD/.artifacts/vscode/networkperspective.openshrike-${{ steps.package.outputs.version }}.vsix"
           mkdir -p "$(dirname "$vsix_path")"
-          npm exec --yes @vscode/vsce@3 -- package --out "$vsix_path"
+          npm exec --yes @vscode/vsce@3 -- package --readme-path README.vscode.md --out "$vsix_path"
 
       - name: Upload release publishables
         uses: actions/upload-artifact@v7

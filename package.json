@@ -15,7 +15,13 @@
     "url": "https://github.com/Network-Perspective/OpenShrike/issues"
   },
   "main": "./dist/vscode/extension.cjs",
-  "icon": "docs/openshrike-logo.png",
+  "icon": "docs/openshrike-icon.png",
+  "galleryBanner": {
+    "color": "#0d1117",
+    "theme": "dark"
+  },
+  "pricing": "Free",
+  "qna": "marketplace",
   "type": "module",
   "bin": {
     "shrike": "./dist/cli.js"
@@ -25,15 +31,22 @@
     "vscode": "^1.101.0"
   },
   "categories": [
+    "Linters",
+    "Testing",
+    "AI",
     "Other"
   ],
   "keywords": [
     "openshrike",
-    "vscode-extension",
-    "cli",
     "code-review",
     "security",
-    "llm"
+    "code-quality",
+    "best-practices",
+    "static-analysis",
+    "llm",
+    "ai",
+    "opencode",
+    "agent"
   ],
   "extensionKind": [
     "workspace"

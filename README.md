@@ -4,11 +4,11 @@
   <a href="https://network-perspective.github.io/OpenShrike/"><img src="https://img.shields.io/badge/Website-5865F2?style=for-the-badge&logoColor=white" alt="Website"></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=NetworkPerspective.openshrike"><img src="https://img.shields.io/badge/VSCode-Add-5865F2?style=for-the-badge&logoColor=white" alt="VsCode"></a>
   <a href="https://www.npmjs.com/package/@networkperspective/openshrike"><img src="https://img.shields.io/badge/NPM-Install-5865F2?style=for-the-badge&logoColor=white" alt="NPM"></a>
-  <a href="https://discord.gg/4MKThAVsy2"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://discord.gg/4MKThAVsy2"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a><br/>
   <a href="https://github.com/Network-Perspective/OpenShrike/releases/latest"><img src="https://img.shields.io/github/v/release/Network-Perspective/OpenShrike?style=for-the-badge&color=20B2AA" alt="Latest release"></a>
   <a href="https://github.com/Network-Perspective/OpenShrike/actions/workflows/release-bundles.yml"><img src="https://img.shields.io/github/actions/workflow/status/Network-Perspective/OpenShrike/release-bundles.yml?style=for-the-badge&label=build" alt="Build status"></a>
   <a href="https://github.com/Network-Perspective/OpenShrike/blob/main/LICENSE"><img src="https://img.shields.io/badge/LICENSE-MIT-20B2AA?style=for-the-badge" alt="MIT License"></a>
-  
+  <br/>
   <!-- Keep these links. Translations will automatically update with the README. -->
   <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=de">Deutsch</a> | 
   <a href="https://www.readme-i18n.com/Network-Perspective/OpenShrike?lang=es">Español</a> | 
