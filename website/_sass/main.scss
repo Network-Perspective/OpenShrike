@@ -215,6 +215,24 @@ img { max-width: 100%; height: auto; }
   font-size: 1.0625rem;
 }
 
+/* ── VS Code section ─────────────────────────────────────── */
+
+.vscode-shot {
+  margin: 0 auto 2.5rem;
+  max-width: 900px;
+}
+
+.vscode-shot img {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.vscode-cta {
+  text-align: center;
+  margin: 2.5rem;
+}
+
 /* ── Card Grid ───────────────────────────────────────────── */
 
 .card-grid {
@@ -271,6 +289,8 @@ img { max-width: 100%; height: auto; }
 .card__icon[data-icon="sliders"]::after    { content: "\2699"; }
 .card__icon[data-icon="wand"]::after       { content: "\2728"; }
 .card__icon[data-icon="key"]::after        { content: "\1F511"; }
+.card__icon[data-icon="sidebar"]::after    { content: "\1F5C2"; }
+.card__icon[data-icon="search"]::after     { content: "\1F50D"; }
 
 .card__title {
   font-size: 1.0625rem;

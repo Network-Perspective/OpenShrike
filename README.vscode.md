@@ -13,7 +13,7 @@
 
 **Turn engineering best practices into automated, predictable code reviews — without leaving your editor.**
 
-Code generation is cheap. Code review is the new bottleneck. LLMs produce pull
+Code generation is fast. Code review is the new bottleneck. LLMs produce pull
 requests in minutes; reviewing them thoroughly still takes hours. Linters catch
 syntax. Unit tests check behavior. OpenShrike systematically verifies that a
 change follows the architectural decisions, security practices, and engineering

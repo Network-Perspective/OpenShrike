@@ -1,4 +1,4 @@
-headline: "Code generation is cheap. Code review is the new bottleneck."
+headline: "Code generation is fast. Code review is the new bottleneck."
 points:
   - title: "AI writes code faster than humans can review it"
     description: "LLMs generate pull requests in minutes. Reviewing them thoroughly still takes hours. The bottleneck has shifted from writing code to understanding and verifying it."

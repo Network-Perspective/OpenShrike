@@ -1,0 +1,25 @@
+<section id="vscode" class="section section--muted">
+  <div class="container">
+    <h2 class="section__title">{{ site.data.vscode.headline }}</h2>
+    <p class="section__lead">{{ site.data.vscode.lead }}</p>
+
+    <div class="vscode-cta">
+      <a href="{{ site.data.vscode.marketplace }}" class="btn btn--primary" target="_blank" rel="noopener">Add OpenShrike to VS Code</a>
+    </div>
+
+    <figure class="vscode-shot">
+      <img src="{{ site.data.vscode.image | relative_url }}" alt="{{ site.data.vscode.image_alt }}">
+    </figure>
+
+    <div class="card-grid card-grid--3col">
+      {% for feature in site.data.vscode.items %}
+      <div class="card">
+        <div class="card__icon" data-icon="{{ feature.icon }}"></div>
+        <h3 class="card__title">{{ feature.title }}</h3>
+        <p class="card__text">{{ feature.description }}</p>
+      </div>
+      {% endfor %}
+    </div>
+
+  </div>
+</section>
