@@ -27,6 +27,7 @@ const {createManagedOpencodeServer} = await import('../src/lib/opencode-server.j
 afterEach(() => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
+  delete process.env.OPENSHRIKE_OPENCODE_BINARY;
   delete process.env.OPENSHRIKE_NODE_BINARY;
 });
 
@@ -111,6 +112,40 @@ describe('createManagedOpencodeServer', () => {
         })
       );
     });
+
+    proc.stdout.emit('data', Buffer.from('opencode server listening on http://127.0.0.1:42113\n'));
+
+    const server = await serverPromise;
+    expect(server.pid).toBe(4321);
+  });
+
+  it('uses the explicitly configured OpenCode binary when provided', async () => {
+    const proc = new FakeChildProcess();
+    process.env.OPENSHRIKE_OPENCODE_BINARY = '/tmp/fake-opencode';
+    mockSpawn.mockReturnValue(proc);
+    mockCreateOpencodeClient.mockReturnValue({tag: 'client'});
+
+    const serverPromise = createManagedOpencodeServer({
+      config: {},
+      port: 42113
+    });
+
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalledWith(
+        '/tmp/fake-opencode',
+        ['serve', '--hostname=127.0.0.1', '--port=42113'],
+        expect.objectContaining({
+          env: expect.objectContaining({
+            OPENSHRIKE_OPENCODE_BINARY: '/tmp/fake-opencode',
+            OPENCODE_CONFIG_CONTENT: '{}'
+          }),
+          stdio: ['ignore', 'pipe', 'pipe']
+        })
+      );
+    });
+
+    expect(mockFindToolRoot).not.toHaveBeenCalled();
+    expect(mockAccess).not.toHaveBeenCalled();
 
     proc.stdout.emit('data', Buffer.from('opencode server listening on http://127.0.0.1:42113\n'));
 

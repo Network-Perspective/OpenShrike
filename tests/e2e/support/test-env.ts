@@ -587,6 +587,7 @@ async function createFakeOpencodeInstallation(options: {
     logPath,
     scenarioPath,
     env: {
+      OPENSHRIKE_OPENCODE_BINARY: wrapperPath,
       PATH: [binRoot, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
       FAKE_OPENCODE_LOG_PATH: logPath,
       FAKE_OPENCODE_SCENARIO_PATH: scenarioPath,

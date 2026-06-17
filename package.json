@@ -270,6 +270,11 @@
     "react": "^19.2.0",
     "zod": "^4.1.12"
   },
+  "overrides": {
+    "esbuild": "0.28.1",
+    "vite": "8.0.16",
+    "ws": "8.21.0"
+  },
   "devDependencies": {
     "@lydell/node-pty": "^1.2.0-beta.12",
     "@types/node": "^24.5.2",
@@ -278,8 +283,8 @@
     "@vscode/test-electron": "^2.5.2",
     "@xterm/headless": "^6.0.0",
     "tsup": "^8.5.0",
-    "tsx": "^4.20.5",
+    "tsx": "^4.22.4",
     "typescript": "^5.9.2",
-    "vitest": "^4.1.1"
+    "vitest": "^4.1.9"
   }
 }

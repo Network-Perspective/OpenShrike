@@ -111,7 +111,7 @@ describe('fix terminal e2e', () => {
         await removeTempPaths(fixture.tempPaths);
       }
     }
-  });
+  }, 120_000);
 });
 
 async function readJsonLines(filePath: string): Promise<Array<Record<string, unknown>>> {

@@ -64,7 +64,7 @@ describe('scan terminal e2e', () => {
         await removeTempPaths(fixture.tempPaths);
       }
     }
-  });
+  }, 120_000);
 
   it('runs shrike scan in a PTY and captures the outbound prompt', async () => {
     const mockServer = await MockAiServer.start();

@@ -57,6 +57,14 @@ export async function createManagedOpencodeServer(options: {
 }
 
 async function resolveOpenCodeLaunchCommand(): Promise<OpenCodeLaunchCommand> {
+  const configuredBinary = process.env.OPENSHRIKE_OPENCODE_BINARY?.trim();
+  if (configuredBinary) {
+    return {
+      command: configuredBinary,
+      args: []
+    };
+  }
+
   const bundledLauncherPath = await resolveBundledOpenCodeLauncherPath();
   if (!bundledLauncherPath) {
     return {
