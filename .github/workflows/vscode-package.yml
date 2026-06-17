@@ -1,0 +1,36 @@
+name: vscode-package
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-vsix:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build and verify VSIX package
+        shell: bash
+        run: |
+          npm ci
+          npm run prepare:vscode-runtime
+          npm run verify:vscode-runtime
+          vsix_path="$PWD/.artifacts/vscode/networkperspective.openshrike-ci.vsix"
+          mkdir -p "$(dirname "$vsix_path")"
+          npm exec --yes @vscode/vsce@3 -- package --readme-path README.vscode.md --out "$vsix_path"
+          scripts/verify-vscode-package.sh --vsix-path "$vsix_path" --require-docker

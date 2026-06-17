@@ -1,6 +1,6 @@
 import type {Event} from '@opencode-ai/sdk';
 import {z} from 'zod';
-import {readCheckDefinition} from './checks.js';
+import {extractCheckTitleFromDefinition, readCheckDefinition} from './checks.js';
 import {
   MAX_CHECK_EVIDENCE_ITEMS,
   MAX_CHECK_REMEDIATION_ITEMS,
@@ -25,6 +25,31 @@ const agentCheckPayloadSchema = z.object({
   remediation: z.array(z.string()).max(MAX_CHECK_REMEDIATION_ITEMS).optional()
 });
 type ValidatedAgentCheckPayload = z.infer<typeof agentCheckPayloadSchema>;
+
+export interface BatchPromptCheckDefinition {
+  id: string;
+  title: string;
+  definition: string;
+}
+
+export interface EvaluateCheckBatchOptions {
+  batchId: string;
+  batchLabel: string;
+  checkIds: string[];
+  projectChecksDir?: string | undefined;
+  repoPath: string;
+  agent: string;
+  model: string;
+  workerId?: string | undefined;
+  scopeContext: ScanScopeContext;
+  emulateOpencode: boolean;
+  runtime: OpenCodeRuntime | null;
+}
+
+export interface EvaluateCheckBatchResult {
+  resultsByCheckId: Map<string, CheckResult>;
+  warnings: string[];
+}
 
 export class CheckEvaluationError extends Error {
   readonly originalOutput: string | null;
@@ -95,14 +120,74 @@ export async function evaluateCheck(options: EvaluateCheckOptions): Promise<Chec
   }
 
   return {
-    id: payload.id!,
-    version: payload.version?.trim() || DEFAULT_VERSION,
-    status: payload.status as CheckResult['status'],
-    confidence: payload.confidence as Confidence,
-    evidence: payload.evidence ?? [],
-    rationale: payload.rationale?.trim() || 'No rationale provided.',
-    remediation: payload.remediation ?? []
+    ...createCheckResultFromPayload(payload, options.checkId)
   };
+}
+
+export async function evaluateCheckBatch(
+  options: EvaluateCheckBatchOptions
+): Promise<EvaluateCheckBatchResult> {
+  if (options.emulateOpencode) {
+    return {
+      resultsByCheckId: new Map(
+        await Promise.all(
+          options.checkIds.map(async checkId =>
+            [checkId, await emulateCheckResult(checkId, options.scopeContext)] as const
+          )
+        )
+      ),
+      warnings: []
+    };
+  }
+
+  if (!options.runtime) {
+    throw new Error('OpenCode runtime is not available.');
+  }
+
+  const checks = await Promise.all(
+    options.checkIds.map(async checkId => {
+      const definition = await readCheckDefinition(checkId, {
+        checksDirectory: options.projectChecksDir
+      });
+      return {
+        id: checkId,
+        title: extractCheckTitleFromDefinition(definition, checkId),
+        definition
+      } satisfies BatchPromptCheckDefinition;
+    })
+  );
+
+  const prompt = buildBatchPrompt({
+    checks,
+    batchLabel: options.batchLabel,
+    repoPath: options.repoPath,
+    scopeContext: options.scopeContext
+  });
+  const systemPrompt = await loadScanSystemPrompt();
+  const responseText = await options.runtime.runPrompt({
+    prompt,
+    system: systemPrompt,
+    agent: options.agent,
+    model: options.model,
+    title: options.batchLabel,
+    batchId: options.batchId,
+    batchCheckIds: options.checkIds,
+    batchLabel: options.batchLabel,
+    workerId: options.workerId
+  });
+
+  let payloadJson: string | null = null;
+
+  try {
+    payloadJson = extractJsonObject(responseText.text);
+    const payload = JSON.parse(payloadJson) as unknown;
+    return parseBatchResponse(payload, {
+      expectedCheckIds: options.checkIds,
+      scopeContext: options.scopeContext
+    });
+  } catch (error) {
+    throw createCheckEvaluationError(error, responseText.text, payloadJson, null);
+  }
 }
 
 async function emulateCheckResult(
@@ -175,6 +260,66 @@ export function buildPrompt(
   return sections.join('\n\n');
 }
 
+export function buildBatchPrompt(options: {
+  checks: readonly BatchPromptCheckDefinition[];
+  batchLabel: string;
+  repoPath: string;
+  scopeContext: ScanScopeContext;
+}): string {
+  const exampleCheckId = options.checks[0]?.id ?? 'check-id';
+  const sections = [
+    [
+      `You are executing a best-practice domain batch against repository path: ${options.repoPath}`,
+      '',
+      `Batch label: ${options.batchLabel}`,
+      buildScopeSection(options.scopeContext),
+      '',
+      `Requested checks (${options.checks.length}):`,
+      ...options.checks.map(check => `- ${check.id}: ${check.title}`)
+    ].join('\n'),
+    [
+      'Best-practice check definitions markdown:',
+      ...options.checks.flatMap((check, index) => [
+        '',
+        `Batch check ${index + 1} of ${options.checks.length}`,
+        `Check id: ${check.id}`,
+        `Check title: ${check.title}`,
+        'Definition markdown:',
+        '---',
+        check.definition,
+        '---'
+      ])
+    ].join('\n'),
+    [
+      'Follow each check definition exactly. Inspect only the allowed review scope and collect direct evidence.',
+      'Assess each requested check independently, even when multiple checks share the same files or evidence.',
+      'Return ONLY one JSON object with this schema:',
+      '{',
+      '  "results": [',
+      '    {',
+      `      "id": "${exampleCheckId}",`,
+      '      "version": "0.1.0",',
+      '      "status": "pass|fail|unknown",',
+      '      "confidence": "HIGH|MEDIUM|LOW",',
+      '      "evidence": ["relative/path:line"],',
+      '      "rationale": "short explanation grounded in evidence",',
+      '      "remediation": ["action 1", "action 2"]',
+      '    }',
+      '  ]',
+      '}',
+      '',
+      'Rules:',
+      ...buildBatchPromptRules(options.scopeContext)
+    ].join('\n')
+  ];
+  const scopeEvidenceSection = buildScopeEvidenceSection(options.scopeContext);
+  if (scopeEvidenceSection) {
+    sections.push(scopeEvidenceSection);
+  }
+
+  return sections.join('\n\n');
+}
+
 function buildScopeSection(scopeContext: ScanScopeContext): string {
   if (scopeContext.isFullRepository) {
     return 'Review scope: full repository.';
@@ -219,6 +364,20 @@ function buildPromptRules(scopeContext: ScanScopeContext): string[] {
           ]
       : []),
     statusRule
+  ];
+}
+
+function buildBatchPromptRules(scopeContext: ScanScopeContext): string[] {
+  const sharedRules = buildPromptRules(scopeContext).filter(rule =>
+    rule !== '- Output raw JSON only. No markdown fences.'
+  );
+
+  return [
+    '- Output raw JSON only. No markdown fences.',
+    '- Return exactly one result object for every requested check id in the `results` array.',
+    '- Keep every result `id` equal to one of the requested check ids.',
+    '- Do not merge, omit, or duplicate checks, even when they are similar.',
+    ...sharedRules
   ];
 }
 
@@ -318,6 +477,110 @@ function extractByBraces(text: string): string {
   throw new Error('Could not find complete JSON object in agent response.');
 }
 
+function parseBatchResponse(
+  payload: unknown,
+  options: {
+    expectedCheckIds: readonly string[];
+    scopeContext: ScanScopeContext;
+  }
+): EvaluateCheckBatchResult {
+  if (!isRecord(payload) || !Array.isArray(payload.results)) {
+    throw new Error('Agent returned invalid batch payload. Expected a JSON object with a results array.');
+  }
+
+  const requestedByNormalizedId = new Map(
+    options.expectedCheckIds.map(checkId => [checkId.toLowerCase(), checkId] as const)
+  );
+  const entriesByCheckId = new Map<string, unknown[]>();
+  const warnings: string[] = [];
+
+  for (const rawEntry of payload.results) {
+    const rawId = extractRawBatchResultId(rawEntry);
+    if (!rawId) {
+      warnings.push('Ignored a batch result entry without a string id.');
+      continue;
+    }
+
+    const expectedCheckId = requestedByNormalizedId.get(rawId.toLowerCase());
+    if (!expectedCheckId) {
+      warnings.push(`Ignored unexpected batch result id '${rawId}'.`);
+      continue;
+    }
+
+    const entries = entriesByCheckId.get(expectedCheckId);
+    if (entries) {
+      entries.push(rawEntry);
+      continue;
+    }
+
+    entriesByCheckId.set(expectedCheckId, [rawEntry]);
+  }
+
+  const resultsByCheckId = new Map<string, CheckResult>();
+
+  for (const checkId of options.expectedCheckIds) {
+    const rawEntries = entriesByCheckId.get(checkId) ?? [];
+
+    if (rawEntries.length === 0) {
+      resultsByCheckId.set(
+        checkId,
+        createPartialBatchUnknownResult(
+          checkId,
+          `Batch response did not include a result for '${checkId}'.`
+        )
+      );
+      continue;
+    }
+
+    if (rawEntries.length > 1) {
+      warnings.push(`Batch response returned duplicate entries for '${checkId}'.`);
+      resultsByCheckId.set(
+        checkId,
+        createPartialBatchUnknownResult(
+          checkId,
+          `Batch response returned multiple results for '${checkId}'.`,
+          rawEntries
+        )
+      );
+      continue;
+    }
+
+    const rawEntry = rawEntries[0];
+    const parsedEntry = agentCheckPayloadSchema.safeParse(rawEntry);
+    if (!parsedEntry.success) {
+      resultsByCheckId.set(
+        checkId,
+        createPartialBatchUnknownResult(
+          checkId,
+          `Batch result for '${checkId}' did not match the required JSON schema.`,
+          rawEntry
+        )
+      );
+      continue;
+    }
+
+    try {
+      validatePayload(parsedEntry.data, checkId);
+      validateEvidenceScope(parsedEntry.data, options.scopeContext);
+      resultsByCheckId.set(checkId, createCheckResultFromPayload(parsedEntry.data, checkId));
+    } catch (error) {
+      resultsByCheckId.set(
+        checkId,
+        createPartialBatchUnknownResult(
+          checkId,
+          error instanceof Error ? error.message : String(error),
+          rawEntry
+        )
+      );
+    }
+  }
+
+  return {
+    resultsByCheckId,
+    warnings
+  };
+}
+
 function validatePayload(payload: ValidatedAgentCheckPayload, expectedCheckId: string): void {
   if ((payload.id ?? '').toLowerCase() !== expectedCheckId.toLowerCase()) {
     throw new Error(`Agent returned unexpected id '${payload.id}', expected '${expectedCheckId}'.`);
@@ -352,6 +615,74 @@ function validateEvidenceScope(payload: ValidatedAgentCheckPayload, scopeContext
 
 function normalizePath(value: string): string {
   return value.trim().replaceAll('\\', '/');
+}
+
+function createCheckResultFromPayload(
+  payload: ValidatedAgentCheckPayload,
+  expectedCheckId: string
+): CheckResult {
+  return {
+    id: expectedCheckId,
+    version: payload.version?.trim() || DEFAULT_VERSION,
+    status: payload.status as CheckResult['status'],
+    confidence: payload.confidence as Confidence,
+    evidence: payload.evidence ?? [],
+    rationale: payload.rationale?.trim() || 'No rationale provided.',
+    remediation: payload.remediation ?? []
+  };
+}
+
+function createPartialBatchUnknownResult(
+  checkId: string,
+  message: string,
+  rawEntry?: unknown
+): CheckResult {
+  const rationaleParts = [`Inconclusive batch result: ${message}`];
+  const originalEntry = serializePayload(rawEntry);
+  if (originalEntry) {
+    rationaleParts.push(`Original batch entry:\n${originalEntry}`);
+  }
+
+  return {
+    id: checkId,
+    version: DEFAULT_VERSION,
+    status: 'unknown',
+    confidence: 'LOW',
+    evidence: [],
+    rationale: rationaleParts.join('\n\n'),
+    remediation: [
+      'Review the batch output and rerun the scan.',
+      "If the check keeps returning scope issues, retry with a broader scope such as '--scope full'."
+    ]
+  };
+}
+
+function serializePayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+
+  try {
+    const serialized = JSON.stringify(value, null, 2);
+    return serialized?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function extractRawBatchResultId(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const candidate = value.id;
+  return typeof candidate === 'string' && candidate.trim()
+    ? candidate.trim()
+    : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function createCheckEvaluationError(

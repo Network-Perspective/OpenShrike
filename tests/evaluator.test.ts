@@ -10,14 +10,20 @@ const {mockReadCheckDefinition} = vi.hoisted(() => ({
   mockReadCheckDefinition: vi.fn()
 }));
 
-vi.mock('../src/lib/checks.js', () => ({
-  readCheckDefinition: mockReadCheckDefinition
-}));
+vi.mock('../src/lib/checks.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/lib/checks.js')>('../src/lib/checks.js');
+  return {
+    ...actual,
+    readCheckDefinition: mockReadCheckDefinition
+  };
+});
 
 import {
+  buildBatchPrompt,
   buildPrompt,
   CheckEvaluationError,
   evaluateCheck,
+  evaluateCheckBatch,
   getCheckEvaluationOriginalOutput
 } from '../src/lib/evaluator.js';
 
@@ -115,6 +121,138 @@ describe('evaluator', () => {
     expect(prompt).not.toContain('Authoritative scope evidence:');
     expect(prompt).not.toContain('Scope capture 1:');
     expect(prompt).not.toContain('git -C /workspace/repo --no-pager diff');
+  });
+
+  it('builds a batch prompt with a shared contract and repeated check definitions', () => {
+    const prompt = buildBatchPrompt({
+      batchLabel: 'rel batch (2 checks)',
+      repoPath: '/workspace/repo',
+      scopeContext,
+      checks: [
+        {
+          id: 'check-a',
+          title: 'Check A',
+          definition: '# Check A'
+        },
+        {
+          id: 'check-b',
+          title: 'Check B',
+          definition: '# Check B'
+        }
+      ]
+    });
+
+    expect(prompt).toContain('Batch label: rel batch (2 checks)');
+    expect(prompt).toContain('Requested checks (2):');
+    expect(prompt).toContain('Check id: check-a');
+    expect(prompt).toContain('Check id: check-b');
+    expect(prompt).toContain('"results": [');
+    expect(prompt).toContain('Do not merge, omit, or duplicate checks');
+  });
+
+  it('salvages valid siblings and marks broken batch entries as inconclusive', async () => {
+    mockReadCheckDefinition.mockImplementation(async (checkId: string) => `# ${checkId}`);
+    const runtime = createRuntime({
+      results: [
+        {
+          id: 'check-a',
+          version: '0.1.0',
+          status: 'pass',
+          confidence: 'HIGH',
+          evidence: ['src/example.ts:1'],
+          rationale: 'Scoped evidence is valid.',
+          remediation: []
+        },
+        {
+          id: 'check-b',
+          version: '0.1.0',
+          status: 'pass',
+          confidence: 'HIGH',
+          evidence: ['src/out-of-scope.ts:9'],
+          rationale: 'This evidence is out of scope.',
+          remediation: []
+        }
+      ]
+    });
+
+    const result = await evaluateCheckBatch({
+      batchId: 'scan-batch-1',
+      batchLabel: 'rel batch (2 checks)',
+      checkIds: ['check-a', 'check-b'],
+      repoPath: '/workspace/repo',
+      agent: 'shrike-checker',
+      model: 'azure/gpt-5.4-mini',
+      scopeContext,
+      emulateOpencode: false,
+      runtime
+    });
+
+    expect(result.warnings).toEqual([]);
+    expect(result.resultsByCheckId.get('check-a')).toMatchObject({
+      id: 'check-a',
+      status: 'pass',
+      confidence: 'HIGH'
+    });
+    expect(result.resultsByCheckId.get('check-b')).toMatchObject({
+      id: 'check-b',
+      status: 'unknown',
+      confidence: 'LOW'
+    });
+    expect(result.resultsByCheckId.get('check-b')?.rationale).toContain('outside scan scope');
+  });
+
+  it('marks duplicate or missing batch ids as inconclusive without discarding valid entries', async () => {
+    const runtime = createRuntime({
+      results: [
+        {
+          id: 'check-a',
+          version: '0.1.0',
+          status: 'pass',
+          confidence: 'HIGH',
+          evidence: ['src/example.ts:1'],
+          rationale: 'Valid.',
+          remediation: []
+        },
+        {
+          id: 'check-a',
+          version: '0.1.0',
+          status: 'fail',
+          confidence: 'HIGH',
+          evidence: ['src/example.ts:2'],
+          rationale: 'Duplicate.',
+          remediation: []
+        },
+        {
+          id: 'extra-check',
+          version: '0.1.0',
+          status: 'pass',
+          confidence: 'LOW',
+          evidence: [],
+          rationale: 'Ignore me.',
+          remediation: []
+        }
+      ]
+    });
+
+    const result = await evaluateCheckBatch({
+      batchId: 'scan-batch-2',
+      batchLabel: 'rel batch (2 checks)',
+      checkIds: ['check-a', 'check-b'],
+      repoPath: '/workspace/repo',
+      agent: 'shrike-checker',
+      model: 'azure/gpt-5.4-mini',
+      scopeContext,
+      emulateOpencode: false,
+      runtime
+    });
+
+    expect(result.warnings).toEqual([
+      "Ignored unexpected batch result id 'extra-check'.",
+      "Batch response returned duplicate entries for 'check-a'."
+    ]);
+    expect(result.resultsByCheckId.get('check-a')?.status).toBe('unknown');
+    expect(result.resultsByCheckId.get('check-b')?.status).toBe('unknown');
+    expect(result.resultsByCheckId.get('check-b')?.rationale).toContain("did not include a result for 'check-b'");
   });
 
   it('rejects oversized evidence arrays from agent output', async () => {

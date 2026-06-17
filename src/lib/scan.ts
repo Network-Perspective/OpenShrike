@@ -18,6 +18,7 @@ import {
   DOCKER_SCAN_REPORT_FILE,
   DOCKER_SCAN_REQUEST_FILE,
   INCONCLUSIVE_OUTPUT_MAX_LENGTH,
+  MAX_SCAN_BATCH_CHECKS,
   MAX_POLICY_CHECKS
 } from './constants.js';
 import {getDefaultConfigPath, loadRuntimeConfig, type LoadedRuntimeConfig} from './config.js';
@@ -28,8 +29,19 @@ import {
 } from './docker-protocol.js';
 import {runFixForCheck} from './fix-runtime.js';
 import {createSavedScanRequest} from './last-scan.js';
-import {resolveProjectCheckSelection} from './checks.js';
-import {CheckEvaluationError, evaluateCheck, getCheckEvaluationOriginalOutput} from './evaluator.js';
+import {
+  getBundledChecksDirectory,
+  inferCheckDomain,
+  listCheckCatalog,
+  resolveProjectCheckSelection
+} from './checks.js';
+import {
+  CheckEvaluationError,
+  evaluateCheck,
+  evaluateCheckBatch,
+  getCheckEvaluationOriginalOutput,
+  type EvaluateCheckBatchResult
+} from './evaluator.js';
 import {resolvePolicyDefinition} from './policies.js';
 import {runProcess} from './process.js';
 import {findToolRoot} from './project-root.js';
@@ -105,15 +117,31 @@ interface ScanSessionHooks {
   onRuntimeEvent?: (event: ScanRuntimeEvent) => void;
 }
 
-interface PendingReadJob {
-  kind: 'scan' | 'recheck';
-  checkId: string;
+export interface ScanBatchJob {
+  kind: 'scan-batch';
+  batchId: string;
+  domain: string | null;
+  checkIds: string[];
+  batchLabel: string;
+}
+
+interface PendingRecheckJob {
+  kind: 'recheck';
+  batchId: string;
+  domain: null;
+  checkIds: [string];
+  batchLabel: string;
   resolve?: ((result: CheckResult) => void) | undefined;
   reject?: ((error: unknown) => void) | undefined;
 }
 
+type PendingReadJob = ScanBatchJob | PendingRecheckJob;
+
 interface ActiveReadJob {
   kind: PendingReadJob['kind'];
+  batchId: string;
+  batchCheckIds: string[];
+  batchLabel: string;
   workerId: string;
 }
 
@@ -219,6 +247,7 @@ export function createNativeScanSession(
   let runtime: OpenCodeRuntime | null = null;
   let runtimePromise: Promise<OpenCodeRuntime | null> | null = null;
   let startPromise: Promise<ScanReport> | null = null;
+  let plannedInitialBatchJobs: ScanBatchJob[] = [];
   let remainingInitialCheckIds = new Set(checkOrder.filter(checkId => !resultsByCheckId.has(checkId)));
 
   if (initialState) {
@@ -278,7 +307,7 @@ export function createNativeScanSession(
       policyVersion,
       checkOrder: [...checkOrder],
       resultsByCheckId: Object.fromEntries(resultsByCheckId.entries()),
-      runningCheckIds: [...activeReadJobs.keys()],
+      runningCheckIds: getRunningCheckIds(),
       fixingCheckId,
       scopeLabel: scopeContext?.label ?? 'Resolving scope',
       scopeFileCount: scopeContext?.files.length ?? 0,
@@ -327,7 +356,7 @@ export function createNativeScanSession(
 
     const checks = checkOrder.map(checkId =>
       resultsByCheckId.get(checkId)
-      ?? createPendingSavedResult(checkId, activeReadJobs.has(checkId) || pendingReadJobs.some(job => job.checkId === checkId))
+      ?? createPendingSavedResult(checkId, isCheckRunning(checkId) || isCheckQueued(checkId))
     );
 
     return buildReport({
@@ -340,6 +369,18 @@ export function createNativeScanSession(
       effectiveParallelism,
       artifactsDir
     });
+  }
+
+  function getRunningCheckIds(): string[] {
+    return checkOrder.filter(checkId => isCheckRunning(checkId));
+  }
+
+  function isCheckRunning(checkId: string): boolean {
+    return [...activeReadJobs.values()].some(job => job.batchCheckIds.includes(checkId));
+  }
+
+  function isCheckQueued(checkId: string): boolean {
+    return pendingReadJobs.some(job => job.checkIds.includes(checkId));
   }
 
   function serializeSavedScope(scope: Awaited<ReturnType<typeof resolveScanScope>>): SavedScanScope {
@@ -400,8 +441,13 @@ export function createNativeScanSession(
       checkOrder = selection.checkIds;
       bundleId = selection.bundleId;
       policyVersion = selection.version;
-      remainingInitialCheckIds = new Set(checkOrder.filter(checkId => !resultsByCheckId.has(checkId)));
-      effectiveParallelism = resolveEffectiveParallelism(options.parallelism, checkOrder.length);
+      const pendingInitialCheckIds = checkOrder.filter(checkId => !resultsByCheckId.has(checkId));
+      remainingInitialCheckIds = new Set(pendingInitialCheckIds);
+      plannedInitialBatchJobs = planScanBatchJobs({
+        checkIds: pendingInitialCheckIds,
+        domainByCheckId: await resolveSelectedCheckDomains(options, checkOrder)
+      });
+      effectiveParallelism = resolveEffectiveParallelism(options.parallelism, plannedInitialBatchJobs.length);
       requestedParallelism = options.parallelism;
       artifactsDir = options.artifactsDir ?? null;
       scopeContext = await resolveScanScope(repoPath, request.scanScope, request.scanTarget ?? undefined);
@@ -433,9 +479,7 @@ export function createNativeScanSession(
         return;
       }
 
-      pendingReadJobs.push(...checkOrder
-        .filter(checkId => !resultsByCheckId.has(checkId))
-        .map(checkId => ({kind: 'scan' as const, checkId})));
+      pendingReadJobs.push(...plannedInitialBatchJobs);
       pumpReadJobs();
     })().catch(error => {
       failSession(error);
@@ -458,17 +502,12 @@ export function createNativeScanSession(
       throw new Error('This check is already being fixed.');
     }
 
-    if (activeReadJobs.has(checkId) || pendingReadJobs.some(job => job.checkId === checkId)) {
+    if (isCheckRunning(checkId) || isCheckQueued(checkId)) {
       throw new Error('This check is already being rechecked.');
     }
 
     return await new Promise<CheckResult>((resolve, reject) => {
-      pendingReadJobs.unshift({
-        kind: 'recheck',
-        checkId,
-        resolve,
-        reject
-      });
+      pendingReadJobs.unshift(createRecheckJob(checkId, {resolve, reject}));
       pumpReadJobs();
     });
   }
@@ -491,11 +530,7 @@ export function createNativeScanSession(
       throw new Error('Another action is already running.');
     }
 
-    if (activeReadJobs.has(checkId)) {
-      throw new Error('This check is already being rechecked.');
-    }
-
-    if (pendingReadJobs.some(job => job.checkId === checkId)) {
+    if (isCheckRunning(checkId) || isCheckQueued(checkId)) {
       throw new Error('This check is already being rechecked.');
     }
 
@@ -520,17 +555,12 @@ export function createNativeScanSession(
         scopeContext: await ensureScopeContext()
       });
       const workerId = `fix-worker-${nextWorkerNumber++}`;
+      const recheckJob = createRecheckJob(checkId);
       fixingCheckId = null;
-      activeReadJobs.set(checkId, {
-        kind: 'recheck',
-        workerId
-      });
+      activeReadJobs.set(recheckJob.batchId, createActiveReadJob(recheckJob, workerId));
       statusLabel = `Rechecking ${checkId}`;
       emitUpdate();
-      return await runReadCheck({
-        kind: 'recheck',
-        checkId
-      }, workerId);
+      return (await runReadJob(recheckJob, workerId))!;
     } catch (error) {
       fixingCheckId = null;
       emitUpdate();
@@ -554,7 +584,7 @@ export function createNativeScanSession(
     try {
       while (activeReadJobs.size < effectiveParallelism) {
         const nextIndex = pendingReadJobs.findIndex(job =>
-          !activeReadJobs.has(job.checkId) && fixingCheckId !== job.checkId
+          job.checkIds.every(checkId => !isCheckRunning(checkId) && fixingCheckId !== checkId)
         );
         if (nextIndex < 0) {
           break;
@@ -566,21 +596,20 @@ export function createNativeScanSession(
         }
 
         const workerId = `worker-${nextWorkerNumber++}`;
-        activeReadJobs.set(job.checkId, {
-          kind: job.kind,
-          workerId
-        });
-        statusLabel = job.kind === 'recheck'
-          ? `Rechecking ${job.checkId}`
-          : `Running ${job.checkId}`;
+        activeReadJobs.set(job.batchId, createActiveReadJob(job, workerId));
+        statusLabel = describeRunningJob(job);
         detailLines = [];
         emitUpdate();
-        void runReadCheck(job, workerId).then(
+        void runReadJob(job, workerId).then(
           result => {
-            job.resolve?.(result);
+            if (job.kind === 'recheck' && result) {
+              job.resolve?.(result);
+            }
           },
           error => {
-            job.reject?.(error);
+            if (job.kind === 'recheck') {
+              job.reject?.(error);
+            }
           }
         );
       }
@@ -590,11 +619,10 @@ export function createNativeScanSession(
     }
   }
 
-  async function runReadCheck(job: PendingReadJob, workerId: string): Promise<CheckResult> {
+  async function runReadJob(job: PendingReadJob, workerId: string): Promise<CheckResult | null> {
     try {
       const runtimeInstance = await ensureRuntime();
-      const result = await evaluateCheckWithRecovery({
-        checkId: job.checkId,
+      const sharedOptions = {
         workerId,
         repoPath,
         agent: agentName,
@@ -609,17 +637,50 @@ export function createNativeScanSession(
           ...(options.artifactsDir ? [options.artifactsDir] : [])
         ]),
         logger
-      });
-      resultsByCheckId.set(job.checkId, result);
-      if (job.kind === 'scan') {
-        remainingInitialCheckIds.delete(job.checkId);
+      };
+
+      if (job.kind === 'scan-batch' && job.checkIds.length > 1) {
+        const batchResult = await evaluateCheckBatchWithRecovery({
+          batchId: job.batchId,
+          batchLabel: job.batchLabel,
+          checkIds: job.checkIds,
+          ...sharedOptions
+        });
+        batchResult.warnings.forEach(message => {
+          logger?.write('scan.batch.warning', {
+            batchId: job.batchId,
+            workerId,
+            message
+          });
+        });
+
+        for (const checkId of job.checkIds) {
+          const result = batchResult.resultsByCheckId.get(checkId);
+          if (!result) {
+            throw new Error(`Missing batch result for check '${checkId}'.`);
+          }
+
+          resultsByCheckId.set(checkId, result);
+          remainingInitialCheckIds.delete(checkId);
+        }
+      } else {
+        const checkId = job.checkIds[0]!;
+        const result = await evaluateCheckWithRecovery({
+          checkId,
+          ...sharedOptions
+        });
+        resultsByCheckId.set(checkId, result);
+        if (job.kind === 'scan-batch') {
+          remainingInitialCheckIds.delete(checkId);
+        }
       }
-      if (remainingInitialCheckIds.size === 0 && !pendingReadJobs.some(candidate => candidate.kind === 'scan')) {
+
+      if (remainingInitialCheckIds.size === 0 && !pendingReadJobs.some(candidate => candidate.kind === 'scan-batch')) {
         isScanComplete = true;
       }
       statusLabel = isScanComplete && activeReadJobs.size <= 1 && !fixingCheckId
         ? 'Scan complete'
-        : `Completed ${job.checkId} (${result.status})`;
+        : describeCompletedJob(job);
       detailLines = [];
       emitUpdate();
       if (isScanComplete && !fixingCheckId) {
@@ -627,14 +688,16 @@ export function createNativeScanSession(
           summary: getReport()?.summary ?? null
         });
       }
-      return result;
+      return job.kind === 'recheck'
+        ? resultsByCheckId.get(job.checkIds[0]!) ?? null
+        : null;
     } catch (error) {
       if (!isRecoverableCheckError(error)) {
         failSession(error);
       }
       throw error;
     } finally {
-      activeReadJobs.delete(job.checkId);
+      activeReadJobs.delete(job.batchId);
       emitUpdate();
       resolveDrainWaiters();
       if (!pauseDispatch) {
@@ -642,6 +705,54 @@ export function createNativeScanSession(
       }
       resolveIdleWaitersIfReady();
     }
+  }
+
+  function createRecheckJob(
+    checkId: string,
+    handlers: {
+      resolve?: ((result: CheckResult) => void) | undefined;
+      reject?: ((error: unknown) => void) | undefined;
+    } = {}
+  ): PendingRecheckJob {
+    return {
+      kind: 'recheck',
+      batchId: `recheck:${checkId}`,
+      domain: null,
+      checkIds: [checkId],
+      batchLabel: checkId,
+      ...(handlers.resolve ? {resolve: handlers.resolve} : {}),
+      ...(handlers.reject ? {reject: handlers.reject} : {})
+    };
+  }
+
+  function createActiveReadJob(job: PendingReadJob, workerId: string): ActiveReadJob {
+    return {
+      kind: job.kind,
+      batchId: job.batchId,
+      batchCheckIds: [...job.checkIds],
+      batchLabel: job.batchLabel,
+      workerId
+    };
+  }
+
+  function describeRunningJob(job: PendingReadJob): string {
+    if (job.kind === 'recheck') {
+      return `Rechecking ${job.checkIds[0]}`;
+    }
+
+    return job.checkIds.length === 1
+      ? `Running ${job.checkIds[0]}`
+      : `Running ${job.batchLabel}`;
+  }
+
+  function describeCompletedJob(job: PendingReadJob): string {
+    if (job.kind === 'recheck' || job.checkIds.length === 1) {
+      const checkId = job.checkIds[0]!;
+      const status = resultsByCheckId.get(checkId)?.status ?? 'unknown';
+      return `Completed ${checkId} (${status})`;
+    }
+
+    return `Completed ${job.batchLabel}`;
   }
 
   async function ensureScopeContext(): Promise<Awaited<ReturnType<typeof resolveScanScope>>> {
@@ -739,11 +850,16 @@ export function createNativeScanSession(
     logger?.write('opencode.event', {
       ...summarizeRuntimeEvent(runtimeEvent.event),
       checkId: runtimeEvent.checkId,
+      batchId: runtimeEvent.batchId ?? null,
+      batchLabel: runtimeEvent.batchLabel ?? null,
       workerId: runtimeEvent.workerId,
       runtimeMode: 'native'
     });
     hooks.onRuntimeEvent?.({
       checkId: runtimeEvent.checkId,
+      ...(runtimeEvent.batchId ? {batchId: runtimeEvent.batchId} : {}),
+      ...(runtimeEvent.batchCheckIds ? {batchCheckIds: runtimeEvent.batchCheckIds} : {}),
+      ...(runtimeEvent.batchLabel ? {batchLabel: runtimeEvent.batchLabel} : {}),
       workerId: runtimeEvent.workerId,
       runtimeMode: 'native',
       event: runtimeEvent.event
@@ -816,7 +932,10 @@ export function createNativeScanSession(
 
   function rejectPendingJobs(error: unknown): void {
     while (pendingReadJobs.length > 0) {
-      pendingReadJobs.shift()?.reject?.(error);
+      const job = pendingReadJobs.shift();
+      if (job?.kind === 'recheck') {
+        job.reject?.(error);
+      }
     }
   }
 
@@ -896,6 +1015,10 @@ export async function runNativeScan(
 
     const bundleId = checkSelection.bundleId;
     const policyVersion = checkSelection.version;
+    const batchJobs = planScanBatchJobs({
+      checkIds,
+      domainByCheckId: await resolveSelectedCheckDomains(options, checkIds)
+    });
     const scopeContext = await resolveScanScope(repoFullPath, options.scanScope, options.scanTarget);
     const progressState: ProgressState = {
       resultsByCheckId: new Map<string, CheckResult>(),
@@ -916,7 +1039,7 @@ export async function runNativeScan(
       null
     );
 
-    const effectiveParallelism = resolveEffectiveParallelism(options.parallelism, checkIds.length);
+    const effectiveParallelism = resolveEffectiveParallelism(options.parallelism, batchJobs.length);
 
     const noChangesError = createNoChangesInScopeCliError(scopeContext);
     if (noChangesError) {
@@ -977,11 +1100,16 @@ export async function runNativeScan(
       logger?.write('opencode.event', {
         ...summarizeRuntimeEvent(runtimeEvent.event),
         checkId: runtimeEvent.checkId,
+        batchId: runtimeEvent.batchId ?? null,
+        batchLabel: runtimeEvent.batchLabel ?? null,
         workerId: runtimeEvent.workerId,
         runtimeMode: executionOptions.runtimeMode
       });
       hooks.onRuntimeEvent?.({
         checkId: runtimeEvent.checkId,
+        ...(runtimeEvent.batchId ? {batchId: runtimeEvent.batchId} : {}),
+        ...(runtimeEvent.batchCheckIds ? {batchCheckIds: runtimeEvent.batchCheckIds} : {}),
+        ...(runtimeEvent.batchLabel ? {batchLabel: runtimeEvent.batchLabel} : {}),
         workerId: runtimeEvent.workerId,
         runtimeMode: executionOptions.runtimeMode,
         event: runtimeEvent.event
@@ -1009,26 +1137,34 @@ export async function runNativeScan(
     ]);
 
     try {
-      await runChecks({
-        checkIds,
+      await runJobs({
+        jobs: batchJobs,
         parallelism: effectiveParallelism,
-        worker: async ({checkId, workerId}) => {
-          progressState.runningCheckIds.add(checkId);
-          emitProgress(
-            logger,
-            hooks,
-            'check-started',
-            scopeContext,
-            progressState,
-            checkIds,
-            checkId,
-            workerId,
-            null,
-            null
-          );
+        worker: async ({job, workerId}) => {
+          job.checkIds.forEach(checkId => {
+            progressState.runningCheckIds.add(checkId);
+          });
 
-          const result = await evaluateCheckWithRecovery({
-            checkId,
+          for (const checkId of job.checkIds) {
+            emitProgress(
+              logger,
+              hooks,
+              'check-started',
+              scopeContext,
+              progressState,
+              checkIds,
+              checkId,
+              workerId,
+              null,
+              null,
+              {
+                ...buildProgressBatchMetadata(job),
+                ...(job.checkIds.length > 1 ? {statusLabel: `Running ${job.batchLabel}`} : {})
+              }
+            );
+          }
+
+          const sharedOptions = {
             workerId,
             repoPath: repoFullPath,
             agent: agentName,
@@ -1040,24 +1176,59 @@ export async function runNativeScan(
             runtime,
             ignoredRepoPaths,
             logger
-          });
+          };
 
-          progressState.resultsByCheckId.set(checkId, result);
-          progressState.runningCheckIds.delete(checkId);
-          progressState.completedCount += 1;
+          const batchResults = job.checkIds.length > 1
+            ? await evaluateCheckBatchWithRecovery({
+                batchId: job.batchId,
+                batchLabel: job.batchLabel,
+                checkIds: job.checkIds,
+                ...sharedOptions
+              })
+            : null;
 
-          emitProgress(
-            logger,
-            hooks,
-            'check-completed',
-            scopeContext,
-            progressState,
-            checkIds,
-            checkId,
-            workerId,
-            result.status,
-            result
-          );
+          if (batchResults) {
+            batchResults.warnings.forEach(message => {
+              logger?.write('scan.batch.warning', {
+                batchId: job.batchId,
+                workerId,
+                message
+              });
+            });
+          }
+
+          for (const checkId of job.checkIds) {
+            const result = batchResults
+              ? batchResults.resultsByCheckId.get(checkId)
+              : await evaluateCheckWithRecovery({
+                  checkId,
+                  ...sharedOptions
+                });
+            if (!result) {
+              throw new Error(`Missing result for check '${checkId}'.`);
+            }
+
+            progressState.resultsByCheckId.set(checkId, result);
+            progressState.runningCheckIds.delete(checkId);
+            progressState.completedCount += 1;
+
+            emitProgress(
+              logger,
+              hooks,
+              'check-completed',
+              scopeContext,
+              progressState,
+              checkIds,
+              checkId,
+              workerId,
+              result.status,
+              result,
+              {
+                ...buildProgressBatchMetadata(job),
+                ...(job.checkIds.length > 1 ? {statusLabel: `Completed ${job.batchLabel}`} : {})
+              }
+            );
+          }
         }
       });
     } finally {
@@ -1643,12 +1814,12 @@ async function appendFileHash(
   hash.update('\0');
 }
 
-async function runChecks(options: {
-  checkIds: string[];
+async function runJobs<Job>(options: {
+  jobs: readonly Job[];
   parallelism: number;
-  worker: (job: {checkId: string; workerId: string}) => Promise<void>;
+  worker: (job: {job: Job; workerId: string}) => Promise<void>;
 }): Promise<void> {
-  const concurrency = Math.max(1, Math.min(options.parallelism, options.checkIds.length || 1));
+  const concurrency = Math.max(1, Math.min(options.parallelism, options.jobs.length || 1));
   let nextIndex = 0;
   let fatalError: unknown = null;
 
@@ -1677,13 +1848,13 @@ async function runChecks(options: {
       const currentIndex = nextIndex;
       nextIndex += 1;
 
-      if (currentIndex >= options.checkIds.length) {
+      if (currentIndex >= options.jobs.length) {
         return;
       }
 
       try {
         await options.worker({
-          checkId: options.checkIds[currentIndex]!,
+          job: options.jobs[currentIndex]!,
           workerId
         });
       } catch (error) {
@@ -1714,6 +1885,103 @@ async function resolveScanCheckSelection(options: ScanCommandOptions): Promise<{
     version: policy?.version ?? new Date().toISOString().slice(0, 10),
     checkIds: policy ? policy.checkIds : [options.checkId!]
   };
+}
+
+async function resolveSelectedCheckDomains(
+  options: Pick<ScanCommandOptions, 'projectChecksDir'>,
+  checkIds: readonly string[]
+): Promise<ReadonlyMap<string, string | null>> {
+  const checksDirectory = options.projectChecksDir ?? getBundledChecksDirectory();
+  const catalog = await listCheckCatalog(checksDirectory);
+  const catalogDomainById = new Map(
+    catalog.map(entry => [entry.id.toLowerCase(), entry.domain] as const)
+  );
+
+  return new Map(
+    checkIds.map(checkId => [
+      checkId,
+      catalogDomainById.get(checkId.toLowerCase()) ?? inferCheckDomain(checkId) ?? null
+    ] as const)
+  );
+}
+
+export function planScanBatchJobs(options: {
+  checkIds: readonly string[];
+  domainByCheckId: ReadonlyMap<string, string | null>;
+}): ScanBatchJob[] {
+  const domainGroups = new Map<string, Array<{checkId: string; index: number}>>();
+  const singletonBatches: Array<{
+    firstIndex: number;
+    domain: string | null;
+    checkIds: string[];
+    batchLabel: string;
+  }> = [];
+
+  options.checkIds.forEach((checkId, index) => {
+    const domain = options.domainByCheckId.get(checkId) ?? inferCheckDomain(checkId) ?? null;
+    if (!domain) {
+      singletonBatches.push({
+        firstIndex: index,
+        domain: null,
+        checkIds: [checkId],
+        batchLabel: checkId
+      });
+      return;
+    }
+
+    const group = domainGroups.get(domain);
+    if (group) {
+      group.push({checkId, index});
+      return;
+    }
+
+    domainGroups.set(domain, [{checkId, index}]);
+  });
+
+  const plannedBatches = [
+    ...singletonBatches,
+    ...[...domainGroups.entries()].flatMap(([domain, group]) => {
+      const batches: Array<{
+        firstIndex: number;
+        domain: string | null;
+        checkIds: string[];
+        batchLabel: string;
+      }> = [];
+
+      for (let startIndex = 0; startIndex < group.length; startIndex += MAX_SCAN_BATCH_CHECKS) {
+        const chunk = group.slice(startIndex, startIndex + MAX_SCAN_BATCH_CHECKS);
+        const chunkCheckIds = chunk.map(item => item.checkId);
+        batches.push({
+          firstIndex: chunk[0]!.index,
+          domain,
+          checkIds: chunkCheckIds,
+          batchLabel: buildScanBatchLabel(domain, chunkCheckIds)
+        });
+      }
+
+      return batches;
+    })
+  ].sort((left, right) => left.firstIndex - right.firstIndex);
+
+  return plannedBatches.map((batch, index) => ({
+    kind: 'scan-batch',
+    batchId: `scan-batch-${index + 1}`,
+    domain: batch.domain,
+    checkIds: batch.checkIds,
+    batchLabel: batch.batchLabel
+  }));
+}
+
+function buildScanBatchLabel(domain: string | null, checkIds: readonly string[]): string {
+  if (checkIds.length <= 1) {
+    return checkIds[0] ?? 'scan batch';
+  }
+
+  return `${domain ?? checkIds[0] ?? 'scan'} batch (${formatCheckCount(checkIds.length)})`;
+}
+
+function formatCheckCount(count: number): string {
+  return `${count} check${count === 1 ? '' : 's'}`;
 }
 
 export async function resolveDockerRuntimeMountPlan(
@@ -2112,9 +2380,15 @@ function emitProgress(
   checkId: string | null,
   workerId: string | null,
   checkStatus: CheckResult['status'] | null,
-  checkResult: CheckResult | null
+  checkResult: CheckResult | null,
+  metadata: {
+    statusLabel?: string | undefined;
+    batchId?: string | undefined;
+    batchCheckIds?: string[] | undefined;
+    batchLabel?: string | undefined;
+  } = {}
 ): void {
-  const statusLabel = type === 'scope-resolved'
+  const statusLabel = metadata.statusLabel ?? (type === 'scope-resolved'
     ? 'Scope resolved'
     : type === 'no-changes-in-scope'
       ? describeNoChangesInScope(scopeContext)
@@ -2122,7 +2396,7 @@ function emitProgress(
         ? (checkId ? `Running ${checkId}` : 'Running check')
         : checkId && checkStatus
           ? `Completed ${checkId} (${checkStatus})`
-          : 'Check completed';
+          : 'Check completed');
   const event = {
     type,
     scopeLabel: scopeContext.label,
@@ -2130,6 +2404,9 @@ function emitProgress(
     isFullRepository: scopeContext.isFullRepository,
     checkIds: [...checkOrder],
     checkId,
+    ...(metadata.batchId ? {batchId: metadata.batchId} : {}),
+    ...(metadata.batchCheckIds ? {batchCheckIds: [...metadata.batchCheckIds]} : {}),
+    ...(metadata.batchLabel ? {batchLabel: metadata.batchLabel} : {}),
     workerId,
     checkStatus,
     checkResult,
@@ -2146,6 +2423,22 @@ function emitProgress(
 
   logger?.write('scan.progress', event);
   hooks.onProgress?.(event);
+}
+
+function buildProgressBatchMetadata(job: ScanBatchJob): {
+  batchId?: string | undefined;
+  batchCheckIds?: string[] | undefined;
+  batchLabel?: string | undefined;
+} {
+  if (job.checkIds.length <= 1) {
+    return {};
+  }
+
+  return {
+    batchId: job.batchId,
+    batchCheckIds: [...job.checkIds],
+    batchLabel: job.batchLabel
+  };
 }
 
 function countChecks(
@@ -2329,6 +2622,110 @@ async function evaluateCheckWithRecovery(options: {
     lastError,
     CHECK_EVALUATION_MAX_ATTEMPTS
   );
+}
+
+async function evaluateCheckBatchWithRecovery(options: {
+  batchId: string;
+  batchLabel: string;
+  checkIds: string[];
+  workerId: string;
+  repoPath: string;
+  agent: string;
+  model: string;
+  runtimeConfigPath?: string | undefined;
+  projectChecksDir?: string | undefined;
+  scopeContext: Awaited<ReturnType<typeof resolveScanScope>>;
+  emulateOpencode: boolean;
+  runtime: OpenCodeRuntime | null;
+  ignoredRepoPaths: string[];
+  logger: Awaited<ReturnType<typeof createScanLogger>>;
+}): Promise<EvaluateCheckBatchResult> {
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= CHECK_EVALUATION_MAX_ATTEMPTS; attempt += 1) {
+    const guard = await RepoMutationGuard.capture(options.repoPath, {
+      ignoredPaths: options.ignoredRepoPaths
+    });
+
+    try {
+      const result = await evaluateCheckBatch({
+        batchId: options.batchId,
+        batchLabel: options.batchLabel,
+        checkIds: options.checkIds,
+        projectChecksDir: options.projectChecksDir,
+        repoPath: options.repoPath,
+        agent: options.agent,
+        model: options.model,
+        workerId: options.workerId,
+        scopeContext: options.scopeContext,
+        emulateOpencode: options.emulateOpencode,
+        runtime: options.runtime
+      });
+      await guard.throwIfMutated();
+      return result;
+    } catch (error) {
+      lastError = error;
+
+      try {
+        await guard.throwIfMutated();
+      } catch (guardError) {
+        throw guardError;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      options.logger?.write('check.batch.attempt.failed', {
+        batchId: options.batchId,
+        batchCheckIds: options.checkIds,
+        workerId: options.workerId,
+        attempt,
+        maxAttempts: CHECK_EVALUATION_MAX_ATTEMPTS,
+        message
+      });
+
+      const fatalSetupError = classifyFatalCheckError(error, {
+        model: options.model,
+        configPath: options.runtimeConfigPath
+      });
+      if (fatalSetupError) {
+        throw fatalSetupError;
+      }
+
+      if (!isRecoverableCheckError(error)) {
+        throw error;
+      }
+
+      if (attempt < CHECK_EVALUATION_MAX_ATTEMPTS) {
+        options.logger?.write('check.batch.retry.scheduled', {
+          batchId: options.batchId,
+          batchCheckIds: options.checkIds,
+          workerId: options.workerId,
+          nextAttempt: attempt + 1
+        });
+        continue;
+      }
+    }
+  }
+
+  options.logger?.write('check.batch.inconclusive', {
+    batchId: options.batchId,
+    batchCheckIds: options.checkIds,
+    workerId: options.workerId,
+    attempts: CHECK_EVALUATION_MAX_ATTEMPTS,
+    message: lastError instanceof Error ? lastError.message : String(lastError)
+  });
+  return {
+    resultsByCheckId: new Map(
+      options.checkIds.map(checkId => [
+        checkId,
+        createInconclusiveResult(
+          checkId,
+          lastError,
+          CHECK_EVALUATION_MAX_ATTEMPTS
+        )
+      ] as const)
+    ),
+    warnings: []
+  };
 }
 
 function isRecoverableCheckError(error: unknown): boolean {
@@ -2639,6 +3036,22 @@ function dedupeIgnoredRepoPaths(paths: string[]): string[] {
 
     seen.add(candidatePath);
     deduped.push(candidatePath);
+  }
+
+  return deduped;
+}
+
+function dedupeCheckIds(checkIds: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const checkId of checkIds) {
+    if (seen.has(checkId)) {
+      continue;
+    }
+
+    seen.add(checkId);
+    deduped.push(checkId);
   }
 
   return deduped;

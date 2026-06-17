@@ -19,6 +19,9 @@ import type {ScanLogger} from './scan-log.js';
 
 export interface RuntimeSessionMetadata {
   checkId?: string | undefined;
+  batchId?: string | undefined;
+  batchCheckIds?: string[] | undefined;
+  batchLabel?: string | undefined;
   workerId?: string | undefined;
 }
 
@@ -26,6 +29,9 @@ export interface RuntimeEventEnvelope {
   event: Event;
   sessionId: string | null;
   checkId: string | null;
+  batchId?: string | null;
+  batchCheckIds?: string[] | undefined;
+  batchLabel?: string | null;
   workerId: string | null;
 }
 
@@ -159,6 +165,9 @@ export class OpenCodeRuntime {
     model: string;
     title: string;
     checkId?: string | undefined;
+    batchId?: string | undefined;
+    batchCheckIds?: string[] | undefined;
+    batchLabel?: string | undefined;
     workerId?: string | undefined;
     allowEmptyText?: boolean | undefined;
     requestTimeoutMs?: number | undefined;
@@ -188,6 +197,9 @@ export class OpenCodeRuntime {
     });
     this.sessionMetadata.set(session.id, {
       checkId: options.checkId,
+      batchId: options.batchId,
+      batchCheckIds: options.batchCheckIds ? [...options.batchCheckIds] : undefined,
+      batchLabel: options.batchLabel,
       workerId: options.workerId
     });
 
@@ -294,6 +306,9 @@ export class OpenCodeRuntime {
           },
           sessionId: session.id,
           checkId: this.sessionMetadata.get(session.id)?.checkId ?? null,
+          batchId: this.sessionMetadata.get(session.id)?.batchId ?? null,
+          batchCheckIds: this.sessionMetadata.get(session.id)?.batchCheckIds,
+          batchLabel: this.sessionMetadata.get(session.id)?.batchLabel ?? null,
           workerId: this.sessionMetadata.get(session.id)?.workerId ?? null
         });
         this.logger?.write('prompt.session.delete_failed', {
@@ -414,6 +429,9 @@ function createRuntimeEventEnvelope(
     event,
     sessionId,
     checkId: metadata?.checkId ?? null,
+    batchId: metadata?.batchId ?? null,
+    batchCheckIds: metadata?.batchCheckIds,
+    batchLabel: metadata?.batchLabel ?? null,
     workerId: metadata?.workerId ?? null
   };
 }

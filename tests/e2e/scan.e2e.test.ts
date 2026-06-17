@@ -638,47 +638,63 @@ describe('scan terminal e2e', () => {
       fixture = await createPhase1ScanFixture({
         mockProviderBaseUrl: `${mockServer.baseUrl}/v1`
       });
+      const activeFixture = fixture;
 
       for (const check of PARALLEL_CHECK_FIXTURES) {
-        await writeProjectCheck(fixture.repoRoot, check.id, check.definition);
+        await writeProjectCheck(activeFixture.repoRoot, check.id, check.definition);
       }
-      runFixtureGit(fixture.repoRoot, [
+      runFixtureGit(activeFixture.repoRoot, [
         'add',
         ...PARALLEL_CHECK_FIXTURES.map(check => `.openshrike/checks/${check.id}.md`)
       ]);
-      runFixtureGit(fixture.repoRoot, ['commit', '-m', 'add extra project checks']);
+      runFixtureGit(activeFixture.repoRoot, ['commit', '-m', 'add extra project checks']);
 
-      for (const check of [
+      const batchedChecks = [
         {
-          id: fixture.checkId,
+          checkId: activeFixture.checkId,
           status: 'pass' as const,
           confidence: 'HIGH' as const,
-          evidence: [`${fixture.changedFilePath}:1`],
+          evidence: [`${activeFixture.changedFilePath}:1`],
           rationale: 'The changed auth module still exports validateAuthToken and returns a boolean.',
-          remediation: ['No action required.'],
-          delayMs: 300
+          remediation: ['No action required.']
         },
-        ...PARALLEL_CHECK_FIXTURES
-      ]) {
-        mockServer.enqueueMatchedTextResponse(
-          `Check id: ${check.id}`,
-          buildCheckResultTextForCheck({
-            checkId: check.id,
-            status: check.status,
-            confidence: check.confidence,
-            evidence: check.evidence,
-            rationale: check.rationale,
-            remediation: check.remediation
-          }),
-          {
-            delayMs: check.delayMs
-          }
-        );
-      }
+        {
+          checkId: PARALLEL_CHECK_FIXTURES[0]!.id,
+          status: PARALLEL_CHECK_FIXTURES[0]!.status,
+          confidence: PARALLEL_CHECK_FIXTURES[0]!.confidence,
+          evidence: PARALLEL_CHECK_FIXTURES[0]!.evidence,
+          rationale: PARALLEL_CHECK_FIXTURES[0]!.rationale,
+          remediation: PARALLEL_CHECK_FIXTURES[0]!.remediation
+        }
+      ] as const;
 
-      const logPath = path.join(fixture.homeRoot, 'phase5-scan.jsonl');
+      mockServer.enqueueMatchedTextResponse(
+        request =>
+          extractPromptCheckIds(request).includes(activeFixture.checkId)
+          && extractPromptCheckIds(request).includes(PARALLEL_CHECK_FIXTURES[0]!.id),
+        buildBatchResultTextForChecks(batchedChecks),
+        {
+          delayMs: 300
+        }
+      );
+      mockServer.enqueueMatchedTextResponse(
+        `Check id: ${PARALLEL_CHECK_FIXTURES[1]!.id}`,
+        buildCheckResultTextForCheck({
+          checkId: PARALLEL_CHECK_FIXTURES[1]!.id,
+          status: PARALLEL_CHECK_FIXTURES[1]!.status,
+          confidence: PARALLEL_CHECK_FIXTURES[1]!.confidence,
+          evidence: PARALLEL_CHECK_FIXTURES[1]!.evidence,
+          rationale: PARALLEL_CHECK_FIXTURES[1]!.rationale,
+          remediation: PARALLEL_CHECK_FIXTURES[1]!.remediation
+        }),
+        {
+          delayMs: PARALLEL_CHECK_FIXTURES[1]!.delayMs
+        }
+      );
+
+      const logPath = path.join(activeFixture.homeRoot, 'phase5-scan.jsonl');
       session = TerminalSession.spawn({
-        command: fixture.commandPath,
+        command: activeFixture.commandPath,
         args: [
           'scan',
           '--no-ui',
@@ -689,8 +705,8 @@ describe('scan terminal e2e', () => {
           '--log',
           logPath
         ],
-        cwd: fixture.repoRoot,
-        env: fixture.env,
+        cwd: activeFixture.repoRoot,
+        env: activeFixture.env,
         cols: 120,
         rows: 40
       });
@@ -702,7 +718,7 @@ describe('scan terminal e2e', () => {
 
       const exit = await session.waitForExit(30_000);
       expect(exit.exitCode).toBe(2);
-      expect(mockServer.requests).toHaveLength(3);
+      expect(mockServer.requests).toHaveLength(2);
 
       const report = extractJsonReport(session.rawOutput());
       expect(report.execution).toMatchObject({
@@ -717,8 +733,8 @@ describe('scan terminal e2e', () => {
       });
       expect(report.checks.map(check => check.id)).toEqual([
         'e2e-scan-002',
-        fixture.checkId,
-        'e2e-scan-003'
+        activeFixture.checkId,
+        'scan-alt-001'
       ]);
       expect(report.checks.map(check => check.status)).toEqual([
         'fail',
@@ -726,22 +742,22 @@ describe('scan terminal e2e', () => {
         'pass'
       ]);
 
-      const requestsByCheckId = new Map(
-        mockServer.requests.map(request => [extractPromptCheckId(request), request] as const)
+      const batchedRequest = mockServer.requests.find(request => {
+        const checkIds = extractPromptCheckIds(request);
+        return checkIds.includes(activeFixture.checkId) && checkIds.includes('e2e-scan-002');
+      });
+      const singletonRequest = mockServer.requests.find(request =>
+        extractPromptCheckIds(request).includes('scan-alt-001')
       );
-      expect([...requestsByCheckId.keys()].sort()).toEqual([
-        fixture.checkId,
-        'e2e-scan-002',
-        'e2e-scan-003'
-      ]);
-      expect(requestsByCheckId.get(fixture.checkId)?.promptText).toContain(fixture.checkDefinition);
-      expect(requestsByCheckId.get('e2e-scan-002')?.promptText).toContain(
+
+      expect(batchedRequest?.promptText).toContain(activeFixture.checkDefinition);
+      expect(batchedRequest?.promptText).toContain(
         PARALLEL_CHECK_FIXTURES[0]!.definition
       );
-      expect(requestsByCheckId.get('e2e-scan-003')?.promptText).toContain(
+      expect(singletonRequest?.promptText).toContain(
         PARALLEL_CHECK_FIXTURES[1]!.definition
       );
-      expect(requestsByCheckId.get(fixture.checkId)?.promptText).toContain('Scoped file allowlist (1):');
+      expect(batchedRequest?.promptText).toContain('Scoped file allowlist (1):');
 
       const logEntries = await readJsonLines(logPath);
       const checkStartedEvents = logEntries.filter(
@@ -759,7 +775,7 @@ describe('scan terminal e2e', () => {
       expect(logEntries.some(entry => entry.kind === 'scan.completed')).toBe(true);
 
       await expectGoldenText(
-        renderPromptGoldenSet(mockServer.requests, fixture.repoRoot),
+        renderPromptGoldenSet(mockServer.requests, activeFixture.repoRoot),
         'scan-parallel.prompts.txt'
       );
     } finally {
@@ -807,6 +823,27 @@ function buildCheckResultTextForCheck(options: {
     evidence: options.evidence,
     rationale: options.rationale,
     remediation: options.remediation
+  }, null, 2);
+}
+
+function buildBatchResultTextForChecks(options: ReadonlyArray<{
+  checkId: string;
+  status: 'pass' | 'fail' | 'unknown';
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  evidence: readonly string[];
+  rationale: string;
+  remediation: readonly string[];
+}>): string {
+  return JSON.stringify({
+    results: options.map(check => ({
+      id: check.checkId,
+      version: '0.1.0',
+      status: check.status,
+      confidence: check.confidence,
+      evidence: [...check.evidence],
+      rationale: check.rationale,
+      remediation: [...check.remediation]
+    }))
   }, null, 2);
 }
 
@@ -861,6 +898,12 @@ function extractPromptCheckId(request: MockAiRequest): string {
   return match.groups.checkId;
 }
 
+function extractPromptCheckIds(request: MockAiRequest): string[] {
+  return [...request.promptText.matchAll(/^Check id: (?<checkId>.+)$/gmu)]
+    .map(match => match.groups?.checkId?.trim() ?? '')
+    .filter(Boolean);
+}
+
 function normalizePromptText(promptText: string, repoRoot: string): string {
   return promptText
     .replaceAll(repoRoot, '<repo>')
@@ -871,7 +914,7 @@ function normalizePromptText(promptText: string, repoRoot: string): string {
 function renderPromptGoldenSet(requests: readonly MockAiRequest[], repoRoot: string): string {
   return requests
     .map(request => ({
-      checkId: extractPromptCheckId(request),
+      checkId: extractPromptCheckIds(request).join(','),
       promptText: normalizePromptText(request.promptText, repoRoot)
     }))
     .sort((left, right) => left.checkId.localeCompare(right.checkId))
@@ -918,9 +961,9 @@ const PARALLEL_CHECK_FIXTURES = [
     delayMs: 50
   },
   {
-    id: 'e2e-scan-003',
+    id: 'scan-alt-001',
     definition: [
-      '# E2E-SCAN-003: Boolean return',
+      '# SCAN-ALT-001: Boolean return',
       '',
       'Ensure the changed auth module still returns a boolean result.'
     ].join('\n'),

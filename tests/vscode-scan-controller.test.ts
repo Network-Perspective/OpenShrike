@@ -12,6 +12,8 @@ const mockRunScan = vi.fn();
 const mockLoadLastScanState = vi.fn();
 const mockResolveLastScanPaths = vi.fn();
 const mockSaveLastScanState = vi.fn();
+const mockCreateRuntimeStreamState = vi.fn(() => ({items: []}));
+const mockReduceRuntimeEvent = vi.fn((state: {items: Array<{text: string}>}) => state);
 
 vi.mock('../src/lib/fix.js', () => ({
   fixAndRecheckCheck: vi.fn(),
@@ -38,8 +40,8 @@ vi.mock('../src/lib/last-scan.js', () => ({
 }));
 
 vi.mock('../src/lib/runtime-events.js', () => ({
-  createRuntimeStreamState: vi.fn(() => ({items: []})),
-  reduceRuntimeEvent: vi.fn((state: {items: Array<{text: string}>}) => state)
+  createRuntimeStreamState: mockCreateRuntimeStreamState,
+  reduceRuntimeEvent: mockReduceRuntimeEvent
 }));
 
 vi.mock('../src/lib/scan-options.js', () => ({
@@ -66,6 +68,9 @@ beforeEach(() => {
   mockLoadLastScanState.mockReset();
   mockResolveLastScanPaths.mockReset();
   mockSaveLastScanState.mockReset();
+  mockCreateRuntimeStreamState.mockClear();
+  mockReduceRuntimeEvent.mockClear();
+  mockReduceRuntimeEvent.mockImplementation((state: {items: Array<{text: string}>}) => state);
   mockResolveLastScanPaths.mockResolvedValue({
     markdownPath: '.openshrike/last-scan.md'
   });
@@ -380,6 +385,139 @@ describe('OpenShrike scan controller', () => {
     await controller.runScan(workspace);
 
     expect(model.getState().tokensLabel).toBe('1.2K / 56');
+  });
+
+  it('marks multiple checks from one batch as running in the native state projection', async () => {
+    const workspacePath = await createWorkspace();
+    const workspace = {
+      name: 'Workspace',
+      path: workspacePath
+    };
+    const report = {
+      ...makeReport(workspacePath, {
+        runtimeMode: 'native'
+      }),
+      summary: {
+        total_checks: 2,
+        passed: 2,
+        failed: 0,
+        unknown: 0
+      },
+      checks: [
+        {
+          id: 'check-a',
+          version: '1',
+          status: 'pass' as const,
+          confidence: 'HIGH' as const,
+          evidence: ['README.md:1'],
+          rationale: 'ok',
+          remediation: []
+        },
+        {
+          id: 'check-b',
+          version: '1',
+          status: 'pass' as const,
+          confidence: 'HIGH' as const,
+          evidence: ['README.md:2'],
+          rationale: 'ok',
+          remediation: []
+        }
+      ]
+    };
+    const model = new OpenShrikeExtensionModel(createEmptyScanState({
+      workspaceName: workspace.name,
+      workspacePath
+    }), null);
+    const controller = new OpenShrikeScanController(model);
+    let resolveStart!: (value: typeof report) => void;
+
+    await controller.initialize(workspace);
+    mockResolveScanOptions.mockResolvedValue(makeOptions(workspacePath, {
+      runtimeMode: 'native',
+      scanScope: 'full'
+    }));
+    mockCreateNativeScanSession.mockImplementation((_options, _initialState, hooks) => ({
+      start: async () => {
+        hooks?.onUpdate?.(makeSessionSnapshot(workspacePath, {
+          checkOrder: ['check-a', 'check-b'],
+          runningCheckIds: ['check-a', 'check-b'],
+          totalChecks: 2,
+          statusLabel: 'Running rel batch (2 checks)'
+        }));
+        return await new Promise<typeof report>(resolve => {
+          resolveStart = resolve;
+        });
+      },
+      getScope: () => null,
+      getReport: () => report,
+      getPersistableReport: () => report,
+      close: vi.fn().mockResolvedValue(undefined)
+    }));
+
+    const runPromise = controller.runScan(workspace);
+    await waitForState(model, state => state.statusLabel === 'Running rel batch (2 checks)');
+
+    const runningState = model.getState();
+    expect(runningState.findings.filter(finding => finding.status === 'running').map(finding => finding.id)).toEqual([
+      'check-a',
+      'check-b'
+    ]);
+
+    resolveStart(report);
+    await runPromise;
+  });
+
+  it('prefixes runtime output with batch labels when batch runtime events stream in', async () => {
+    const workspacePath = await createWorkspace();
+    const workspace = {
+      name: 'Workspace',
+      path: workspacePath
+    };
+    const report = makeReport(workspacePath, {
+      runtimeMode: 'native'
+    });
+    const model = new OpenShrikeExtensionModel(createEmptyScanState({
+      workspaceName: workspace.name,
+      workspacePath
+    }), null);
+    const controller = new OpenShrikeScanController(model);
+
+    mockReduceRuntimeEvent.mockImplementation(() => ({
+      items: [{text: 'Planning review'}]
+    }));
+
+    await controller.initialize(workspace);
+    mockResolveScanOptions.mockResolvedValue(makeOptions(workspacePath, {
+      runtimeMode: 'native',
+      scanScope: 'full'
+    }));
+    mockCreateNativeScanSession.mockImplementation((_options, _initialState, hooks) => ({
+      start: async () => {
+        hooks?.onRuntimeEvent?.({
+          checkId: null,
+          batchId: 'scan-batch-1',
+          batchCheckIds: ['check-a', 'check-b'],
+          batchLabel: 'rel batch (2 checks)',
+          workerId: 'worker-1',
+          runtimeMode: 'native',
+          event: {
+            type: 'message.updated',
+            properties: {}
+          }
+        });
+        return report;
+      },
+      getScope: () => null,
+      getReport: () => report,
+      getPersistableReport: () => report,
+      close: vi.fn().mockResolvedValue(undefined)
+    }));
+
+    await controller.runScan(workspace);
+
+    expect(model.getState().outputLines.some(line =>
+      line.includes('rel batch (2 checks): Planning review')
+    )).toBe(true);
   });
 
   it('does not let a stale last-scan restore overwrite live token usage', async () => {

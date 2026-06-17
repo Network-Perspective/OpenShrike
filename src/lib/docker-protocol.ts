@@ -64,6 +64,9 @@ const scanProgressEventSchema = z.object({
   isFullRepository: z.boolean(),
   checkIds: z.array(z.string()).default([]),
   checkId: z.string().nullable(),
+  batchId: z.string().nullable().optional(),
+  batchCheckIds: z.array(z.string()).optional(),
+  batchLabel: z.string().nullable().optional(),
   workerId: z.string().nullable(),
   checkStatus: checkStatusSchema.nullable(),
   checkResult: checkResultSchema.nullable().default(null),
@@ -80,6 +83,9 @@ const scanProgressEventSchema = z.object({
 
 const scanRuntimeEventSchema = z.object({
   checkId: z.string().nullable(),
+  batchId: z.string().nullable().optional(),
+  batchCheckIds: z.array(z.string()).optional(),
+  batchLabel: z.string().nullable().optional(),
   workerId: z.string().nullable(),
   runtimeMode: runtimeModeSchema,
   event: serializedRuntimeEventSchema

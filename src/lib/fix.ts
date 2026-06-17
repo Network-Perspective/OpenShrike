@@ -160,11 +160,16 @@ export async function fixAndRecheckCheck(options: {
             logger?.write('opencode.event', {
               ...summarizeRuntimeEvent(runtimeEvent.event),
               checkId: runtimeEvent.checkId,
+              batchId: runtimeEvent.batchId ?? null,
+              batchLabel: runtimeEvent.batchLabel ?? null,
               workerId: runtimeEvent.workerId,
               runtimeMode: 'native'
             });
             options.onRuntimeEvent?.({
               checkId: runtimeEvent.checkId,
+              ...(runtimeEvent.batchId ? {batchId: runtimeEvent.batchId} : {}),
+              ...(runtimeEvent.batchCheckIds ? {batchCheckIds: runtimeEvent.batchCheckIds} : {}),
+              ...(runtimeEvent.batchLabel ? {batchLabel: runtimeEvent.batchLabel} : {}),
               workerId: runtimeEvent.workerId,
               runtimeMode: 'native',
               event: runtimeEvent.event

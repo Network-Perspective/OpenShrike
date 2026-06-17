@@ -13,6 +13,7 @@ import type {
 
 const mockLoadRuntimeConfig = vi.fn();
 const mockEvaluateCheck = vi.fn();
+const mockEvaluateCheckBatch = vi.fn();
 const mockResolvePolicyDefinition = vi.fn();
 const mockResolveScanScope = vi.fn();
 const mockRuntimeCreate = vi.fn();
@@ -30,7 +31,8 @@ vi.mock('../src/lib/evaluator.js', async () => {
   const actual = await vi.importActual<typeof import('../src/lib/evaluator.js')>('../src/lib/evaluator.js');
   return {
     ...actual,
-    evaluateCheck: mockEvaluateCheck
+    evaluateCheck: mockEvaluateCheck,
+    evaluateCheckBatch: mockEvaluateCheckBatch
   };
 });
 
@@ -54,7 +56,7 @@ vi.mock('../src/lib/repo-guard.js', () => ({
   }
 }));
 
-const {runNativeScan, runScan} = await import('../src/lib/scan.js');
+const {planScanBatchJobs, runNativeScan, runScan} = await import('../src/lib/scan.js');
 
 const tempRoots: string[] = [];
 
@@ -62,6 +64,40 @@ describe('runScan', () => {
   afterEach(async () => {
     vi.clearAllMocks();
     await Promise.all(tempRoots.splice(0).map(root => fs.rm(root, {recursive: true, force: true})));
+  });
+
+  it('plans domain batches deterministically and keeps later split batches in selection order', () => {
+    const jobs = planScanBatchJobs({
+      checkIds: [
+        'rel-001',
+        'sec-001',
+        'rel-002',
+        'rel-003',
+        'rel-004',
+        'rel-005',
+        'rel-006'
+      ],
+      domainByCheckId: new Map([
+        ['rel-001', 'rel'],
+        ['sec-001', 'sec'],
+        ['rel-002', 'rel'],
+        ['rel-003', 'rel'],
+        ['rel-004', 'rel'],
+        ['rel-005', 'rel'],
+        ['rel-006', 'rel']
+      ])
+    });
+
+    expect(jobs.map(job => job.checkIds)).toEqual([
+      ['rel-001', 'rel-002', 'rel-003', 'rel-004', 'rel-005'],
+      ['sec-001'],
+      ['rel-006']
+    ]);
+    expect(jobs.map(job => job.batchLabel)).toEqual([
+      'rel batch (5 checks)',
+      'sec-001',
+      'rel-006'
+    ]);
   });
 
   it('returns unknown results when no files match a non-full scope', async () => {
@@ -198,6 +234,76 @@ describe('runScan', () => {
       'fail'
     ]);
     expect(progress.filter(event => event.type !== 'check-completed').every(event => event.checkResult === null)).toBe(true);
+  });
+
+  it('batches same-domain project checks into fewer prompts while keeping per-check progress', async () => {
+    const repoRoot = await makeRepoRoot();
+    const projectChecksDir = path.join(repoRoot, '.openshrike', 'checks');
+    const runtime = {
+      close: vi.fn().mockResolvedValue(undefined)
+    };
+
+    await fs.mkdir(projectChecksDir, {recursive: true});
+    await fs.writeFile(path.join(projectChecksDir, 'rel-check-001.md'), '# REL-CHECK-001\n', 'utf8');
+    await fs.writeFile(path.join(projectChecksDir, 'rel-check-002.md'), '# REL-CHECK-002\n', 'utf8');
+    await fs.writeFile(path.join(projectChecksDir, 'api-check-001.md'), '# API-CHECK-001\n', 'utf8');
+
+    mockResolveScanScope.mockResolvedValue(makeScope({}));
+    mockLoadRuntimeConfig.mockResolvedValue({
+      configPath: '/tmp/opencode.json',
+      config: {},
+      requiredEnvVars: [],
+      missingEnvVars: []
+    });
+    mockRuntimeCreate.mockResolvedValue(runtime);
+    mockRepoGuardCapture.mockResolvedValue({
+      throwIfMutated: vi.fn().mockResolvedValue(undefined)
+    });
+    mockEvaluateCheckBatch.mockResolvedValue({
+      resultsByCheckId: new Map([
+        ['rel-check-001', makeCheckResult('rel-check-001', 'pass')],
+        ['rel-check-002', makeCheckResult('rel-check-002', 'fail')]
+      ]),
+      warnings: []
+    });
+    mockEvaluateCheck.mockResolvedValue(makeCheckResult('api-check-001', 'pass'));
+
+    const progress: ScanProgressEvent[] = [];
+    const report = await runScan(makeOptions(repoRoot, {
+      projectChecksDir,
+      parallelism: 2
+    }), {
+      onProgress: event => progress.push(event)
+    });
+
+    expect(mockEvaluateCheckBatch).toHaveBeenCalledTimes(1);
+    expect(mockEvaluateCheckBatch.mock.calls[0]?.[0]).toMatchObject({
+      checkIds: ['rel-check-001', 'rel-check-002']
+    });
+    expect(mockEvaluateCheck).toHaveBeenCalledTimes(1);
+    expect(mockEvaluateCheck).toHaveBeenCalledWith(expect.objectContaining({
+      checkId: 'api-check-001'
+    }));
+    expect(report.execution).toMatchObject({
+      requested_parallelism: 2,
+      effective_parallelism: 2
+    });
+    expect(progress.some(event =>
+      event.type === 'check-started'
+      && event.batchLabel === 'rel-check batch (2 checks)'
+      && event.runningCheckIds.includes('rel-check-001')
+      && event.runningCheckIds.includes('rel-check-002')
+    )).toBe(true);
+    expect(new Set(progress
+      .filter(event => event.type === 'check-completed')
+      .map(event => event.checkResult?.id))).toEqual(
+      new Set(['api-check-001', 'rel-check-001', 'rel-check-002'])
+    );
+    expect(report.checks.map(check => check.id)).toEqual([
+      'rel-check-002',
+      'api-check-001',
+      'rel-check-001'
+    ]);
   });
 
   it('uses only project-local checks when a project checks directory is configured', async () => {
@@ -494,6 +600,86 @@ describe('runScan', () => {
       runtimeMode: 'native'
     });
     expect(runtimeEvents[0]?.event.type).toBe('session.status');
+  });
+
+  it('routes batch runtime events with batch metadata', async () => {
+    const repoRoot = await makeRepoRoot();
+    const projectChecksDir = path.join(repoRoot, '.openshrike', 'checks');
+    let capturedRuntimeEvent:
+      | ((event: {
+        event: {type: string; properties: Record<string, unknown>};
+        checkId: string | null;
+        batchId?: string | null;
+        batchCheckIds?: string[];
+        batchLabel?: string | null;
+        workerId: string | null;
+        sessionId: string | null;
+      }) => void)
+      | undefined;
+
+    await fs.mkdir(projectChecksDir, {recursive: true});
+    await fs.writeFile(path.join(projectChecksDir, 'rel-check-001.md'), '# REL-CHECK-001\n', 'utf8');
+    await fs.writeFile(path.join(projectChecksDir, 'rel-check-002.md'), '# REL-CHECK-002\n', 'utf8');
+
+    mockResolveScanScope.mockResolvedValue(makeScope({}));
+    mockLoadRuntimeConfig.mockResolvedValue({
+      configPath: '/tmp/opencode.json',
+      config: {},
+      requiredEnvVars: [],
+      missingEnvVars: []
+    });
+    mockRuntimeCreate.mockImplementation(async options => {
+      capturedRuntimeEvent = options.onEvent;
+      return {
+        close: vi.fn().mockResolvedValue(undefined)
+      };
+    });
+    mockRepoGuardCapture.mockResolvedValue({
+      throwIfMutated: vi.fn().mockResolvedValue(undefined)
+    });
+    mockEvaluateCheckBatch.mockImplementation(async () => {
+      capturedRuntimeEvent?.({
+        sessionId: 'session-1',
+        checkId: null,
+        batchId: 'scan-batch-1',
+        batchCheckIds: ['rel-check-001', 'rel-check-002'],
+        batchLabel: 'rel-check batch (2 checks)',
+        workerId: 'worker-1',
+        event: {
+          type: 'session.status',
+          properties: {
+            sessionID: 'session-1',
+            status: {
+              type: 'running'
+            }
+          }
+        }
+      });
+      return {
+        resultsByCheckId: new Map([
+          ['rel-check-001', makeCheckResult('rel-check-001', 'pass')],
+          ['rel-check-002', makeCheckResult('rel-check-002', 'pass')]
+        ]),
+        warnings: []
+      };
+    });
+
+    const runtimeEvents: ScanRuntimeEvent[] = [];
+    await runScan(makeOptions(repoRoot, {
+      projectChecksDir
+    }), {
+      onRuntimeEvent: event => runtimeEvents.push(event)
+    });
+
+    expect(runtimeEvents).toHaveLength(1);
+    expect(runtimeEvents[0]).toMatchObject({
+      checkId: null,
+      batchId: 'scan-batch-1',
+      batchCheckIds: ['rel-check-001', 'rel-check-002'],
+      batchLabel: 'rel-check batch (2 checks)',
+      workerId: 'worker-1',
+      runtimeMode: 'native'
+    });
   });
 
   it('passes internal ignored repo paths to the mutation guard', async () => {

@@ -40,6 +40,8 @@ describe('check catalog', () => {
     expect(catalog.map(entry => entry.id)).toContain('rel-typescript-001');
     expect(catalog.map(entry => entry.id)).toContain('typescript-arch-001');
     expect(catalog.map(entry => entry.id)).toContain('bp-sec-004');
+    expect(catalog.find(entry => entry.id === 'rel-typescript-001')?.domain).toBe('rel');
+    expect(catalog.find(entry => entry.id === 'typescript-arch-001')?.domain).toBe('arch');
   });
 
   it('falls back to filename and heading for project-local checks without frontmatter', async () => {
@@ -56,9 +58,36 @@ describe('check catalog', () => {
     expect(catalog).toEqual([
       expect.objectContaining({
         id: 'custom-check',
-        title: 'Custom Check Title'
+        title: 'Custom Check Title',
+        domain: null
       })
     ]);
+  });
+
+  it('infers domains from project-local ids or filenames when frontmatter domain is missing', async () => {
+    const checksDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-project-checks-domain-'));
+    tempDirectories.push(checksDirectory);
+    await fs.writeFile(
+      path.join(checksDirectory, 'rel-custom-001-network-timeouts.md'),
+      '# REL-CUSTOM-001: Network timeouts are bounded\n',
+      'utf8'
+    );
+    await fs.writeFile(
+      path.join(checksDirectory, 'custom-file.md'),
+      [
+        '---',
+        'id: api-009',
+        'title: API contracts remain compatible',
+        '---',
+        '',
+        '# Placeholder title'
+      ].join('\n'),
+      'utf8'
+    );
+
+    const catalog = await listCheckCatalog(checksDirectory);
+    expect(catalog.find(entry => entry.id === 'rel-custom-001-network-timeouts')?.domain).toBe('rel-custom');
+    expect(catalog.find(entry => entry.id === 'api-009')?.domain).toBe('api');
   });
 
   it('uses project-local frontmatter ids when filenames do not match the check id', async () => {

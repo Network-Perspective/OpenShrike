@@ -97,6 +97,9 @@ export interface ScanProgressEvent {
   isFullRepository: boolean;
   checkIds: string[];
   checkId: string | null;
+  batchId?: string | null | undefined;
+  batchCheckIds?: string[] | undefined;
+  batchLabel?: string | null | undefined;
   workerId: string | null;
   checkStatus: CheckStatus | null;
   checkResult: CheckResult | null;
@@ -118,6 +121,9 @@ export interface SerializedRuntimeEvent {
 
 export interface ScanRuntimeEvent {
   checkId: string | null;
+  batchId?: string | null | undefined;
+  batchCheckIds?: string[] | undefined;
+  batchLabel?: string | null | undefined;
   workerId: string | null;
   runtimeMode: RuntimeMode;
   event: SerializedRuntimeEvent;

@@ -8,6 +8,7 @@ export interface CheckCatalogEntry {
   id: string;
   title: string;
   path: string;
+  domain: string | null;
   version: string;
   mtimeMs: number;
 }
@@ -60,11 +61,18 @@ export async function listCheckCatalog(checksDirectory: string): Promise<CheckCa
     markdownFiles.map(async checkPath => {
       const definition = await fs.readFile(checkPath, 'utf8');
       const {attributes} = parseMarkdownFrontmatter(definition);
+      const basename = path.basename(checkPath, '.md');
+      const id = readFrontmatterString(attributes, 'id') ?? basename;
       const stats = await fs.stat(checkPath);
       return {
-        id: readFrontmatterString(attributes, 'id') ?? path.basename(checkPath, '.md'),
-        title: readFrontmatterString(attributes, 'title') ?? extractCheckTitleFromDefinition(definition, path.basename(checkPath, '.md')),
+        id,
+        title: readFrontmatterString(attributes, 'title') ?? extractCheckTitleFromDefinition(definition, basename),
         path: checkPath,
+        domain: normalizeCheckDomain(
+          readFrontmatterString(attributes, 'domain')
+          ?? inferCheckDomain(id)
+          ?? inferCheckDomain(basename)
+        ),
         version: stats.mtime.toISOString().slice(0, 10),
         mtimeMs: stats.mtimeMs
       } satisfies CheckCatalogEntry;
@@ -144,6 +152,17 @@ export function extractCheckTitleFromDefinition(
   return fallbackTitle;
 }
 
+export function inferCheckDomain(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const match = trimmed.match(/^(.*?)-\d+(?:-|$)/u);
+  const domain = match?.[1]?.trim().replace(/-+$/u, '') ?? '';
+  return domain || null;
+}
+
 async function resolveCheckCatalogEntry(
   checkId: string,
   options: ResolveCheckDefinitionOptions = {}
@@ -191,6 +210,11 @@ async function listMarkdownFiles(
 
 function isNotFoundError(error: unknown): boolean {
   return (error as NodeJS.ErrnoException)?.code === 'ENOENT';
+}
+
+function normalizeCheckDomain(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? '';
+  return normalized || null;
 }
 
 function resolveBundledPolicyDirectorySkips(checksDirectory: string): ReadonlySet<string> | undefined {

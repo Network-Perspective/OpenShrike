@@ -7,6 +7,7 @@ import type {CheckResult, ScanCommandOptions} from '../src/lib/types.js';
 const mockResolvePolicyDefinition = vi.fn();
 const mockResolveScanScope = vi.fn();
 const mockEvaluateCheck = vi.fn();
+const mockEvaluateCheckBatch = vi.fn();
 const mockLoadRuntimeConfig = vi.fn();
 const mockCreateRuntime = vi.fn();
 const mockCreateScanLogger = vi.fn();
@@ -24,6 +25,7 @@ vi.mock('../src/lib/scope.js', () => ({
 vi.mock('../src/lib/evaluator.js', () => ({
   CheckEvaluationError: class CheckEvaluationError extends Error {},
   evaluateCheck: mockEvaluateCheck,
+  evaluateCheckBatch: mockEvaluateCheckBatch,
   getCheckEvaluationOriginalOutput: vi.fn(() => null)
 }));
 
@@ -67,6 +69,7 @@ beforeEach(async () => {
   mockResolvePolicyDefinition.mockReset();
   mockResolveScanScope.mockReset();
   mockEvaluateCheck.mockReset();
+  mockEvaluateCheckBatch.mockReset();
   mockLoadRuntimeConfig.mockReset();
   mockCreateRuntime.mockReset();
   mockCreateScanLogger.mockReset();
@@ -245,6 +248,47 @@ describe('createNativeScanSession', () => {
     ]));
 
     firstCheck.resolve(makeResult('check-a', 'fail'));
+
+    await completion;
+    await session.close();
+  });
+
+  it('marks every member of an active batch as running in session snapshots', async () => {
+    const projectChecksDir = path.join(repoRoot, '.openshrike', 'checks');
+    await fs.mkdir(projectChecksDir, {recursive: true});
+    await fs.writeFile(path.join(projectChecksDir, 'rel-check-001.md'), '# REL-CHECK-001\n', 'utf8');
+    await fs.writeFile(path.join(projectChecksDir, 'rel-check-002.md'), '# REL-CHECK-002\n', 'utf8');
+
+    const batchResult = deferred<{
+      resultsByCheckId: Map<string, CheckResult>;
+      warnings: string[];
+    }>();
+    mockEvaluateCheckBatch.mockImplementation(async () => await batchResult.promise);
+
+    const updates = createSnapshotUpdates();
+    const session = createNativeScanSession(makeOptions({
+      policyId: undefined,
+      projectChecksDir
+    }), undefined, {
+      onUpdate: updates.onUpdate
+    });
+    const completion = session.start();
+
+    const runningSnapshot = await updates.waitFor(snapshot =>
+      snapshot.runningCheckIds.includes('rel-check-001')
+      && snapshot.runningCheckIds.includes('rel-check-002')
+    );
+    expect(runningSnapshot.runningCheckIds).toEqual(['rel-check-001', 'rel-check-002']);
+    expect(runningSnapshot.statusLabel).toBe('Running rel-check batch (2 checks)');
+    expect(mockEvaluateCheck).not.toHaveBeenCalled();
+
+    batchResult.resolve({
+      resultsByCheckId: new Map([
+        ['rel-check-001', makeResult('rel-check-001', 'pass')],
+        ['rel-check-002', makeResult('rel-check-002', 'pass')]
+      ]),
+      warnings: []
+    });
 
     await completion;
     await session.close();

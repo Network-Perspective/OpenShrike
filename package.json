@@ -252,13 +252,14 @@
     "publish:npm": "scripts/publish-npm.sh",
     "publish:vscode": "scripts/publish-vscode.sh",
     "prepare:vscode-runtime": "node scripts/prepare-vscode-runtime-assets.mjs",
+    "verify:vscode-runtime": "node scripts/verify-vscode-runtime-assets.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:extension-host": "node tests/extension-host/run.mjs",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:e2e:watch": "vitest --config vitest.e2e.config.ts",
     "test:watch": "vitest",
-    "vscode:prepublish": "npm run build && npm run prepare:vscode-runtime",
+    "vscode:prepublish": "npm run build && npm run prepare:vscode-runtime && npm run verify:vscode-runtime",
     "release:prepare": "scripts/create-release.sh"
   },
   "dependencies": {

@@ -20,7 +20,10 @@ Environment:
 Behavior:
   - runs `npm ci`
   - runs `npm run build`
+  - runs `npm run prepare:vscode-runtime`
+  - runs `npm run verify:vscode-runtime`
   - packages a VSIX with `@vscode/vsce`
+  - validates the packaged Docker runtime assets
   - publishes the VSIX with `@vscode/vsce`
   - uses `VSCE_PAT` when available, otherwise falls back to Azure identity
 
@@ -83,6 +86,8 @@ if [[ "$SKIP_BUILD" != "true" ]]; then
   mkdir -p "$(dirname "$PACKAGE_PATH")"
   npm ci
   npm run build
+  npm run prepare:vscode-runtime
+  npm run verify:vscode-runtime
   npm exec --yes @vscode/vsce@3 -- package --readme-path README.vscode.md --out "$PACKAGE_PATH"
 fi
 
@@ -90,6 +95,8 @@ if [[ ! -f "$PACKAGE_PATH" ]]; then
   echo "Could not find VSIX package at '$PACKAGE_PATH'." >&2
   exit 1
 fi
+
+scripts/verify-vscode-package.sh --vsix-path "$PACKAGE_PATH"
 
 echo "Publishing VS Code extension from $PACKAGE_PATH"
 PUBLISH_ARGS=(publish --packagePath "$PACKAGE_PATH")

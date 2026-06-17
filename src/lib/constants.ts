@@ -30,6 +30,7 @@ export const RUNTIME_MODE_VALUES = ['native', 'docker'] as const;
 export const STREAM_EVENT_LIMIT = 120;
 export const STREAM_TEXT_LIMIT = 2400;
 export const MAX_POLICY_CHECKS = 200;
+export const MAX_SCAN_BATCH_CHECKS = 5;
 export const MAX_CHECK_EVIDENCE_ITEMS = 20;
 export const MAX_CHECK_REMEDIATION_ITEMS = 20;
 export const CHECK_EVALUATION_MAX_ATTEMPTS = 2;

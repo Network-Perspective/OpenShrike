@@ -663,7 +663,7 @@ export class OpenShrikeScanController {
       return;
     }
 
-    const streamKey = `${event.runtimeMode}:${event.checkId ?? event.workerId ?? 'session'}`;
+    const streamKey = `${event.runtimeMode}:${event.batchId ?? event.checkId ?? event.workerId ?? 'session'}`;
     const previous = this.runtimeStreams.get(streamKey) ?? createRuntimeStreamState();
     const next = reduceRuntimeEvent(previous, event.event);
     this.runtimeStreams.set(streamKey, next);
@@ -673,7 +673,11 @@ export class OpenShrikeScanController {
       return;
     }
 
-    const prefix = event.checkId ? `${event.checkId}: ` : '';
+    const prefix = event.checkId
+      ? `${event.checkId}: `
+      : event.batchLabel
+        ? `${event.batchLabel}: `
+        : '';
     for (const item of next.items.slice(previous.items.length)) {
       this.appendOutputLine(`${prefix}${item.text}`);
     }
