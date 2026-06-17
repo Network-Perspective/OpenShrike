@@ -124,7 +124,7 @@ export async function createPhase1ScanFixture(options: {
   ]);
 
   const projectConfig = buildShrikeProjectConfig({
-    policyIds: ['typescript-baseline'],
+    policyIds: ['lang-typescript'],
     model: 'openai/gpt-4o-mini',
     fixModel: 'openai/gpt-4o-mini',
     runtimeMode: 'native',
@@ -334,7 +334,7 @@ export async function createPhase3FixFixture(): Promise<Phase3FixFixture> {
   ]);
 
   const projectConfig = buildShrikeProjectConfig({
-    policyIds: ['typescript-baseline'],
+    policyIds: ['lang-typescript'],
     model: 'openai/gpt-4o-mini',
     fixModel: 'openai/gpt-4o-mini',
     runtimeMode: 'native',
@@ -531,7 +531,7 @@ export async function createPhase4InitFixture(): Promise<Phase4InitFixture> {
     checksDirectory,
     selectedScanModel: 'azure/gpt-5.4-mini',
     selectedFixModel: 'azure/gpt-5.4',
-    expectedPolicyId: 'typescript-baseline',
+    expectedPolicyId: 'lang-typescript',
     commandPath: resolveFromToolRoot('shrike'),
     env: {
       ...buildIsolatedHomeEnv(homeRoot),

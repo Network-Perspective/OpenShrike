@@ -1,23 +1,32 @@
 import {describe, expect, it} from 'vitest';
-import {resolvePolicyDefinition} from '../src/lib/policies.js';
+import {listPolicyCatalog, resolvePolicyDefinition} from '../src/lib/policies.js';
 
 describe('resolvePolicyDefinition', () => {
-  it('returns checks for csharp-baseline', async () => {
-    const policy = await resolvePolicyDefinition('csharp-baseline');
+  it('returns checks for lang-csharp', async () => {
+    const policy = await resolvePolicyDefinition('lang-csharp');
 
-    expect(policy.id).toBe('csharp-baseline');
+    expect(policy.id).toBe('lang-csharp');
     expect(policy.version).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(policy.checkIds).toContain('csharp-rel-001-cancellation-tokens');
+    expect(policy.checkIds).toContain('csharp-rel-001');
+    expect(policy.checkIds).toContain('bp-sec-001');
   });
 
-  it('returns checks for vertical-slice-architecture', async () => {
-    const policy = await resolvePolicyDefinition('vertical-slice-architecture');
+  it('returns checks for shared-foundation', async () => {
+    const policy = await resolvePolicyDefinition('shared-foundation');
 
-    expect(policy.id).toBe('vertical-slice-architecture');
+    expect(policy.id).toBe('shared-foundation');
     expect(policy.version).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(policy.checkIds).toContain('bp-arch-001-avoid-hidden-cross-module-dependencies');
-    expect(policy.checkIds).toContain('vertical-slice-arch-001-feature-slices-own-use-cases');
-    expect(policy.checkIds).toContain('vertical-slice-arch-004-shared-abstractions-are-demand-driven');
+    expect(policy.checkIds).toContain('bp-arch-001');
+    expect(policy.checkIds).toContain('bp-api-001');
+    expect(policy.checkIds).toContain('bp-sec-004');
+  });
+
+  it('lists selectable policies and excludes the manifest', async () => {
+    const catalog = await listPolicyCatalog();
+
+    expect(catalog.map(policy => policy.id)).toContain('lang-typescript');
+    expect(catalog.map(policy => policy.id)).toContain('shared-foundation');
+    expect(catalog.map(policy => policy.id)).not.toContain('policy-manifest');
   });
 
   it('throws for unknown policy', async () => {

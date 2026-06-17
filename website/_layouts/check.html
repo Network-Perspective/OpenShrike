@@ -1,0 +1,60 @@
+---
+layout: default
+---
+{%- assign dmeta = site.data.library.domains[page.domain] -%}
+{%- assign lmeta = site.data.library.languages[page.language] -%}
+{%- assign domain_name = dmeta.name | default: page.domain -%}
+{%- assign lang_name = lmeta.name | default: page.language -%}
+{%- comment -%}
+  The markdown body opens with an H1 ("# id: title"); drop it and use front matter instead.
+  Jekyll's DocumentDrop shadows page.id with the document's URL id, so recover the real
+  check id ("sec-001") from the H1 text ("id: title").
+{%- endcomment -%}
+{%- assign check_id = content | split: '</h1>' | first | split: '>' | last | split: ': ' | first | strip -%}
+{%- assign body = content | split: '</h1>' | last -%}
+
+<article class="doc container">
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <a href="{{ '/library/' | relative_url }}">Library</a>
+    <span aria-hidden="true">/</span>
+    <a href="{{ '/library/checks/' | relative_url }}">Checks</a>
+    <span aria-hidden="true">/</span>
+    <span>{{ check_id }}</span>
+  </nav>
+
+  <header class="doc__header">
+    <div class="doc__badges">
+      {% if dmeta %}<a class="badge badge--domain" href="{{ '/library/checks/' | relative_url }}#domain-{{ page.domain }}">{{ domain_name }}</a>{% endif %}
+      {% if lmeta %}<a class="badge badge--lang" href="{{ '/library/checks/' | relative_url }}#lang-{{ page.language }}">{{ lang_name }}</a>{% endif %}
+      {% if page.status %}<span class="badge badge--status">{{ page.status }}</span>{% endif %}
+      {% for app in page["app-type"] %}<span class="badge badge--app">{{ app }}</span>{% endfor %}
+    </div>
+    <h1 class="doc__title">{{ page.title }}</h1>
+    <code class="doc__id">{{ check_id }}</code>
+  </header>
+
+  <div class="doc__body">
+    {{ body }}
+  </div>
+
+  {% if page.sources and page.sources.size > 0 %}
+  <footer class="doc__sources">
+    <h2 id="sources">Sources</h2>
+    <ul>
+      {% for s in page.sources %}
+      <li>
+        <span class="doc__source-title">{{ s.title }}</span>
+        {% if s.author %}<span class="doc__source-meta">— {{ s.author }}{% if s.year %}, {{ s.year }}{% endif %}</span>
+        {% elsif s.year %}<span class="doc__source-meta">— {{ s.year }}</span>{% endif %}
+        {% if s.type %}<span class="badge badge--source">{{ s.type }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </footer>
+  {% endif %}
+
+  <nav class="doc__footer-nav">
+    <a href="{{ '/library/checks/' | relative_url }}">← All checks</a>
+    <a href="https://github.com/Network-Perspective/OpenShrike" target="_blank" rel="noopener">OpenShrike on GitHub →</a>
+  </nav>
+</article>

@@ -85,8 +85,8 @@ function createProgram(argv: string[]): Command {
     .addOption(new Option('-p, --parallelism <N_OR_AUTO_OR_FULL>', 'Run checks concurrently'))
     .addOption(new Option('-l, --last-scan', 'Load the saved .openshrike/last-scan.json report instead of rescanning'))
     .addOption(new Option('--no-ui', 'Disable the live dashboard'))
-    .addOption(new Option('--check <CHECK_ID>', 'Check identifier, e.g. csharp-rel-001-cancellation-tokens'))
-    .addOption(new Option('--policy <POLICY_ID>', 'Policy identifier, e.g. csharp-baseline'))
+    .addOption(new Option('--check <CHECK_ID>', 'Check identifier, e.g. csharp-rel-001'))
+    .addOption(new Option('--policy <POLICY_ID>', 'Policy identifier, e.g. lang-csharp'))
     .addOption(new Option('--output <FORMAT>', 'Output format: markdown or json'))
     .addOption(new Option('--agent <NAME>', 'Optional OpenCode agent name'))
     .addOption(new Option('--model <MODEL>', 'Optional model name in provider/model form'))
@@ -150,8 +150,8 @@ function createProgram(argv: string[]): Command {
     .addOption(new Option('-p, --parallelism <N_OR_AUTO_OR_FULL>', 'Run checks concurrently'))
     .addOption(new Option('-l, --last-scan', 'Load the saved .openshrike/last-scan.json report instead of rescanning'))
     .addOption(new Option('--no-ui', 'Disable the live dashboard'))
-    .addOption(new Option('--check <CHECK_ID>', 'Check identifier, e.g. csharp-rel-001-cancellation-tokens'))
-    .addOption(new Option('--policy <POLICY_ID>', 'Policy identifier, e.g. csharp-baseline'))
+    .addOption(new Option('--check <CHECK_ID>', 'Check identifier, e.g. csharp-rel-001'))
+    .addOption(new Option('--policy <POLICY_ID>', 'Policy identifier, e.g. lang-csharp'))
     .addOption(new Option('--output <FORMAT>', 'Output format: markdown or json'))
     .addOption(new Option('--agent <NAME>', 'Optional OpenCode fix agent name'))
     .addOption(new Option('--fix-agent <NAME>').hideHelp())
@@ -252,8 +252,8 @@ function buildScanHelpSpec(defaultTarget: string | null): CommandHelpSpec {
         {term: '--no-ui', description: 'Disable the live dashboard.'}
       ],
       [
-        {term: '--check <CHECK_ID>', description: 'Check identifier, e.g. csharp-rel-001-cancellation-tokens.'},
-        {term: '--policy <POLICY_ID>', description: 'Policy identifier, e.g. csharp-baseline.'},
+        {term: '--check <CHECK_ID>', description: 'Check identifier, e.g. csharp-rel-001.'},
+        {term: '--policy <POLICY_ID>', description: 'Policy identifier, e.g. lang-csharp.'},
         {term: '--output <FORMAT>', description: 'Output format: markdown or json (default: markdown).'},
         {term: '--agent <NAME>', description: 'Optional OpenCode agent name.'},
         {term: '--model <MODEL>', description: 'Optional model name in provider/model form.'},
@@ -285,8 +285,8 @@ function buildFixHelpSpec(defaultTarget: string | null): CommandHelpSpec {
         {term: '--no-ui', description: 'Disable the live dashboard.'}
       ],
       [
-        {term: '--check <CHECK_ID>', description: 'Check identifier, e.g. csharp-rel-001-cancellation-tokens.'},
-        {term: '--policy <POLICY_ID>', description: 'Policy identifier, e.g. csharp-baseline.'},
+        {term: '--check <CHECK_ID>', description: 'Check identifier, e.g. csharp-rel-001.'},
+        {term: '--policy <POLICY_ID>', description: 'Policy identifier, e.g. lang-csharp.'},
         {term: '--output <FORMAT>', description: 'Output format: markdown or json (default: markdown).'},
         {term: '--agent <NAME>', description: 'Optional OpenCode fix agent name.'},
         {term: '--model <MODEL>', description: 'Optional fix model name in provider/model form.'},

@@ -1,10 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {CONFIG_DIRECTORY_NAME, PROJECT_CHECKS_DIRECTORY_NAME} from './constants.js';
+import {parseMarkdownFrontmatter, readFrontmatterString} from './frontmatter.js';
 import {resolveFromToolRoot} from './project-root.js';
 
 export interface CheckCatalogEntry {
   id: string;
+  title: string;
   path: string;
   version: string;
   mtimeMs: number;
@@ -15,7 +17,7 @@ export interface ResolveCheckDefinitionOptions {
 }
 
 export function getBundledChecksDirectory(): string {
-  return resolveFromToolRoot('best_practices', 'checks');
+  return resolveFromToolRoot('best_practices');
 }
 
 export function getProjectChecksDirectory(repoRoot: string): string {
@@ -26,17 +28,7 @@ export async function resolveCheckDefinitionPath(
   checkId: string,
   options: ResolveCheckDefinitionOptions = {}
 ): Promise<string> {
-  const checksDirectory = options.checksDirectory ?? getBundledChecksDirectory();
-  const expectedFileName = `${checkId}.md`;
-  const match = await findFileByName(checksDirectory, expectedFileName);
-
-  if (!match) {
-    throw new Error(
-      `Unknown check id '${checkId}'. Expected markdown definition named '${expectedFileName}' in '${checksDirectory}'.`
-    );
-  }
-
-  return match;
+  return (await resolveCheckCatalogEntry(checkId, options)).path;
 }
 
 export async function readCheckDefinition(
@@ -51,12 +43,13 @@ export async function readCheckTitle(
   checkId: string,
   options: ResolveCheckDefinitionOptions = {}
 ): Promise<string> {
-  const definition = await readCheckDefinition(checkId, options);
-  return extractCheckTitleFromDefinition(definition, checkId);
+  return (await resolveCheckCatalogEntry(checkId, options)).title;
 }
 
 export async function listCheckCatalog(checksDirectory: string): Promise<CheckCatalogEntry[]> {
-  const markdownFiles = await listMarkdownFiles(checksDirectory).catch(error => {
+  const markdownFiles = await listMarkdownFiles(checksDirectory, {
+    skipDirectoryNames: resolveBundledPolicyDirectorySkips(checksDirectory)
+  }).catch(error => {
     if (isNotFoundError(error)) {
       return [];
     }
@@ -65,9 +58,12 @@ export async function listCheckCatalog(checksDirectory: string): Promise<CheckCa
   });
   const entries = await Promise.all(
     markdownFiles.map(async checkPath => {
+      const definition = await fs.readFile(checkPath, 'utf8');
+      const {attributes} = parseMarkdownFrontmatter(definition);
       const stats = await fs.stat(checkPath);
       return {
-        id: path.basename(checkPath, '.md'),
+        id: readFrontmatterString(attributes, 'id') ?? path.basename(checkPath, '.md'),
+        title: readFrontmatterString(attributes, 'title') ?? extractCheckTitleFromDefinition(definition, path.basename(checkPath, '.md')),
         path: checkPath,
         version: stats.mtime.toISOString().slice(0, 10),
         mtimeMs: stats.mtimeMs
@@ -109,7 +105,7 @@ export async function resolveProjectCheckSelection(
     const match = catalog.find(entry => entry.id.toLowerCase() === checkId.toLowerCase());
     if (!match) {
       throw new Error(
-        `Unknown check id '${checkId}'. Expected markdown definition named '${checkId}.md' in '${projectChecksDir}'.`
+        `Unknown check id '${checkId}'. Expected a markdown check with that id in '${projectChecksDir}'.`
       );
     }
 
@@ -148,35 +144,40 @@ export function extractCheckTitleFromDefinition(
   return fallbackTitle;
 }
 
-async function findFileByName(directory: string, expectedFileName: string): Promise<string | null> {
-  const entries = await fs.readdir(directory, {withFileTypes: true});
+async function resolveCheckCatalogEntry(
+  checkId: string,
+  options: ResolveCheckDefinitionOptions = {}
+): Promise<CheckCatalogEntry> {
+  const checksDirectory = options.checksDirectory ?? getBundledChecksDirectory();
+  const catalog = await listCheckCatalog(checksDirectory);
+  const match = catalog.find(entry => entry.id.toLowerCase() === checkId.toLowerCase());
 
-  for (const entry of entries) {
-    const fullPath = path.join(directory, entry.name);
-    if (entry.isDirectory()) {
-      const nested = await findFileByName(fullPath, expectedFileName);
-      if (nested) {
-        return nested;
-      }
-      continue;
-    }
-
-    if (entry.isFile() && entry.name.toLowerCase() === expectedFileName.toLowerCase()) {
-      return fullPath;
-    }
+  if (!match) {
+    throw new Error(
+      `Unknown check id '${checkId}'. Expected a markdown check with that id in '${checksDirectory}'.`
+    );
   }
 
-  return null;
+  return match;
 }
 
-async function listMarkdownFiles(directory: string): Promise<string[]> {
+async function listMarkdownFiles(
+  directory: string,
+  options: {
+    skipDirectoryNames?: ReadonlySet<string> | undefined;
+  } = {}
+): Promise<string[]> {
   const entries = await fs.readdir(directory, {withFileTypes: true});
   const files: string[] = [];
 
   for (const entry of entries) {
     const fullPath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      files.push(...await listMarkdownFiles(fullPath));
+      if (options.skipDirectoryNames?.has(entry.name)) {
+        continue;
+      }
+
+      files.push(...await listMarkdownFiles(fullPath, options));
       continue;
     }
 
@@ -190,6 +191,12 @@ async function listMarkdownFiles(directory: string): Promise<string[]> {
 
 function isNotFoundError(error: unknown): boolean {
   return (error as NodeJS.ErrnoException)?.code === 'ENOENT';
+}
+
+function resolveBundledPolicyDirectorySkips(checksDirectory: string): ReadonlySet<string> | undefined {
+  return path.resolve(checksDirectory) === path.resolve(getBundledChecksDirectory())
+    ? new Set(['policies'])
+    : undefined;
 }
 
 function resolveLatestCatalogVersion(catalog: readonly CheckCatalogEntry[]): string {

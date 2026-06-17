@@ -87,11 +87,11 @@ describe('init ui layout', () => {
   });
 
   it('renders checkbox selections for multi-select screens', () => {
-    const spec: InitScreenSpec<'typescript-baseline' | 'python-baseline'> = {
+    const spec: InitScreenSpec<'lang-typescript' | 'lang-python'> = {
       prompt: 'Select default policies',
       options: [
-        {value: 'typescript-baseline', label: 'typescript-baseline'},
-        {value: 'python-baseline', label: 'python-baseline'}
+        {value: 'lang-typescript', label: 'lang-typescript'},
+        {value: 'lang-python', label: 'lang-python'}
       ],
       selectionMode: 'multiple'
     };
@@ -103,15 +103,15 @@ describe('init ui layout', () => {
         query: '',
         showHelp: false,
         filteredOptions: spec.options,
-        selectedValues: ['typescript-baseline'],
+        selectedValues: ['lang-typescript'],
         effectiveIndex: 1,
         visibleStart: 0
       }),
       {columns: 120}
     ));
 
-    expect(output).toContain('[x]  typescript-baseline');
-    expect(output).toContain('› [ ]  python-baseline');
+    expect(output).toContain('[x]  lang-typescript');
+    expect(output).toContain('› [ ]  lang-python');
   });
 
   it('limits the visible option list to 20 rows and shows the current window', () => {
@@ -147,7 +147,7 @@ describe('init ui layout', () => {
   });
 
   it('aligns option details to a shared column', () => {
-    const spec: InitScreenSpec<'shared-foundation' | 'pytorch-baseline'> = {
+    const spec: InitScreenSpec<'shared-foundation' | 'lang-pytorch'> = {
       prompt: 'Select default policies',
       options: [
         {
@@ -156,9 +156,9 @@ describe('init ui layout', () => {
           detail: 'Shared Foundation Policy'
         },
         {
-          value: 'pytorch-baseline',
-          label: 'pytorch-baseline',
-          detail: 'PyTorch Baseline Policy'
+          value: 'lang-pytorch',
+          label: 'lang-pytorch',
+          detail: 'PyTorch Language Policy'
         }
       ],
       selectionMode: 'multiple'
@@ -180,12 +180,12 @@ describe('init ui layout', () => {
 
     const lines = output.split('\n');
     const sharedLine = lines.find(line => line.includes('Shared Foundation Policy'));
-    const pytorchLine = lines.find(line => line.includes('PyTorch Baseline Policy'));
+    const pytorchLine = lines.find(line => line.includes('PyTorch Language Policy'));
 
     expect(sharedLine).toBeDefined();
     expect(pytorchLine).toBeDefined();
     expect(sharedLine!.indexOf('Shared Foundation Policy')).toBe(
-      pytorchLine!.indexOf('PyTorch Baseline Policy')
+      pytorchLine!.indexOf('PyTorch Language Policy')
     );
   });
 

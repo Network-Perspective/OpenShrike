@@ -7,6 +7,8 @@ import {loadProjectConfig, loadProjectConfigForRepo} from '../src/lib/project-co
 import {writeShrikeInitFiles} from '../src/lib/init/write.js';
 
 const tempDirectories: string[] = [];
+const originalTestOpenShrikeKey = process.env.TEST_OPENSHRIKE_KEY;
+const originalTestOpenShrikeResource = process.env.TEST_OPENSHRIKE_RESOURCE;
 
 afterEach(async () => {
   await Promise.all(
@@ -14,6 +16,18 @@ afterEach(async () => {
       fs.rm(directory, {recursive: true, force: true})
     )
   );
+
+  if (originalTestOpenShrikeKey === undefined) {
+    delete process.env.TEST_OPENSHRIKE_KEY;
+  } else {
+    process.env.TEST_OPENSHRIKE_KEY = originalTestOpenShrikeKey;
+  }
+
+  if (originalTestOpenShrikeResource === undefined) {
+    delete process.env.TEST_OPENSHRIKE_RESOURCE;
+  } else {
+    process.env.TEST_OPENSHRIKE_RESOURCE = originalTestOpenShrikeResource;
+  }
 });
 
 describe('runtime config', () => {
@@ -127,7 +141,7 @@ describe('runtime config', () => {
 
     const result = await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyIds: ['typescript-baseline'],
+      policyIds: ['lang-typescript'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -155,8 +169,8 @@ describe('runtime config', () => {
     expect(projectConfig.config.runtime.fixAgent).toBe('shrike-fixer');
     expect(projectConfig.config.runtime.fixModel).toBe('azure/gpt-5.4-mini');
     expect(projectConfig.config.init.detectedFrom).toEqual(['package.json', 'tsconfig.json']);
-    expect(projectConfig.config.init.seedPolicyId).toBe('typescript-baseline');
-    expect(projectConfig.config.init.seedPolicyIds).toEqual(['typescript-baseline']);
+    expect(projectConfig.config.init.seedPolicyId).toBe('lang-typescript');
+    expect(projectConfig.config.init.seedPolicyIds).toEqual(['lang-typescript']);
     expect(result.checksDirectory).toBe(path.join(tempRoot, '.openshrike', 'checks'));
     expect(result.seededCheckPaths.length).toBeGreaterThan(0);
     expect(readme).toContain('`project.json`');
@@ -173,7 +187,7 @@ describe('runtime config', () => {
 
     const result = await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyIds: ['typescript-baseline', 'python-baseline'],
+      policyIds: ['lang-typescript', 'lang-python'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -184,14 +198,14 @@ describe('runtime config', () => {
     const projectConfig = await loadProjectConfig(result.projectConfigPath);
     const seededCheckFiles = await fs.readdir(result.checksDirectory);
 
-    expect(projectConfig.config.init.seedPolicyId).toBe('typescript-baseline');
+    expect(projectConfig.config.init.seedPolicyId).toBe('lang-typescript');
     expect(projectConfig.config.init.seedPolicyIds).toEqual([
-      'typescript-baseline',
-      'python-baseline'
+      'lang-typescript',
+      'lang-python'
     ]);
-    expect(seededCheckFiles).toContain('typescript-api-001-public-boundary-types-avoid-any.md');
+    expect(seededCheckFiles).toContain('typescript-arch-001-external-data-not-cast-directly-into-trusted-types.md');
     expect(seededCheckFiles).toContain('python-rel-001-http-clients-have-timeouts.md');
-    expect(result.seededCheckPaths.filter(filePath => filePath.endsWith('bp-api-001-machine-readable-errors.md'))).toHaveLength(1);
+    expect(result.seededCheckPaths.filter(filePath => filePath.endsWith('bp-api-001-machine-readable-error-contracts.md'))).toHaveLength(1);
   });
 
   it('preserves existing .openshrike/.gitignore entries and adds the artifacts rule', async () => {
@@ -204,7 +218,7 @@ describe('runtime config', () => {
 
     await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyIds: ['typescript-baseline'],
+      policyIds: ['lang-typescript'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -223,7 +237,7 @@ describe('runtime config', () => {
 
     const result = await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyIds: ['typescript-baseline'],
+      policyIds: ['lang-typescript'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -268,7 +282,7 @@ describe('runtime config', () => {
         },
         scan: {
           defaultKind: 'policy',
-          defaultId: 'typescript-baseline',
+          defaultId: 'lang-typescript',
           repo: '.',
           scope: 'uncommitted',
           output: 'markdown',
@@ -286,7 +300,7 @@ describe('runtime config', () => {
 
     await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyIds: ['typescript-baseline'],
+      policyIds: ['lang-typescript'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'docker',
       parallelism: 4,
@@ -314,7 +328,7 @@ describe('runtime config', () => {
 
     const result = await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyIds: ['typescript-baseline'],
+      policyIds: ['lang-typescript'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -357,7 +371,7 @@ describe('runtime config', () => {
 
     await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyIds: ['typescript-baseline'],
+      policyIds: ['lang-typescript'],
       model: 'azure/gpt-5.4',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -388,7 +402,7 @@ describe('runtime config', () => {
 
     await writeShrikeInitFiles({
       repoRoot: tempRoot,
-      policyIds: ['typescript-baseline'],
+      policyIds: ['lang-typescript'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -402,7 +416,7 @@ describe('runtime config', () => {
 
     expect(loaded?.repoRoot).toBe(tempRoot);
     expect(loaded?.config.scan.defaultId).toBe('.openshrike/checks');
-    expect(loaded?.config.init.seedPolicyId).toBe('typescript-baseline');
-    expect(loaded?.config.init.seedPolicyIds).toEqual(['typescript-baseline']);
+    expect(loaded?.config.init.seedPolicyId).toBe('lang-typescript');
+    expect(loaded?.config.init.seedPolicyIds).toEqual(['lang-typescript']);
   });
 });

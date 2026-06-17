@@ -1,0 +1,65 @@
+---
+layout: default
+title: "All Checks — OpenShrike Best-Practice Library"
+permalink: /library/checks/
+---
+{%- assign allchecks = site.checks | concat: site.extended -%}
+{%- assign by_domain = allchecks | group_by: "domain" -%}
+{%- assign by_lang = allchecks | group_by: "language" -%}
+
+<article class="doc container">
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <a href="{{ '/library/' | relative_url }}">Library</a>
+    <span aria-hidden="true">/</span>
+    <span>Checks</span>
+  </nav>
+
+  <header class="doc__header">
+    <h1 class="doc__title">All checks</h1>
+    <p class="doc__lead">{{ allchecks.size }} reviewable best-practice checks. Browse by domain or by language.</p>
+  </header>
+
+  <div class="jump-nav">
+    <span class="jump-nav__label">Domains:</span>
+    {% for g in by_domain %}<a href="#domain-{{ g.name }}">{{ site.data.library.domains[g.name].name | default: g.name }}</a>{% endfor %}
+  </div>
+  <div class="jump-nav">
+    <span class="jump-nav__label">Languages:</span>
+    {% for g in by_lang %}<a href="#lang-{{ g.name }}">{{ site.data.library.languages[g.name].name | default: g.name }}</a>{% endfor %}
+  </div>
+
+  <h2 class="checks-axis">By domain</h2>
+  {% for g in by_domain %}
+  {%- assign meta = site.data.library.domains[g.name] -%}
+  <section class="check-group" id="domain-{{ g.name }}">
+    <h3 class="check-group__title">{{ meta.name | default: g.name }} <span class="card__count">{{ g.items.size }}</span></h3>
+    {% if meta.blurb %}<p class="check-group__blurb">{{ meta.blurb }}</p>{% endif %}
+    <ul class="check-list">
+      {% for c in g.items %}
+      {%- assign cid = c.content | split: '</h1>' | first | split: '>' | last | split: ': ' | first | strip -%}
+      <li class="check-list__item">
+        <a class="check-list__id" href="{{ c.url | relative_url }}">{{ cid }}</a>
+        <span class="check-list__title">— {{ c.title }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endfor %}
+
+  <h2 class="checks-axis">By language</h2>
+  {% for g in by_lang %}
+  {%- assign meta = site.data.library.languages[g.name] -%}
+  <section class="check-group" id="lang-{{ g.name }}">
+    <h3 class="check-group__title">{{ meta.name | default: g.name }} <span class="card__count">{{ g.items.size }}</span></h3>
+    <ul class="check-list">
+      {% for c in g.items %}
+      {%- assign cid = c.content | split: '</h1>' | first | split: '>' | last | split: ': ' | first | strip -%}
+      <li class="check-list__item">
+        <a class="check-list__id" href="{{ c.url | relative_url }}">{{ cid }}</a>
+        <span class="check-list__title">— {{ c.title }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endfor %}
+</article>

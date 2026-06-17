@@ -6,7 +6,44 @@ baseurl: "/OpenShrike"
 markdown: kramdown
 permalink: pretty
 
+plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+# The best-practice library is sourced directly from ../best_practices via the
+# _checks, _extended and _policies symlinks. No content is copied or duplicated.
+collections:
+  checks:
+    output: true
+    permalink: /library/checks/:path/
+  extended:
+    output: true
+    permalink: /library/checks/:path/
+  policies:
+    output: true
+    permalink: /library/policies/:path/
+
+defaults:
+  - scope:
+      path: ""
+      type: checks
+    values:
+      layout: check
+  - scope:
+      path: ""
+      type: extended
+    values:
+      layout: check
+  - scope:
+      path: ""
+      type: policies
+    values:
+      layout: policy
+
 exclude:
   - Gemfile
   - Gemfile.lock
   - README.md
+  # MANIFEST is a policy index for the markdown repo; the site has its own
+  # /library/policies overview, so it is not published as a page.
+  - _policies/MANIFEST.md

@@ -1,59 +1,48 @@
-# CSHARP-OPS-005: Schema migrations are not applied unsafely on normal startup
+---
+id: csharp-ops-005
+title: Schema migrations are not applied unsafely on normal startup
+domain: ops
+language: csharp
+app-type: [any]
+status: active
+sources:
+  - type: check
+    title: Safe startup migrations
+---
+
+# csharp-ops-005: Schema migrations are not applied unsafely on normal startup
 
 ## Intent
 
-Applying migrations automatically on every application startup is risky in
-multi-instance production systems. Schema change should be coordinated and
-observable.
+Applying migrations automatically on every application startup is risky in multi-instance production systems. Schema change should be coordinated and observable.
 
 ## Applicability
 
-Applies when the repository uses EF Core migrations or another migration system
-from application startup code.
-
-Return `unknown` when migration ownership is not visible in scope.
+Applies when the repository uses EF Core migrations or another migration system from application startup code.
 
 ## What to inspect
 
-1. Search for `Database.Migrate()`, migration runners, or startup migration
-   helpers.
-2. Determine whether migration execution happens in the normal service startup
-   path or in a dedicated admin/deployment path.
+`Database.Migrate()`, startup migration helpers, environment guards, and whether migrations run in the normal service startup path.
 
 ## Pass criteria
 
-- Migrations run in a dedicated deployment job, admin command, or guarded
-  bootstrap path.
-- If startup migration exists, it is clearly restricted to safe environments or
-  coordinated single-instance execution.
+Migrations run in a dedicated deployment job, admin command, or clearly guarded safe bootstrap path.
 
 ## Fail criteria
 
-- The normal production startup path applies migrations automatically with no
-  guard or coordination.
-- Multiple instances could race to change schema during rollout.
+The normal production startup path applies migrations automatically with no guard or coordination.
 
 ## Do not flag
 
-- Test fixtures.
-- Local development bootstrap code.
-- Dedicated migration executables or release jobs.
-
-## Evidence to collect
-
-- The startup code invoking migrations.
-- Missing guards or coordination.
+Test fixtures, local development bootstrap code, or dedicated migration executables.
 
 ## Confidence guidance
 
-- `HIGH`: production startup directly calls migrations.
-- `MEDIUM`: migration code exists, but environment guards may live elsewhere.
-- `LOW`: prefer `unknown` if startup topology is unclear.
+`HIGH` when production startup directly calls migrations. `MEDIUM` when guards may exist elsewhere. `LOW` when startup topology is unclear.
 
 ## Remediation
 
-- Move migrations to a deployment job or explicit admin command.
-- Guard any startup migration path to safe environments only.
+Move migrations to a deployment job or explicit admin command, or guard any startup migration path to safe environments only.
 
 ## Pass example
 
@@ -67,7 +56,5 @@ if (app.Environment.IsDevelopment())
 ## Fail example
 
 ```csharp
-await using var scope = app.Services.CreateAsyncScope();
-var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 await db.Database.MigrateAsync();
 ```

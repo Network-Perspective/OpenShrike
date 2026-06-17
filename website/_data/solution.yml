@@ -1,4 +1,4 @@
-headline: "A third option: predictable, automated code review"
+headline: "Predictable, automated code review"
 description: "OpenShrike gives you semi-deterministic checks and an automated code review process. Instead of reviewing everything line by line, it brings your focus to the aspects that actually need human attention."
 points:
   - title: "Requirements as Markdown"

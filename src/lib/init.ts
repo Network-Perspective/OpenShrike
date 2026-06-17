@@ -121,7 +121,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             return buildExitResult(context);
           }
 
-          pushSelectedHistory(history, 'existing-init', prompt, optionsForScreen, selection.value);
+          pushSelectedHistory(history, 'existing-init', prompt, optionsForScreen, selection.value!);
 
           if (selection.value === 'update') {
             resetSelections(context, true);
@@ -213,7 +213,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             break;
           }
 
-          pushSelectedHistory(history, 'opencode-discovery', prompt, optionsForScreen, selection.value);
+          pushSelectedHistory(history, 'opencode-discovery', prompt, optionsForScreen, selection.value!);
 
           if (context.opencode.models.length === 1) {
             context.selections.model = context.opencode.models[0];
@@ -251,7 +251,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             break;
           }
 
-          const selectedInstall = installOptions.find(option => option.id === selection.value);
+          const selectedInstall = installOptions.find(option => option.id === selection.value!);
           if (!selectedInstall?.command || !selectedInstall.args) {
             screen = 'opencode-discovery';
             break;
@@ -272,7 +272,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
               lines: [error instanceof Error ? error.message : String(error)],
               retryScreen: 'opencode-install',
               backScreen: 'opencode-discovery',
-              retryAction: selection.value
+                retryAction: selection.value!
             };
             screen = 'error';
           }
@@ -309,9 +309,9 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
           }
 
           if (selectingFixModel) {
-            context.selections.fixModel = selection.value;
+            context.selections.fixModel = selection.value!;
           } else {
-            context.selections.model = selection.value;
+            context.selections.model = selection.value!;
           }
 
           if (modelSelectionFlow === 'change-scan' || modelSelectionFlow === 'change-fix') {
@@ -324,7 +324,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             selectionFlow = 'initial';
             modelSelectionFlow = 'initial-scan';
           } else {
-            pushSelectedHistory(history, 'model-selection', prompt, modelOptions, selection.value);
+            pushSelectedHistory(history, 'model-selection', prompt, modelOptions, selection.value!);
             screen = selectingFixModel ? 'policy-selection' : 'fix-model-choice';
           }
           break;
@@ -368,14 +368,14 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
 
           if (selection.value === 'same-as-scan') {
             context.selections.fixModel = context.selections.model;
-            pushSelectedHistory(history, 'fix-model-choice', prompt, optionsForScreen, selection.value);
+            pushSelectedHistory(history, 'fix-model-choice', prompt, optionsForScreen, selection.value!);
             screen = 'policy-selection';
             break;
           }
 
           if (selection.value === 'use-suggested') {
             context.selections.fixModel = suggestedFixModel;
-            pushSelectedHistory(history, 'fix-model-choice', prompt, optionsForScreen, selection.value);
+            pushSelectedHistory(history, 'fix-model-choice', prompt, optionsForScreen, selection.value!);
             screen = 'policy-selection';
             break;
           }
@@ -475,7 +475,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
           }
 
           if (selection.value === 'change-defaults') {
-            pushSelectedHistory(history, 'success', prompt, optionsForScreen, selection.value);
+            pushSelectedHistory(history, 'success', prompt, optionsForScreen, selection.value!);
             changeDefaultsOrigin = 'success';
             screen = 'change-defaults';
             break;
@@ -568,7 +568,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             break;
           }
 
-          context.selections.runtimeMode = selection.value;
+          context.selections.runtimeMode = selection.value!;
           await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults', {
             scope: 'project',
             preserveExisting: true,
@@ -596,7 +596,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
             break;
           }
 
-          context.selections.parallelism = parseParallelism(selection.value);
+          context.selections.parallelism = parseParallelism(selection.value!);
           await writeSelectionsOrShowError(context, 'change-defaults', 'change-defaults', {
             scope: 'project',
             preserveExisting: true,
@@ -1151,7 +1151,7 @@ function resolveSubmittedValues<T extends string>(selection: InitScreenResult<T>
     return [];
   }
 
-  return 'values' in selection ? selection.values : [selection.value];
+  return selection.values ?? (selection.value ? [selection.value] : []);
 }
 
 function formatPolicySelection(policyIds: string[]): string {

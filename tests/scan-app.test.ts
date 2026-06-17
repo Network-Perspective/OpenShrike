@@ -154,20 +154,20 @@ describe('toggleBrowserViewMode', () => {
 
 describe('formatCheckIdDisplay', () => {
   it('shortens check ids to the uppercase prefix ending in the numeric code', () => {
-    expect(formatCheckIdDisplay('bp-sec-004-sensitive-data-not-logged')).toBe('BP-SEC-004');
-    expect(formatCheckIdDisplay('csharp-rel-001-cancellation-tokens')).toBe('CSHARP-REL-001');
+    expect(formatCheckIdDisplay('bp-sec-004')).toBe('BP-SEC-004');
+    expect(formatCheckIdDisplay('csharp-rel-001')).toBe('CSHARP-REL-001');
   });
 });
 
 describe('formatCheckListLabel', () => {
   it('renders checks as name followed by the short id in parentheses', () => {
     const check = toDisplayChecks(makeReport([
-      ['bp-sec-004-sensitive-data-not-logged', 'fail']
+      ['bp-sec-004', 'fail']
     ]))[0]!;
 
     expect(formatCheckListLabel(check, {
-      'bp-sec-004-sensitive-data-not-logged': 'Sensitive data is not logged'
-    })).toBe('Sensitive data is not logged (BP-SEC-004)');
+      'bp-sec-004': 'Sensitive data is not emitted to logs or traces'
+    })).toBe('Sensitive data is not emitted to logs or traces (BP-SEC-004)');
   });
 });
 
@@ -184,11 +184,11 @@ describe('formatStatusMarker', () => {
 describe('buildCheckListEntryDisplay', () => {
   it('renders running checks in bright white with the short id after the title', () => {
     const display = buildCheckListEntryDisplay({
-      id: 'bp-sec-004-sensitive-data-not-logged',
+      id: 'bp-sec-004',
       status: 'running',
       result: null
     }, {
-      'bp-sec-004-sensitive-data-not-logged': 'Sensitive data is not logged'
+      'bp-sec-004': 'Sensitive data is not emitted to logs or traces'
     }, {
       runningIndicatorFrame: '⠋'
     });
@@ -196,9 +196,9 @@ describe('buildCheckListEntryDisplay', () => {
     expect(display).toEqual({
       marker: '[⠋]',
       statusColor: 'whiteBright',
-      title: 'Sensitive data is not logged',
+      title: 'Sensitive data is not emitted to logs or traces',
       idLabel: 'BP-SEC-004',
-      label: 'Sensitive data is not logged (BP-SEC-004)'
+      label: 'Sensitive data is not emitted to logs or traces (BP-SEC-004)'
     });
   });
 });

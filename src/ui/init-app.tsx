@@ -48,8 +48,8 @@ export interface InitScreenSpec<T extends string> {
 }
 
 export type InitScreenResult<T extends string> =
-  | {type: 'submit'; value: T}
-  | {type: 'submit'; values: T[]}
+  | {type: 'submit'; value: T; values?: T[] | undefined}
+  | {type: 'submit'; value?: T | undefined; values: T[]}
   | {type: 'back'};
 
 export interface InitHistoryItem {

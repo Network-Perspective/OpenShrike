@@ -47,7 +47,7 @@ describe('validateScanOptions', () => {
   it('validates scan target requirements', () => {
     expect(() =>
       validateScanOptions({
-        checkId: 'csharp-rel-001-cancellation-tokens',
+        checkId: 'csharp-rel-001',
         repoPath: '.',
         outputFormat: 'json',
         scanScope: 'commit',
@@ -61,7 +61,7 @@ describe('validateScanOptions', () => {
 
   it('allows branch scope without an explicit target so runtime scope discovery can apply the default', () => {
     const result = validateScanOptions({
-      checkId: 'csharp-rel-001-cancellation-tokens',
+      checkId: 'csharp-rel-001',
       repoPath: '.',
       outputFormat: 'json',
       scanScope: 'branch',
@@ -77,7 +77,7 @@ describe('validateScanOptions', () => {
 
   it('accepts valid policy input', () => {
     const result = validateScanOptions({
-      policyId: 'csharp-baseline',
+      policyId: 'lang-csharp',
       repoPath: '.',
       outputFormat: 'markdown',
       scanScope: 'full',
@@ -88,7 +88,7 @@ describe('validateScanOptions', () => {
       ui: false
     });
 
-    expect(result.policyId).toBe('csharp-baseline');
+    expect(result.policyId).toBe('lang-csharp');
     expect(result.outputFormat).toBe('markdown');
     expect(result.logPath).toBe('logs/opencode.jsonl');
     expect(result.runtimeMode).toBe('docker');
@@ -97,7 +97,7 @@ describe('validateScanOptions', () => {
 
   it('accepts full parallelism', () => {
     const result = validateScanOptions({
-      policyId: 'csharp-baseline',
+      policyId: 'lang-csharp',
       repoPath: '.',
       outputFormat: 'markdown',
       scanScope: 'full',
@@ -132,7 +132,7 @@ describe('validateScanOptions', () => {
 
     await writeShrikeInitFiles({
       repoRoot,
-      policyIds: ['typescript-baseline'],
+      policyIds: ['lang-typescript'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -163,7 +163,7 @@ describe('validateScanOptions', () => {
 
     await writeShrikeInitFiles({
       repoRoot,
-      policyIds: ['typescript-baseline'],
+      policyIds: ['lang-typescript'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -196,7 +196,7 @@ describe('validateScanOptions', () => {
 
     await writeShrikeInitFiles({
       repoRoot,
-      policyIds: ['typescript-baseline'],
+      policyIds: ['lang-typescript'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',
@@ -206,14 +206,14 @@ describe('validateScanOptions', () => {
 
     const result = await resolveScanOptions({
       repoPath: repoRoot,
-      checkId: 'typescript-api-001-public-boundary-types-avoid-any',
+      checkId: 'typescript-arch-001',
       runtimeMode: 'docker',
       ui: false,
       mockOpencode: true
     });
 
     expect(result.projectChecksDir).toBe(path.join(repoRoot, '.openshrike', 'checks'));
-    expect(result.checkId).toBe('typescript-api-001-public-boundary-types-avoid-any');
+    expect(result.checkId).toBe('typescript-arch-001');
     expect(result.runtimeMode).toBe('docker');
     expect(result.ui).toBe(false);
   });
@@ -224,7 +224,7 @@ describe('validateScanOptions', () => {
 
     await writeShrikeInitFiles({
       repoRoot,
-      policyIds: ['typescript-baseline'],
+      policyIds: ['lang-typescript'],
       model: 'azure/gpt-5.4-mini',
       runtimeMode: 'native',
       projectType: 'typescript',

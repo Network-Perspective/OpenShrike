@@ -1,5 +1,5 @@
 import path from 'node:path';
-import {resolveCheckDefinitionPath, resolveProjectCheckSelection} from './checks.js';
+import {getBundledChecksDirectory, listCheckCatalog, resolveProjectCheckSelection} from './checks.js';
 import {CONFIG_DIRECTORY_NAME} from './constants.js';
 import {resolvePolicyDefinition} from './policies.js';
 import {findToolRoot} from './project-root.js';
@@ -37,6 +37,9 @@ async function assembleBundle(
   } = {}
 ): Promise<string> {
   const toolRoot = findToolRoot();
+  const checksDirectory = options.checksDirectory ?? getBundledChecksDirectory();
+  const catalog = await listCheckCatalog(checksDirectory);
+  const catalogById = new Map(catalog.map(entry => [entry.id.toLowerCase(), entry] as const));
   const relativeBase = options.relativeBase ?? toolRoot;
   const lines = [
     '# OpenShrike Execution Bundle',
@@ -52,10 +55,12 @@ async function assembleBundle(
   ];
 
   for (const checkId of checkIds) {
-    const definitionPath = await resolveCheckDefinitionPath(checkId, {
-      checksDirectory: options.checksDirectory
-    });
-    const relativePath = path.relative(relativeBase, definitionPath).replaceAll(path.sep, '/');
+    const catalogEntry = catalogById.get(checkId.toLowerCase());
+    if (!catalogEntry) {
+      throw new Error(`Unknown check id '${checkId}'. Expected a markdown check with that id in '${checksDirectory}'.`);
+    }
+
+    const relativePath = path.relative(relativeBase, catalogEntry.path).replaceAll(path.sep, '/');
     lines.push(`- id: ${checkId}`);
     lines.push(`  source: ${relativePath}`);
   }

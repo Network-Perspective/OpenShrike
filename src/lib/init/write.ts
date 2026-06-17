@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {Config} from '@opencode-ai/sdk';
-import {resolveCheckDefinitionPath} from '../checks.js';
+import {getBundledChecksDirectory, listCheckCatalog} from '../checks.js';
 import {buildDefaultOpencodeConfig, serializeConfig} from '../config.js';
 import {
   ARTIFACTS_DIRECTORY_NAME,
@@ -227,6 +227,8 @@ async function seedProjectChecksDirectory(options: {
 }): Promise<string[]> {
   const seededPaths: string[] = [];
   const seenCheckIds = new Set<string>();
+  const catalog = await listCheckCatalog(getBundledChecksDirectory());
+  const catalogById = new Map(catalog.map(entry => [entry.id.toLowerCase(), entry] as const));
 
   for (const policyId of normalizePolicyIds(options.policyIds)) {
     const policy = await resolvePolicyDefinition(policyId);
@@ -238,7 +240,12 @@ async function seedProjectChecksDirectory(options: {
       }
       seenCheckIds.add(normalizedCheckId);
 
-      const sourcePath = await resolveCheckDefinitionPath(checkId);
+      const sourceEntry = catalogById.get(normalizedCheckId);
+      if (!sourceEntry) {
+        throw new Error(`Unknown check id '${checkId}'. Expected a markdown check with that id in '${getBundledChecksDirectory()}'.`);
+      }
+
+      const sourcePath = sourceEntry.path;
       const targetPath = path.join(options.checksDirectory, path.basename(sourcePath));
       const targetStats = await fs.stat(targetPath).catch(error => isNotFoundError(error) ? null : Promise.reject(error));
 

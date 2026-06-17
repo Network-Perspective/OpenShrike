@@ -1,0 +1,30 @@
+# Display metadata for the best-practice library browse views.
+# Keys match the `domain:` and `language:` front-matter values in best_practices/.
+
+domains:
+  sec:   { name: "Security",       blurb: "Input validation, authn/z, injection, secrets and safe data handling." }
+  rel:   { name: "Reliability",    blurb: "Timeouts, retries, idempotency, resource lifecycles and graceful failure." }
+  arch:  { name: "Architecture",   blurb: "Boundaries, dependency direction, encapsulation and explicit entrypoints." }
+  api:   { name: "API",            blurb: "Boundary validation, error contracts, compatibility and idempotent mutations." }
+  data:  { name: "Data",           blurb: "Atomic mutations, schema evolution, provenance and validated upstream data." }
+  perf:  { name: "Performance",    blurb: "Hot-path data access, quadratic work, async blocking and latency signals." }
+  ops:   { name: "Operations",     blurb: "Health signals, safe automation, telemetry and production defaults." }
+  test:  { name: "Testing",        blurb: "Deterministic, isolated tests that assert outcomes through supported interfaces." }
+  doc:   { name: "Documentation",  blurb: "Public APIs, behavior changes and release notes stay documented." }
+
+languages:
+  shared:     { name: "Shared (all languages)" }
+  cpp:        { name: "C++" }
+  csharp:     { name: "C#" }
+  go:         { name: "Go" }
+  java:       { name: "Java" }
+  javascript: { name: "JavaScript" }
+  kotlin:     { name: "Kotlin" }
+  php:        { name: "PHP" }
+  python:     { name: "Python" }
+  python-ml:  { name: "Python (ML)" }
+  pytorch:    { name: "PyTorch" }
+  ruby:       { name: "Ruby" }
+  rust:       { name: "Rust" }
+  swift:      { name: "Swift" }
+  typescript: { name: "TypeScript" }

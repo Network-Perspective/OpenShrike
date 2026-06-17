@@ -1,9 +1,9 @@
 import fs from 'node:fs/promises';
 import {fixAndRecheckCheck, recheckSingleCheck, updateReportCheck} from '../lib/fix.js';
 import {
+  getBundledChecksDirectory,
   getProjectChecksDirectory,
-  readCheckTitle,
-  resolveCheckDefinitionPath,
+  listCheckCatalog,
   resolveProjectCheckSelection
 } from '../lib/checks.js';
 import {loadLastScanState, resolveLastScanPaths, saveLastScanState} from '../lib/last-scan.js';
@@ -885,23 +885,22 @@ export class OpenShrikeScanController {
       return;
     }
 
-    const entries = await Promise.all(pendingCheckIds.map(async checkId => {
+    const catalog = await listCheckCatalog(checksDirectory ?? getBundledChecksDirectory());
+    const catalogById = new Map(catalog.map(entry => [entry.id.toLowerCase(), entry] as const));
+    const entries = pendingCheckIds.map(checkId => {
       const metadataKey = this.createMetadataKey(checkId, checksDirectory);
 
-      try {
-        const [title, checkMarkdownPath] = await Promise.all([
-          readCheckTitle(checkId, {checksDirectory}),
-          resolveCheckDefinitionPath(checkId, {checksDirectory})
-        ]);
-        return {
-          metadataKey,
-          title,
-          checkMarkdownPath
-        };
-      } catch {
+      const catalogEntry = catalogById.get(checkId.toLowerCase());
+      if (!catalogEntry) {
         return null;
       }
-    }));
+
+      return {
+        metadataKey,
+        title: catalogEntry.title,
+        checkMarkdownPath: catalogEntry.path
+      };
+    });
 
     let changed = false;
     for (const entry of entries) {

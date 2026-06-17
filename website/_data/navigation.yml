@@ -4,6 +4,8 @@
   anchor: "#solution"
 - title: Features
   anchor: "#features"
+- title: Library
+  url: "/library/"
 - title: VS Code
   anchor: "#vscode"
 - title: Compare

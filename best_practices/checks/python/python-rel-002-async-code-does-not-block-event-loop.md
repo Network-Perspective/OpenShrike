@@ -1,53 +1,51 @@
-# PYTHON-REL-002: Async code does not block the event loop
+---
+id: python-rel-002
+title: Async code does not block the event loop
+domain: rel
+language: python
+app-type: [any]
+status: active
+sources:
+  - type: documentation
+    title: Python asyncio docs, "Developing with asyncio"
+  - type: article
+    title: "asyncio: We Did It Wrong"
+    author: Lynn Root
+    section: "Blocking Calls in Async Code"
+---
+
+# python-rel-002: Async code does not block the event loop
 
 ## Intent
-
-`async def` code should not smuggle synchronous blocking work into the event
-loop. Blocking calls inside async paths create latency spikes and head-of-line
-blocking that are hard to diagnose.
+Keep `async def` paths from smuggling blocking work onto the event-loop thread.
 
 ## Applicability
-
-Applies when the diff changes `asyncio`, FastAPI, Starlette, aiohttp, async
-workers, or other async Python code.
-
-Return `unknown` when the runtime model is not clearly async.
+Applies to asyncio, FastAPI, Starlette, aiohttp, and other async Python code.
 
 ## What to inspect
-
-1. Review async functions and handlers in the diff.
-2. Look for synchronous network clients, blocking sleeps, CPU-heavy loops, or
-   file I/O executed directly inside async paths.
+Async functions, blocking libraries, synchronous sleeps, and offload boundaries.
 
 ## Pass criteria
-
-- Async paths use async-aware clients and waits.
-- Blocking work is moved to worker pools or explicit sync boundaries.
+Async paths use async-aware clients or explicitly move blocking work to a worker thread or executor.
 
 ## Fail criteria
-
-- `time.sleep`, synchronous `requests`, blocking DB calls, or heavy CPU work
-  are introduced directly inside async paths without isolation.
+The diff adds blocking network, disk, subprocess, or sleep calls directly inside `async def` code.
 
 ## Do not flag
-
-- Short in-memory work inside async functions.
-- Explicit `run_in_executor` or worker-pool handoff.
-- Sync frameworks using ordinary functions, not async handlers.
-
-## Evidence to collect
-
-- The async function.
-- The blocking call inside it.
+Tiny in-memory work or explicit `to_thread` or executor handoff.
 
 ## Confidence guidance
-
-- `HIGH`: blocking work in an async function is directly visible.
-- `MEDIUM`: the client or helper is likely blocking, but implementation is
-  partly out of scope.
-- `LOW`: prefer `unknown` if async usage is incidental.
+`HIGH` when the blocking call is directly visible. `MEDIUM` when a helper looks blocking but is out of scope. `LOW` when async ownership is unclear.
 
 ## Remediation
+Use async-aware APIs or move the blocking work behind an explicit sync boundary.
 
-- Use async-aware clients.
-- Move blocking work to explicit worker pools or sync boundaries.
+## Pass example
+```python
+await asyncio.to_thread(Path(path).read_text)
+```
+
+## Fail example
+```python
+time.sleep(1)
+```

@@ -10,7 +10,7 @@
     <ul class="nav__links">
       {% for item in site.data.navigation %}
       <li>
-        <a href="{{ item.anchor | default: item.url }}"
+        <a href="{% if item.anchor %}{{ '/' | relative_url }}{{ item.anchor }}{% elsif item.external %}{{ item.url }}{% else %}{{ item.url | relative_url }}{% endif %}"
            {% if item.external %}target="_blank" rel="noopener"{% endif %}>
           {{ item.title }}
         </a>

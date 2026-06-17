@@ -1,0 +1,25 @@
+{%- assign allchecks = site.checks | concat: site.extended -%}
+{%- assign languages = site.policies | where: "kind", "language" | sort: "title" -%}
+<section class="section section--muted" id="library">
+  <div class="container">
+    <h2 class="section__title">An open best-practice library</h2>
+    <p class="section__lead">
+      OpenShrike is bundled with {{ allchecks.size }} checks bundled into {{ site.policies.size }} language policies
+      that codify best practices for software development. 
+      <br/>
+      It is good to get started, but you can easily tailor it to your own team's needs. 
+      Add or remove checks, or create your own policies, as easily as editing a Markdown file.
+    </p>
+    <div class="card-grid card-grid--3col">
+      {% for p in languages limit:8 %}
+      <a class="card card--link" href="{{ p.url | relative_url }}">
+        <div class="card__title">{{ p.title }}</div>
+        <p class="card__text">{{ p["check-count"] }} checks</p>
+      </a>
+      {% endfor %}
+    </div>
+    <div class="vscode-cta">
+      <a href="{{ '/library/' | relative_url }}" class="btn btn--primary">Explore the library</a>
+    </div>
+  </div>
+</section>

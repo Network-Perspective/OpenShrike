@@ -6,6 +6,7 @@ import type {SavedLastScanState, ScanCommandOptions, ShrikeProjectConfig} from '
 import type {ScanSessionSnapshot} from '../src/lib/scan.js';
 
 const mockCreateNativeScanSession = vi.fn();
+const mockListCheckCatalog = vi.fn();
 const mockResolveScanOptions = vi.fn();
 const mockRunScan = vi.fn();
 const mockLoadLastScanState = vi.fn();
@@ -19,7 +20,9 @@ vi.mock('../src/lib/fix.js', () => ({
 }));
 
 vi.mock('../src/lib/checks.js', () => ({
+  getBundledChecksDirectory: vi.fn(() => '/bundled/checks'),
   getProjectChecksDirectory: vi.fn((repoRoot: string) => path.join(repoRoot, '.openshrike', 'checks')),
+  listCheckCatalog: mockListCheckCatalog,
   readCheckTitle: vi.fn(),
   resolveCheckDefinitionPath: vi.fn(),
   resolveProjectCheckSelection: vi.fn(async (_projectChecksDir: string, checkId?: string) => ({
@@ -56,6 +59,7 @@ const tempDirectories: string[] = [];
 
 beforeEach(() => {
   mockCreateNativeScanSession.mockReset();
+  mockListCheckCatalog.mockReset();
   mockResolveScanOptions.mockReset();
   mockRunScan.mockReset();
   mockLoadLastScanState.mockReset();
@@ -65,6 +69,15 @@ beforeEach(() => {
     markdownPath: '.openshrike/last-scan.md'
   });
   mockSaveLastScanState.mockResolvedValue([]);
+  mockListCheckCatalog.mockResolvedValue([
+    {
+      id: 'check-a',
+      title: 'Check A',
+      path: '/bundled/check-a.md',
+      version: '1',
+      mtimeMs: 1
+    }
+  ]);
 });
 
 afterEach(async () => {

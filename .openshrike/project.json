@@ -9,9 +9,10 @@
       "src/**/*.ts"
     ],
     "opencodeSetup": "existing-config",
-    "seedPolicyId": "javascript-baseline",
+    "seedPolicyId": "lang-typescript",
     "seedPolicyIds": [
-      "javascript-baseline"
+      "lang-typescript",
+      "shared-foundation"
     ]
   },
   "runtime": {
@@ -21,9 +22,7 @@
     "fixAgent": "shrike-fixer",
     "fixModel": "azure/gpt-5.4",
     "mode": "native",
-    "parallelism": "full",
-    "agent": "shrike-checker",
-    "model": "azure/gpt-5.4-mini"
+    "parallelism": "full"
   },
   "scan": {
     "defaultKind": "project-checks",

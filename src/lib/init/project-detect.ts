@@ -56,14 +56,14 @@ const PROJECT_LABELS: Record<ProjectType, string> = {
 };
 
 const DEFAULT_POLICIES: Record<ProjectType, string> = {
-  typescript: 'typescript-baseline',
-  javascript: 'javascript-baseline',
-  python: 'python-baseline',
-  'python-ml': 'python-ml-baseline',
-  pytorch: 'pytorch-baseline',
-  csharp: 'csharp-baseline',
-  go: 'go-baseline',
-  java: 'java-baseline',
+  typescript: 'lang-typescript',
+  javascript: 'lang-javascript',
+  python: 'lang-python',
+  'python-ml': 'lang-python-ml',
+  pytorch: 'lang-pytorch',
+  csharp: 'lang-csharp',
+  go: 'lang-go',
+  java: 'lang-java',
   shared: 'shared-foundation'
 };
 
@@ -361,15 +361,15 @@ function unique(values: string[]): string[] {
 function getAdjacentPolicies(projectType: ProjectType): string[] {
   switch (projectType) {
     case 'typescript':
-      return ['javascript-baseline'];
+      return ['lang-javascript'];
     case 'javascript':
-      return ['typescript-baseline'];
+      return ['lang-typescript'];
     case 'python':
-      return ['python-ml-baseline', 'pytorch-baseline'];
+      return ['lang-python-ml', 'lang-pytorch'];
     case 'python-ml':
-      return ['python-baseline', 'pytorch-baseline'];
+      return ['lang-python', 'lang-pytorch'];
     case 'pytorch':
-      return ['python-baseline', 'python-ml-baseline'];
+      return ['lang-python', 'lang-python-ml'];
     default:
       return [];
   }

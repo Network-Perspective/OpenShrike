@@ -1,0 +1,77 @@
+---
+layout: default
+title: "Best-Practice Library — OpenShrike"
+permalink: /library/
+---
+{%- assign allchecks = site.checks | concat: site.extended -%}
+{%- assign foundation = site.policies | where: "kind", "foundation" -%}
+{%- assign languages = site.policies | where: "kind", "language" | sort: "title" -%}
+{%- assign by_domain = allchecks | group_by: "domain" -%}
+{%- assign by_lang = allchecks | group_by: "language" -%}
+
+<section class="hero hero--library">
+  <div class="container">
+    <h1 class="hero__title">Best-Practice Library</h1>
+    <p class="hero__subtitle">
+      {{ allchecks.size }} reviewable checks across {{ by_lang.size }} languages, bundled into
+      {{ site.policies.size }} ready-to-run policies. 
+    </p>
+    <div class="hero__actions">
+      <a href="#policies" class="btn btn--primary">Browse policies</a>
+      <a href="{{ '/library/checks/' | relative_url }}" class="btn btn--outline">All checks</a>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="policies">
+  <div class="container">
+    <h2 class="section__title">Policies</h2>
+    <p class="section__lead">
+      A policy is a curated bundle of checks. Enable one per substantial language in your repo;
+      every language policy already inlines the shared foundation.
+    </p>
+    <div class="card-grid card-grid--3col">
+      {% for p in foundation %}
+      <a class="card card--highlighted card--link" href="{{ p.url | relative_url }}">
+        <div class="card__title">{{ p.title }}</div>
+        <p class="card__text">Cross-language baseline · {{ p["check-count"] }} checks</p>
+      </a>
+      {% endfor %}
+      {% for p in languages %}
+      <a class="card card--link" href="{{ p.url | relative_url }}">
+        <div class="card__title">{{ p.title }}</div>
+        <p class="card__text">{{ p["check-count"] }} checks · includes shared foundation</p>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="section section--muted" id="domains">
+  <div class="container">
+    <h2 class="section__title">Browse by domain</h2>
+    <div class="card-grid card-grid--3col">
+      {% for g in by_domain %}
+      {%- assign meta = site.data.library.domains[g.name] -%}
+      <a class="card card--link" href="{{ '/library/checks/' | relative_url }}#domain-{{ g.name }}">
+        <div class="card__title">{{ meta.name | default: g.name }} <span class="card__count">{{ g.items.size }}</span></div>
+        <p class="card__text">{{ meta.blurb }}</p>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="section" id="languages">
+  <div class="container">
+    <h2 class="section__title">Browse by language</h2>
+    <div class="tag-list">
+      {% for g in by_lang %}
+      {%- assign meta = site.data.library.languages[g.name] -%}
+      <a class="tag" href="{{ '/library/checks/' | relative_url }}#lang-{{ g.name }}">
+        {{ meta.name | default: g.name }} <span class="tag__count">{{ g.items.size }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
