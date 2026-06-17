@@ -21,8 +21,8 @@
     "scanModel": "azure/gpt-5.4-mini",
     "fixAgent": "shrike-fixer",
     "fixModel": "azure/gpt-5.4",
-    "mode": "native",
-    "parallelism": "full"
+    "mode": "docker",
+    "parallelism": 10
   },
   "scan": {
     "defaultKind": "project-checks",

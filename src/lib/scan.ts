@@ -1591,13 +1591,10 @@ async function computeDockerRuntimeContextHash(toolRoot: string): Promise<string
   const includedPaths = [
     'docker/openshrike-runtime.Dockerfile',
     'package.json',
-    'package-lock.json',
-    'tsconfig.json',
-    'tsup.cli.config.ts',
-    'vitest.config.ts',
-    'src',
-    'best_practices',
-    'docs'
+    'docker/openshrike-runtime.package-lock.json',
+    'dist/cli.js',
+    'prompts',
+    'best_practices'
   ];
 
   for (const relativePath of includedPaths) {

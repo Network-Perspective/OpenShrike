@@ -291,6 +291,16 @@ export function renderSummaryHtml(viewModel: ScanViewModel): string {
             color: var(--text-strong);
           }
 
+          .setup-status {
+            color: var(--text-strong);
+          }
+
+          .setup-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+          }
+
           .setup-action {
             display: inline-flex;
             align-items: center;
@@ -302,11 +312,19 @@ export function renderSummaryHtml(viewModel: ScanViewModel): string {
             background: var(--vscode-button-background);
             color: var(--vscode-button-foreground);
             text-decoration: none;
+            border: 1px solid transparent;
             font-weight: 600;
           }
 
           .setup-action:hover {
             background: var(--vscode-button-hoverBackground);
+          }
+
+          .setup-action.is-disabled {
+            background: var(--surface-3);
+            color: var(--text-muted);
+            border-color: var(--action-border);
+            pointer-events: none;
           }
         </style>
       </head>
@@ -421,19 +439,61 @@ function renderScanSummary(
 
 function renderInitializationPrompt(viewModel: ScanViewModel): string {
   const hasWorkspace = viewModel.workspaceName !== 'No Workspace Open';
-  const action = hasWorkspace
-    ? `<a class="setup-action" href="${createCommandUri('openshrike.runInitInTerminal', [viewModel.workspacePath])}">Run shrike init</a>`
-    : '';
-  const copy = hasWorkspace
-    ? 'The current repository is not initialized for OpenShrike. Start <code>shrike init</code> in the integrated terminal, complete the setup flow, then return here and run a scan.'
-    : 'Open a workspace folder before initializing OpenShrike.';
+  if (!hasWorkspace) {
+    return `
+      <section class="setup-card">
+        <div class="setup-title">Repository initialization required</div>
+        <div class="setup-copy">Open a workspace folder before initializing OpenShrike.</div>
+      </section>
+    `;
+  }
+
+  const copy = buildInitializationCopy(viewModel);
+  const statusLine = viewModel.initEnvironment.message;
+  const actions = renderInitializationActions(viewModel);
 
   return `
     <section class="setup-card">
       <div class="setup-title">Repository initialization required</div>
       <div class="setup-copy">${copy}</div>
-      ${action}
+      <div class="setup-status">${escapeHtml(statusLine)}</div>
+      ${actions}
     </section>
+  `;
+}
+
+function buildInitializationCopy(viewModel: ScanViewModel): string {
+  switch (viewModel.initEnvironment.statusKind) {
+    case 'checking':
+      return 'OpenShrike is checking whether Node.js 22+ is available on the current workspace host before enabling the bundled init wizard.';
+    case 'ready':
+      return 'OpenShrike will run the bundled <code>shrike init</code> wizard in the integrated terminal on the current workspace host. Complete that setup flow, then return here and run a scan.';
+    case 'missing':
+    case 'unsupported':
+      return 'OpenShrike needs Node.js 22+ on the current workspace host before it can run the bundled <code>shrike init</code> wizard.';
+    case 'error':
+      return 'OpenShrike needs Node.js 22+ on the current workspace host before it can run the bundled <code>shrike init</code> wizard. If installing Node.js does not help, verify <code>node --version</code> in a terminal on the workspace host.';
+  }
+}
+
+function renderInitializationActions(viewModel: ScanViewModel): string {
+  if (viewModel.canRunBundledInit) {
+    return `
+      <div class="setup-actions">
+        <a class="setup-action" href="${createCommandUri('openshrike.runInitInTerminal', [viewModel.workspacePath])}">Run shrike init</a>
+      </div>
+    `;
+  }
+
+  if (!viewModel.showInstallNodeAction) {
+    return '';
+  }
+
+  return `
+    <div class="setup-actions">
+      <a class="setup-action" href="${createCommandUri('openshrike.openNodeInstallPage')}">Install Node.js</a>
+      <span class="setup-action is-disabled" aria-disabled="true">Run shrike init</span>
+    </div>
   `;
 }
 

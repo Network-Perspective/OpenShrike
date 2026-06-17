@@ -1,4 +1,5 @@
 import {formatCheckIdDisplay} from '../lib/check-display.js';
+import {type InitEnvironmentState} from './init-environment-state.js';
 import {
   formatConfidence,
   getStatusLabel,
@@ -62,6 +63,9 @@ export interface ScanViewModel {
   canCancel: boolean;
   hasFindings: boolean;
   isInitialized: boolean;
+  initEnvironment: InitEnvironmentState;
+  canRunBundledInit: boolean;
+  showInstallNodeAction: boolean;
 }
 
 export function buildScanViewModel(input: {
@@ -70,6 +74,7 @@ export function buildScanViewModel(input: {
   sortMode: FindingSortMode;
 }): ScanViewModel {
   const {state, selectedFindingId, sortMode} = input;
+  const hasWorkspace = state.workspaceName !== 'No Workspace Open';
   const sortedFindings = sortFindings(state.findings, sortMode);
   const items = buildFindingItems(sortedFindings, selectedFindingId);
   const selectedFinding = state.findings.find(finding => finding.id === selectedFindingId) ?? null;
@@ -120,7 +125,10 @@ export function buildScanViewModel(input: {
     warnings: [...state.warnings],
     canCancel: state.canCancel,
     hasFindings: state.findings.length > 0,
-    isInitialized: state.isInitialized
+    isInitialized: state.isInitialized,
+    initEnvironment: state.initEnvironment,
+    canRunBundledInit: hasWorkspace && !state.isInitialized && state.initEnvironment.statusKind === 'ready',
+    showInstallNodeAction: hasWorkspace && !state.isInitialized && ['missing', 'unsupported', 'error'].includes(state.initEnvironment.statusKind)
   };
 }
 
@@ -149,10 +157,7 @@ function buildStatusBarText(state: ScanState): string {
 
 function buildStatusBarTooltip(state: ScanState): string {
   if (!state.isInitialized) {
-    return [
-      'Repository not initialized for OpenShrike.',
-      'Run `shrike init` in the integrated terminal, then return here and run a scan.'
-    ].join('\n');
+    return buildUninitializedStatusBarTooltip(state.initEnvironment);
   }
 
   const statusBarTooltipLines = [
@@ -180,6 +185,40 @@ function buildStatusBarTooltip(state: ScanState): string {
   }
 
   return statusBarTooltipLines.join('\n');
+}
+
+function buildUninitializedStatusBarTooltip(initEnvironment: InitEnvironmentState): string {
+  switch (initEnvironment.statusKind) {
+    case 'checking':
+      return [
+        'Repository not initialized for OpenShrike.',
+        'Checking Node.js on the workspace host before enabling the bundled init wizard.'
+      ].join('\n');
+    case 'ready':
+      return [
+        'Repository not initialized for OpenShrike.',
+        `Node.js ${initEnvironment.detectedVersion ?? ''} is available on the workspace host.`,
+        'Run the bundled `shrike init` wizard in the integrated terminal, then return here and run a scan.'
+      ].join('\n');
+    case 'missing':
+      return [
+        'Repository not initialized for OpenShrike.',
+        'Node.js 22+ was not found on the workspace host.',
+        'Install Node.js, then return here and run the bundled `shrike init` wizard.'
+      ].join('\n');
+    case 'unsupported':
+      return [
+        'Repository not initialized for OpenShrike.',
+        `${initEnvironment.detectedVersion ?? 'The detected Node.js version'} does not satisfy Node.js 22+.`,
+        'Install a newer Node.js version on the workspace host, then run the bundled `shrike init` wizard.'
+      ].join('\n');
+    case 'error':
+      return [
+        'Repository not initialized for OpenShrike.',
+        'OpenShrike could not verify Node.js on the workspace host.',
+        'Verify `node --version` in a terminal, or install Node.js 22+, then run the bundled `shrike init` wizard.'
+      ].join('\n');
+  }
 }
 
 function buildFindingItems(

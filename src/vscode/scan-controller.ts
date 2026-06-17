@@ -7,6 +7,7 @@ import {
   resolveProjectCheckSelection
 } from '../lib/checks.js';
 import {loadLastScanState, resolveLastScanPaths, saveLastScanState} from '../lib/last-scan.js';
+import {CliError} from '../lib/cli-error.js';
 import {loadProjectConfigForRepo, resolveProjectConfigRelativePath, writeProjectConfig} from '../lib/project-config.js';
 import {resolvePolicyDefinition} from '../lib/policies.js';
 import {createRuntimeStreamState, reduceRuntimeEvent, type RuntimeStreamState} from '../lib/runtime-events.js';
@@ -1110,6 +1111,9 @@ export class OpenShrikeScanController {
       this.scopeLabel = input.scope.label;
     }
     this.appendOutputLine(`Scan failed: ${message}`);
+    for (const detailLine of getCliErrorOutputLines(input.error)) {
+      this.appendOutputLine(detailLine);
+    }
     this.clearTransientCheckStates();
 
     if (input.report) {
@@ -1271,4 +1275,46 @@ function getErrorMessage(error: unknown): string {
   }
 
   return 'Scan failed.';
+}
+
+function getCliErrorOutputLines(error: unknown): string[] {
+  if (!(error instanceof CliError) || !error.details || typeof error.details !== 'object' || Array.isArray(error.details)) {
+    return [];
+  }
+
+  const details = error.details as {
+    cause?: unknown;
+    configPath?: unknown;
+    missingEnvVars?: unknown;
+    actions?: unknown;
+  };
+  const lines: string[] = [];
+
+  if (typeof details.cause === 'string' && details.cause.trim()) {
+    lines.push(`Cause: ${details.cause.trim()}`);
+  }
+
+  if (typeof details.configPath === 'string' && details.configPath.trim()) {
+    lines.push(`Config: ${details.configPath.trim()}`);
+  }
+
+  if (Array.isArray(details.missingEnvVars) && details.missingEnvVars.length > 0) {
+    const envVars = details.missingEnvVars
+      .map(value => String(value).trim())
+      .filter(Boolean);
+    if (envVars.length > 0) {
+      lines.push(`Missing env: ${envVars.join(', ')}`);
+    }
+  }
+
+  if (Array.isArray(details.actions)) {
+    for (const action of details.actions) {
+      const message = String(action).trim();
+      if (message) {
+        lines.push(`Next step: ${message}`);
+      }
+    }
+  }
+
+  return lines;
 }

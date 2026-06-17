@@ -54,6 +54,7 @@ vi.mock('../src/lib/scan.js', () => ({
 const {createEmptyScanState} = await import('../src/vscode/scan-data.js');
 const {OpenShrikeExtensionModel} = await import('../src/vscode/extension-model.js');
 const {OpenShrikeScanController} = await import('../src/vscode/scan-controller.js');
+const {CliError} = await import('../src/lib/cli-error.js');
 
 const tempDirectories: string[] = [];
 
@@ -277,6 +278,56 @@ describe('OpenShrike scan controller', () => {
     expect(state.outputLines.at(-1)).toContain('Scan failed: Docker image build failed.');
   });
 
+  it('prints structured scan error details into the output log', async () => {
+    const workspacePath = await createWorkspace();
+    const workspace = {
+      name: 'Workspace',
+      path: workspacePath
+    };
+    const model = new OpenShrikeExtensionModel(createEmptyScanState({
+      workspaceName: workspace.name,
+      workspacePath
+    }), null);
+    const controller = new OpenShrikeScanController(model);
+
+    await controller.initialize(workspace);
+    mockResolveScanOptions.mockResolvedValue(makeOptions(workspacePath, {
+      runtimeMode: 'native',
+      scanScope: 'full'
+    }));
+    mockCreateNativeScanSession.mockImplementation(() => ({
+      start: async () => {
+        throw new CliError(
+          'MISSING_ENVIRONMENT',
+          'OpenCode provider setup is incomplete, so checks could not start.',
+          {
+            configPath: path.join(workspacePath, '.openshrike', 'opencode.json'),
+            missingEnvVars: ['AZURE_RESOURCE_PREFIX'],
+            actions: [
+              'Set AZURE_RESOURCE_PREFIX and rerun the scan.'
+            ]
+          }
+        );
+      },
+      getScope: () => null,
+      getReport: () => null,
+      getPersistableReport: () => null,
+      close: vi.fn().mockResolvedValue(undefined)
+    }));
+
+    await expect(controller.runScan(workspace)).rejects.toThrow(
+      'OpenCode provider setup is incomplete, so checks could not start.'
+    );
+
+    const state = model.getState();
+    expect(state.outputLines).toEqual(expect.arrayContaining([
+      expect.stringContaining('Scan failed: OpenCode provider setup is incomplete, so checks could not start.'),
+      expect.stringContaining(`Config: ${path.join(workspacePath, '.openshrike', 'opencode.json')}`),
+      expect.stringContaining('Missing env: AZURE_RESOURCE_PREFIX'),
+      expect.stringContaining('Next step: Set AZURE_RESOURCE_PREFIX and rerun the scan.')
+    ]));
+  });
+
   it('tracks assistant token usage for native scans', async () => {
     const workspacePath = await createWorkspace();
     const workspace = {
@@ -397,6 +448,9 @@ describe('OpenShrike scan controller', () => {
     });
     const runPromise = controller.runScan(workspace);
     await waitForState(model, state => state.tokensLabel === '1.2K / 56');
+    await vi.waitFor(() => {
+      expect(typeof resolveLoad).toBe('function');
+    });
 
     resolveLoad({
       state: {

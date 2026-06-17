@@ -83,8 +83,14 @@
       {
         "command": "openshrike.runInitInTerminal",
         "category": "OpenShrike",
-        "title": "Run Init In Terminal",
+        "title": "Run shrike init",
         "icon": "$(terminal)"
+      },
+      {
+        "command": "openshrike.openNodeInstallPage",
+        "category": "OpenShrike",
+        "title": "Install Node.js",
+        "icon": "$(link-external)"
       },
       {
         "command": "openshrike.runScan",
@@ -245,13 +251,14 @@
     "pack:npm": "npm run build:cli && npm run prepare:npm-package && npm pack .artifacts/npm/package --pack-destination .artifacts/npm",
     "publish:npm": "scripts/publish-npm.sh",
     "publish:vscode": "scripts/publish-vscode.sh",
+    "prepare:vscode-runtime": "node scripts/prepare-vscode-runtime-assets.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:extension-host": "node tests/extension-host/run.mjs",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:e2e:watch": "vitest --config vitest.e2e.config.ts",
     "test:watch": "vitest",
-    "vscode:prepublish": "npm run build",
+    "vscode:prepublish": "npm run build && npm run prepare:vscode-runtime",
     "release:prepare": "scripts/create-release.sh"
   },
   "dependencies": {

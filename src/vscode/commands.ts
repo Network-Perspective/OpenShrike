@@ -1,9 +1,15 @@
 import * as vscode from 'vscode';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import {loadProjectConfigForRepo} from '../lib/project-config.js';
 import {parseEvidenceLocation} from '../lib/evidence.js';
 import type {RuntimeMode, ScanCommandOptions} from '../lib/types.js';
 import type {OpenShrikeExtensionModel} from './extension-model.js';
+import {
+  isInitEnvironmentReady,
+  type InitEnvironmentState
+} from './init-environment-state.js';
+import type {OpenShrikeInitEnvironmentMonitor} from './init-environment.js';
 import type {OpenShrikeOutputChannel} from './output-channel.js';
 import type {OpenShrikeScanController} from './scan-controller.js';
 import {
@@ -21,6 +27,8 @@ export function registerExtensionCommands(
     output: OpenShrikeOutputChannel;
     detailPanel: OpenShrikeDetailPanel;
     controller: OpenShrikeScanController;
+    initEnvironmentMonitor: OpenShrikeInitEnvironmentMonitor;
+    extensionRoot: string;
   }
 ): void {
   const register = (command: string, callback: () => unknown | Thenable<unknown>) => {
@@ -33,7 +41,7 @@ export function registerExtensionCommands(
       return vscode.window.showWarningMessage('Open a workspace folder before running OpenShrike scans.');
     }
 
-    if (!await ensureWorkspaceInitialized(workspace.path)) {
+    if (!await ensureWorkspaceInitialized(workspace.path, dependencies.initEnvironmentMonitor)) {
       return undefined;
     }
 
@@ -50,7 +58,7 @@ export function registerExtensionCommands(
       return vscode.window.showWarningMessage('Open a workspace folder before running OpenShrike scans.');
     }
 
-    if (!await ensureWorkspaceInitialized(workspace.path)) {
+    if (!await ensureWorkspaceInitialized(workspace.path, dependencies.initEnvironmentMonitor)) {
       return undefined;
     }
 
@@ -74,7 +82,7 @@ export function registerExtensionCommands(
       return vscode.window.showWarningMessage('Open a workspace folder before running OpenShrike scans.');
     }
 
-    if (!await ensureWorkspaceInitialized(workspace.path)) {
+    if (!await ensureWorkspaceInitialized(workspace.path, dependencies.initEnvironmentMonitor)) {
       return undefined;
     }
 
@@ -96,7 +104,7 @@ export function registerExtensionCommands(
       return vscode.window.showWarningMessage('Open a workspace folder before running OpenShrike scans.');
     }
 
-    if (!await ensureWorkspaceInitialized(workspace.path)) {
+    if (!await ensureWorkspaceInitialized(workspace.path, dependencies.initEnvironmentMonitor)) {
       return undefined;
     }
 
@@ -123,7 +131,7 @@ export function registerExtensionCommands(
       return vscode.window.showWarningMessage('Open a workspace folder before loading OpenShrike scan results.');
     }
 
-    if (!await ensureWorkspaceInitialized(workspace.path)) {
+    if (!await ensureWorkspaceInitialized(workspace.path, dependencies.initEnvironmentMonitor)) {
       return undefined;
     }
 
@@ -161,7 +169,17 @@ export function registerExtensionCommands(
   register('openshrike.openCheckMarkdown', () => openSelectedCheckMarkdown(dependencies.model));
 
   context.subscriptions.push(vscode.commands.registerCommand('openshrike.runInitInTerminal', (workspacePath?: unknown) => {
-    return runInitInTerminal(typeof workspacePath === 'string' ? workspacePath : undefined);
+    return runInitInTerminal({
+      initEnvironmentMonitor: dependencies.initEnvironmentMonitor,
+      extensionRoot: dependencies.extensionRoot,
+      ...(typeof workspacePath === 'string' ? {workspacePath} : {})
+    });
+  }));
+
+  context.subscriptions.push(vscode.commands.registerCommand('openshrike.openNodeInstallPage', async () => {
+    await vscode.env.openExternal(vscode.Uri.parse('https://nodejs.org/en/download'));
+    dependencies.initEnvironmentMonitor.scheduleRefresh(dependencies.model.getState().workspacePath);
+    return undefined;
   }));
 
   context.subscriptions.push(vscode.commands.registerCommand('openshrike.selectFinding', (findingId?: unknown) => {
@@ -183,21 +201,43 @@ export function registerExtensionCommands(
   }));
 }
 
-function runInitInTerminal(workspacePath?: string): Thenable<unknown> | undefined {
-  const workspaceRoot = workspacePath ?? resolveWorkspaceRootPath();
+async function runInitInTerminal(input: {
+  workspacePath?: string;
+  initEnvironmentMonitor: OpenShrikeInitEnvironmentMonitor;
+  extensionRoot: string;
+}): Promise<unknown> {
+  const workspaceRoot = input.workspacePath ?? resolveWorkspaceRootPath();
   if (!workspaceRoot) {
     return vscode.window.showWarningMessage('Open a workspace folder before running OpenShrike init.');
   }
 
+  const initEnvironment = await input.initEnvironmentMonitor.refresh(workspaceRoot);
+  if (!isInitEnvironmentReady(initEnvironment)) {
+    return await promptToInstallNode(initEnvironment);
+  }
+
+  const bundledCliPath = path.join(input.extensionRoot, 'dist', 'cli.js');
+  try {
+    await fs.access(bundledCliPath);
+  } catch {
+    return vscode.window.showErrorMessage(
+      'OpenShrike could not find its bundled CLI. Reinstall the extension and try again.'
+    );
+  }
+
   const terminal = vscode.window.createTerminal({
     name: 'OpenShrike Init',
-    cwd: workspaceRoot
+    cwd: workspaceRoot,
+    shellPath: initEnvironment.detectedPath,
+    shellArgs: [bundledCliPath, 'init'],
+    env: {
+      OPENSHRIKE_TOOL_ROOT: input.extensionRoot
+    }
   });
   terminal.show();
-  terminal.sendText('shrike init', true);
 
   return vscode.window.showInformationMessage(
-    'Started `shrike init` in the integrated terminal. Return to OpenShrike and run a scan when initialization completes.'
+    'Started the bundled `shrike init` wizard in the integrated terminal. Return to OpenShrike and run a scan when initialization completes.'
   );
 }
 
@@ -297,14 +337,22 @@ function clampLineNumber(lineNumber: number, lineCount: number): number {
   return Math.max(0, Math.min(lineCount - 1, lineNumber - 1));
 }
 
-async function ensureWorkspaceInitialized(workspacePath: string): Promise<boolean> {
+async function ensureWorkspaceInitialized(
+  workspacePath: string,
+  initEnvironmentMonitor: OpenShrikeInitEnvironmentMonitor
+): Promise<boolean> {
   const projectConfig = await loadProjectConfigForRepo(workspacePath).catch(() => null);
   if (projectConfig) {
     return true;
   }
 
+  const initEnvironment = await initEnvironmentMonitor.refresh(workspacePath);
+  if (!isInitEnvironmentReady(initEnvironment)) {
+    return await promptToInstallNode(initEnvironment).then(() => false);
+  }
+
   const selection = await vscode.window.showWarningMessage(
-    'The current repository is not initialized for OpenShrike. Run `shrike init` in the integrated terminal first.',
+    'The current repository is not initialized for OpenShrike. Run the bundled `shrike init` wizard in the integrated terminal first.',
     'Run shrike init'
   );
   if (selection === 'Run shrike init') {
@@ -430,4 +478,31 @@ function coerceRuntimeModeInput(value: unknown): RuntimeMode | null {
 function getSelectedFindingLabel(model: OpenShrikeExtensionModel): string {
   const selectedFinding = model.getSelectedFinding();
   return selectedFinding ? `"${selectedFinding.title}"` : 'The selected finding';
+}
+
+async function promptToInstallNode(initEnvironment: InitEnvironmentState): Promise<unknown> {
+  const selection = await vscode.window.showWarningMessage(
+    buildBlockedInitMessage(initEnvironment),
+    'Install Node.js'
+  );
+  if (selection === 'Install Node.js') {
+    await vscode.commands.executeCommand('openshrike.openNodeInstallPage');
+  }
+
+  return undefined;
+}
+
+function buildBlockedInitMessage(initEnvironment: InitEnvironmentState): string {
+  switch (initEnvironment.statusKind) {
+    case 'missing':
+      return 'OpenShrike cannot run the bundled init wizard because Node.js 22+ was not found on the current workspace host.';
+    case 'unsupported':
+      return `OpenShrike detected ${initEnvironment.detectedVersion ?? 'an unsupported Node.js version'} on the current workspace host, but the bundled init wizard requires Node.js 22+.`;
+    case 'error':
+      return 'OpenShrike could not verify Node.js on the current workspace host. Verify `node --version` in a terminal, or install Node.js 22+, and then try again.';
+    case 'checking':
+      return 'OpenShrike is still checking whether Node.js 22+ is available on the current workspace host.';
+    case 'ready':
+      return 'OpenShrike is ready to run the bundled init wizard.';
+  }
 }

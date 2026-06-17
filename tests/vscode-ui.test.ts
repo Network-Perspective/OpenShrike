@@ -4,12 +4,20 @@ import path from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
 import {createEmptyScanState, createSampleScanState, getDefaultSelectedFindingId, sortFindings} from '../src/vscode/scan-data.js';
 import {OpenShrikeExtensionModel} from '../src/vscode/extension-model.js';
+import {
+  createCheckingInitEnvironmentState,
+  createErrorInitEnvironmentState,
+  createMissingInitEnvironmentState,
+  createReadyInitEnvironmentState,
+  createUnsupportedInitEnvironmentState
+} from '../src/vscode/init-environment-state.js';
 import {buildScanViewModel} from '../src/vscode/scan-view-model.js';
 import {createScanStateFromResults} from '../src/vscode/scan-state.js';
 import {renderChecksHtml} from '../src/vscode/views/checks-html.js';
 import {OpenShrikeChecksViewProvider} from '../src/vscode/views/checks-view.js';
 import {renderFindingDetailHtml} from '../src/vscode/views/detail-html.js';
 import {renderSummaryHtml} from '../src/vscode/views/summary-html.js';
+import {OpenShrikeSummaryViewProvider} from '../src/vscode/views/summary-view.js';
 
 vi.mock('vscode', () => ({}));
 
@@ -123,7 +131,11 @@ describe('VS Code summary HTML', () => {
         workspacePath: '/tmp/workspace',
         statusLabel: 'Initialization required',
         activeOperationLabel: 'Run `shrike init` in the integrated terminal to initialize this repository.',
-        isInitialized: false
+        isInitialized: false,
+        initEnvironment: createReadyInitEnvironmentState({
+          detectedVersion: 'v22.18.0',
+          detectedPath: '/usr/bin/node'
+        })
       }),
       selectedFindingId: null,
       sortMode: 'status'
@@ -131,11 +143,95 @@ describe('VS Code summary HTML', () => {
     const html = renderSummaryHtml(viewModel);
 
     expect(html).toContain('Repository initialization required');
-    expect(html).toContain('The current repository is not initialized for OpenShrike.');
+    expect(html).toContain('bundled <code>shrike init</code> wizard');
+    expect(html).toContain('Node.js v22.18.0 detected');
     expect(html).toContain('command:openshrike.runInitInTerminal');
     expect(html).toContain('Run shrike init');
+    expect(html).not.toContain('command:openshrike.openNodeInstallPage');
     expect(html).not.toContain('command:openshrike.runScanWithScopeOverride');
     expect(html).not.toContain('Last scan snapshot:');
+  });
+
+  it('renders a transient checking state before Node.js readiness is known', () => {
+    const viewModel = buildScanViewModel({
+      state: createEmptyScanState({
+        workspaceName: 'Workspace',
+        workspacePath: '/tmp/workspace',
+        statusLabel: 'Initialization required',
+        isInitialized: false,
+        initEnvironment: createCheckingInitEnvironmentState()
+      }),
+      selectedFindingId: null,
+      sortMode: 'status'
+    });
+    const html = renderSummaryHtml(viewModel);
+
+    expect(html).toContain('Checking Node.js on the workspace host...');
+    expect(html).not.toContain('command:openshrike.runInitInTerminal');
+    expect(html).not.toContain('command:openshrike.openNodeInstallPage');
+  });
+
+  it('renders an install path when Node.js is missing on the workspace host', () => {
+    const viewModel = buildScanViewModel({
+      state: createEmptyScanState({
+        workspaceName: 'Workspace',
+        workspacePath: '/tmp/workspace',
+        statusLabel: 'Initialization required',
+        isInitialized: false,
+        initEnvironment: createMissingInitEnvironmentState()
+      }),
+      selectedFindingId: null,
+      sortMode: 'status'
+    });
+    const html = renderSummaryHtml(viewModel);
+
+    expect(html).toContain('Node.js was not found on the workspace host');
+    expect(html).toContain('Install Node.js');
+    expect(html).toContain('command:openshrike.openNodeInstallPage');
+    expect(html).not.toContain('command:openshrike.runInitInTerminal');
+    expect(html).toContain('aria-disabled="true"');
+  });
+
+  it('renders an install path when Node.js is too old on the workspace host', () => {
+    const viewModel = buildScanViewModel({
+      state: createEmptyScanState({
+        workspaceName: 'Workspace',
+        workspacePath: '/tmp/workspace',
+        statusLabel: 'Initialization required',
+        isInitialized: false,
+        initEnvironment: createUnsupportedInitEnvironmentState({
+          detectedVersion: 'v20.12.2',
+          detectedPath: '/usr/bin/node'
+        })
+      }),
+      selectedFindingId: null,
+      sortMode: 'status'
+    });
+    const html = renderSummaryHtml(viewModel);
+
+    expect(html).toContain('Found Node.js v20.12.2, but OpenShrike requires 22+');
+    expect(html).toContain('command:openshrike.openNodeInstallPage');
+    expect(html).not.toContain('command:openshrike.runInitInTerminal');
+  });
+
+  it('renders conservative install guidance when the Node.js probe fails', () => {
+    const viewModel = buildScanViewModel({
+      state: createEmptyScanState({
+        workspaceName: 'Workspace',
+        workspacePath: '/tmp/workspace',
+        statusLabel: 'Initialization required',
+        isInitialized: false,
+        initEnvironment: createErrorInitEnvironmentState()
+      }),
+      selectedFindingId: null,
+      sortMode: 'status'
+    });
+    const html = renderSummaryHtml(viewModel);
+
+    expect(html).toContain('Could not verify Node.js on the workspace host');
+    expect(html).toContain('<code>node --version</code>');
+    expect(html).toContain('command:openshrike.openNodeInstallPage');
+    expect(html).not.toContain('command:openshrike.runInitInTerminal');
   });
 
   it('keeps zero-complete cancelled scans out of the fully scanned copy', () => {
@@ -244,7 +340,8 @@ describe('VS Code view model', () => {
       workspacePath: '/tmp/workspace',
       statusLabel: 'Initialization required',
       activeOperationLabel: 'Run `shrike init` in the integrated terminal to initialize this repository.',
-      isInitialized: false
+      isInitialized: false,
+      initEnvironment: createMissingInitEnvironmentState()
     });
     const viewModel = buildScanViewModel({
       state,
@@ -254,7 +351,79 @@ describe('VS Code view model', () => {
 
     expect(viewModel.statusBarText).toBe('$(warning) OpenShrike: Init Required');
     expect(viewModel.statusBarTooltip).toContain('Repository not initialized for OpenShrike.');
+    expect(viewModel.statusBarTooltip).toContain('Node.js 22+ was not found on the workspace host.');
     expect(viewModel.isInitialized).toBe(false);
+  });
+
+  it('maps init-environment gating flags into the view model', () => {
+    const readyViewModel = buildScanViewModel({
+      state: createEmptyScanState({
+        workspaceName: 'Workspace',
+        workspacePath: '/tmp/workspace',
+        isInitialized: false,
+        initEnvironment: createReadyInitEnvironmentState({
+          detectedVersion: 'v22.18.0',
+          detectedPath: '/usr/bin/node'
+        })
+      }),
+      selectedFindingId: null,
+      sortMode: 'status'
+    });
+    const missingViewModel = buildScanViewModel({
+      state: createEmptyScanState({
+        workspaceName: 'Workspace',
+        workspacePath: '/tmp/workspace',
+        isInitialized: false,
+        initEnvironment: createMissingInitEnvironmentState()
+      }),
+      selectedFindingId: null,
+      sortMode: 'status'
+    });
+
+    expect(readyViewModel.canRunBundledInit).toBe(true);
+    expect(readyViewModel.showInstallNodeAction).toBe(false);
+    expect(missingViewModel.canRunBundledInit).toBe(false);
+    expect(missingViewModel.showInstallNodeAction).toBe(true);
+  });
+});
+
+describe('VS Code summary view', () => {
+  it('notifies visibility hooks when the summary view resolves and regains focus', () => {
+    const onDidResolve = vi.fn();
+    const onDidChangeVisibility = vi.fn();
+    const model = new OpenShrikeExtensionModel(createSampleScanState(), 'BP-SEC-001');
+    const provider = new OpenShrikeSummaryViewProvider(model, {
+      onDidResolve,
+      onDidChangeVisibility
+    });
+    let onVisibilityChange: (() => void) | undefined;
+    const webviewView = {
+      visible: true,
+      webview: {
+        options: {},
+        html: ''
+      },
+      onDidChangeVisibility(listener: () => void) {
+        onVisibilityChange = listener;
+        return {
+          dispose() {}
+        };
+      }
+    };
+
+    provider.resolveWebviewView(webviewView as never);
+
+    expect(onDidResolve).toHaveBeenCalledWith(true);
+
+    webviewView.visible = false;
+    onVisibilityChange?.();
+    expect(onDidChangeVisibility).toHaveBeenLastCalledWith(false);
+
+    webviewView.visible = true;
+    onVisibilityChange?.();
+    expect(onDidChangeVisibility).toHaveBeenLastCalledWith(true);
+
+    provider.dispose();
   });
 });
 

@@ -6,16 +6,13 @@ RUN apt-get update \
 
 WORKDIR /workspace/tool
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json ./package.json
+COPY docker/openshrike-runtime.package-lock.json ./package-lock.json
+RUN npm ci --omit=dev
 
-COPY tsconfig.json vitest.config.ts tsup.cli.config.ts ./
+COPY dist/cli.js ./dist/cli.js
 COPY prompts ./prompts
-COPY src ./src
 COPY best_practices ./best_practices
-COPY docs ./docs
-
-RUN npm run build:cli
 
 ENV PATH="/workspace/tool/node_modules/.bin:${PATH}"
 

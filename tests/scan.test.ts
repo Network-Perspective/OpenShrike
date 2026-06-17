@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {CHECK_EVALUATION_MAX_ATTEMPTS} from '../src/lib/constants.js';
+import {CHECK_EVALUATION_MAX_ATTEMPTS, MAX_POLICY_CHECKS} from '../src/lib/constants.js';
 import type {
   CheckResult,
   ScanCommandOptions,
@@ -418,6 +418,28 @@ describe('runScan', () => {
     await expect(runScan(makeOptions(repoRoot, {
       checkId: 'check-a'
     }))).rejects.toThrow(/Read-only guardrail violation/i);
+  });
+
+  it('rejects policies only when they exceed the maximum supported check count', async () => {
+    const repoRoot = await makeRepoRoot();
+    const oversizedCheckIds = Array.from(
+      {length: MAX_POLICY_CHECKS + 1},
+      (_value, index) => `check-${index + 1}`
+    );
+
+    mockResolvePolicyDefinition.mockResolvedValue({
+      id: 'oversized-policy',
+      version: '2026-06-17',
+      checkIds: oversizedCheckIds
+    });
+
+    await expect(runScan(makeOptions(repoRoot, {
+      policyId: 'oversized-policy',
+      mockOpencode: true
+    }))).rejects.toMatchObject({
+      code: 'POLICY_TOO_LARGE',
+      message: `Check selection expands to ${MAX_POLICY_CHECKS + 1} checks, which exceeds the maximum supported ${MAX_POLICY_CHECKS}.`
+    });
   });
 
   it('routes runtime events with check and worker metadata', async () => {

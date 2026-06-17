@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import {registerExtensionCommands} from './commands.js';
 import {createEmptyScanState, getDefaultSelectedFindingId} from './scan-data.js';
 import {OpenShrikeExtensionModel} from './extension-model.js';
+import {OpenShrikeInitEnvironmentMonitor} from './init-environment.js';
 import {OpenShrikeOutputChannel} from './output-channel.js';
 import {OpenShrikeScanController} from './scan-controller.js';
 import {OpenShrikeStatusBar} from './status-bar.js';
@@ -17,7 +18,7 @@ export interface OpenShrikeExtensionApi {
 
 export function activate(context: vscode.ExtensionContext): OpenShrikeExtensionApi {
   try {
-    process.env.OPENSHRIKE_TOOL_ROOT ??= context.extension.extensionPath;
+    process.env.OPENSHRIKE_TOOL_ROOT ??= context.extensionPath;
     const workspaceTarget = resolveWorkspaceTarget();
     console.info('[OpenShrike] Activating extension', workspaceTarget);
 
@@ -28,13 +29,22 @@ export function activate(context: vscode.ExtensionContext): OpenShrikeExtensionA
     });
     const model = new OpenShrikeExtensionModel(state, getDefaultSelectedFindingId(state));
     const controller = new OpenShrikeScanController(model);
+    const initEnvironmentMonitor = new OpenShrikeInitEnvironmentMonitor(model);
     const output = new OpenShrikeOutputChannel(model);
     const checksViewProvider = new OpenShrikeChecksViewProvider(model);
     const detailPanel = new OpenShrikeDetailPanel(model);
-    const summaryViewProvider = new OpenShrikeSummaryViewProvider(model);
+    const summaryViewProvider = new OpenShrikeSummaryViewProvider(model, {
+      onDidResolve: isVisible => {
+        initEnvironmentMonitor.notifySummaryViewResolved(isVisible);
+      },
+      onDidChangeVisibility: isVisible => {
+        initEnvironmentMonitor.notifySummaryVisibilityChanged(isVisible);
+      }
+    });
     const statusBar = new OpenShrikeStatusBar(model);
 
     context.subscriptions.push(
+      initEnvironmentMonitor,
       output,
       checksViewProvider,
       detailPanel,
@@ -53,7 +63,14 @@ export function activate(context: vscode.ExtensionContext): OpenShrikeExtensionA
       model,
       controller,
       output,
-      detailPanel
+      detailPanel,
+      initEnvironmentMonitor,
+      extensionRoot: context.extensionPath
+    });
+
+    initEnvironmentMonitor.scheduleRefresh(workspaceTarget.path, {
+      announceChecking: true,
+      delayMs: 0
     });
 
     void controller.initialize(workspaceTarget).then(async () => {

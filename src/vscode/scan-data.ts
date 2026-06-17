@@ -1,4 +1,9 @@
 import type {CheckStatus} from '../lib/types.js';
+import {
+  createCheckingInitEnvironmentState,
+  createReadyInitEnvironmentState,
+  type InitEnvironmentState
+} from './init-environment-state.js';
 
 export type FindingStatus = CheckStatus | 'pending' | 'running' | 'fixing';
 export type FindingSortMode = 'id' | 'status' | 'name';
@@ -65,6 +70,7 @@ export interface ScanState {
   warnings: string[];
   canCancel: boolean;
   isInitialized: boolean;
+  initEnvironment: InitEnvironmentState;
 }
 
 const DEFAULT_SELECTED_FINDING_ID = 'BP-SEC-001';
@@ -353,7 +359,11 @@ export function createSampleScanState(input: {
     lastScanPath: '.openshrike/last-scan.md',
     warnings: [],
     canCancel: false,
-    isInitialized: true
+    isInitialized: true,
+    initEnvironment: createReadyInitEnvironmentState({
+      detectedVersion: 'v22.18.0',
+      detectedPath: '/usr/bin/node'
+    })
   };
 }
 
@@ -367,6 +377,7 @@ export function createEmptyScanState(input: {
   parallelismLabel?: string;
   activeOperationLabel?: string;
   isInitialized?: boolean;
+  initEnvironment?: InitEnvironmentState;
 }): ScanState {
   return {
     workspaceName: input.workspaceName,
@@ -398,7 +409,8 @@ export function createEmptyScanState(input: {
     lastScanPath: '.openshrike/last-scan.md',
     warnings: [],
     canCancel: false,
-    isInitialized: input.isInitialized ?? true
+    isInitialized: input.isInitialized ?? true,
+    initEnvironment: input.initEnvironment ?? createCheckingInitEnvironmentState()
   };
 }
 

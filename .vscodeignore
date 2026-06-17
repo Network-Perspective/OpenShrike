@@ -4,11 +4,17 @@
 .codex/**
 .ignore/**
 .artifacts/**
+.npm-cache/**
 .openshrike/**
 .openshrike-debug/**
 archive/**
 coverage/**
 docker/**
+!docker/
+!docker/openshrike-runtime.Dockerfile
+!docker/openshrike-runtime.package-lock.json
+!dist/
+!dist/**
 node_modules/.package-lock.json
 node_modules/opencode-ai/bin/.opencode
 scripts/**
@@ -19,6 +25,7 @@ docs/**
 !docs/openshrike-icon.png
 README.md
 README.npm.md
+!README.vscode.md
 *.vsix
 install
 install.ps1

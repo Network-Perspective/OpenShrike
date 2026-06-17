@@ -1,6 +1,7 @@
 import path from 'node:path';
 import {formatEvidenceLabel, parseEvidenceLocation} from '../lib/evidence.js';
 import type {CheckResult, ParallelismValue, RuntimeMode, SavedScanRequest} from '../lib/types.js';
+import {createCheckingInitEnvironmentState, type InitEnvironmentState} from './init-environment-state.js';
 import type {EvidenceItem, Finding, FindingStatus, ScanState, ScanStatusKind} from './scan-data.js';
 
 export function createScanStateFromResults(input: {
@@ -27,6 +28,7 @@ export function createScanStateFromResults(input: {
   warnings: string[];
   lastScanPath: string;
   canCancel: boolean;
+  initEnvironment?: InitEnvironmentState;
 }): ScanState {
   const resultsByCheckId = new Map(input.checks.map(check => [check.id, check] as const));
   const runningCheckIds = new Set(input.runningCheckIds ?? []);
@@ -81,7 +83,8 @@ export function createScanStateFromResults(input: {
     lastScanPath: input.lastScanPath,
     warnings: [...input.warnings],
     canCancel: input.canCancel,
-    isInitialized: true
+    isInitialized: true,
+    initEnvironment: input.initEnvironment ?? createCheckingInitEnvironmentState()
   };
 }
 

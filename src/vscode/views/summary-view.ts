@@ -3,11 +3,20 @@ import type {OpenShrikeExtensionModel} from '../extension-model.js';
 import {renderExtensionErrorHtml} from './error-html.js';
 import {renderSummaryHtml} from './summary-html.js';
 
+interface SummaryViewCallbacks {
+  onDidResolve?(isVisible: boolean): void;
+  onDidChangeVisibility?(isVisible: boolean): void;
+}
+
 export class OpenShrikeSummaryViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private webviewView: vscode.WebviewView | null = null;
   private readonly unsubscribe: () => void;
+  private visibilitySubscription: vscode.Disposable | null = null;
 
-  constructor(private readonly model: OpenShrikeExtensionModel) {
+  constructor(
+    private readonly model: OpenShrikeExtensionModel,
+    private readonly callbacks: SummaryViewCallbacks = {}
+  ) {
     this.unsubscribe = this.model.subscribe(() => {
       this.render();
     });
@@ -15,10 +24,18 @@ export class OpenShrikeSummaryViewProvider implements vscode.WebviewViewProvider
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.webviewView = webviewView;
+    this.visibilitySubscription?.dispose();
+    this.visibilitySubscription = webviewView.onDidChangeVisibility(() => {
+      this.callbacks.onDidChangeVisibility?.(webviewView.visible);
+      if (webviewView.visible) {
+        this.render();
+      }
+    });
     webviewView.webview.options = {
       enableCommandUris: true
     };
     console.info('[OpenShrike] Resolving summary webview');
+    this.callbacks.onDidResolve?.(webviewView.visible);
 
     try {
       this.render();
@@ -30,6 +47,7 @@ export class OpenShrikeSummaryViewProvider implements vscode.WebviewViewProvider
 
   dispose(): void {
     this.unsubscribe();
+    this.visibilitySubscription?.dispose();
   }
 
   private render(): void {

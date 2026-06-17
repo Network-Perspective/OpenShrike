@@ -6,6 +6,7 @@ import {
   type FindingSortMode,
   type ScanState
 } from './scan-data.js';
+import type {InitEnvironmentState} from './init-environment-state.js';
 import {buildScanViewModel, type ScanViewModel} from './scan-view-model.js';
 
 type Listener = () => void;
@@ -61,7 +62,10 @@ export class OpenShrikeExtensionModel {
   }
 
   setState(nextState: ScanState): void {
-    this.state = nextState;
+    this.state = {
+      ...nextState,
+      initEnvironment: nextState.initEnvironment ?? this.state.initEnvironment
+    };
 
     if (this.selectedFindingId && findFindingById(this.state, this.selectedFindingId)) {
       this.emit();
@@ -69,6 +73,18 @@ export class OpenShrikeExtensionModel {
     }
 
     this.selectedFindingId = getDefaultSelectedFindingId(this.state);
+    this.emit();
+  }
+
+  setInitEnvironment(initEnvironment: InitEnvironmentState): void {
+    if (isSameInitEnvironmentState(this.state.initEnvironment, initEnvironment)) {
+      return;
+    }
+
+    this.state = {
+      ...this.state,
+      initEnvironment
+    };
     this.emit();
   }
 
@@ -109,4 +125,13 @@ export class OpenShrikeExtensionModel {
       listener();
     }
   }
+}
+
+function isSameInitEnvironmentState(left: InitEnvironmentState, right: InitEnvironmentState): boolean {
+  return left.statusKind === right.statusKind
+    && left.requiredNodeRange === right.requiredNodeRange
+    && left.detectedVersion === right.detectedVersion
+    && left.detectedPath === right.detectedPath
+    && left.message === right.message
+    && left.checkedAtMs === right.checkedAtMs;
 }

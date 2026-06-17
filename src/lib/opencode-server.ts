@@ -1,10 +1,18 @@
 import {spawn, type ChildProcessByStdio} from 'node:child_process';
+import {access} from 'node:fs/promises';
+import path from 'node:path';
 import type {Readable} from 'node:stream';
 import {createOpencodeClient, type Config, type OpencodeClient} from '@opencode-ai/sdk';
 import {OPENCODE_SERVER_CLOSE_TIMEOUT_MS, OPENCODE_SERVER_START_TIMEOUT_MS} from './constants.js';
+import {findToolRoot} from './project-root.js';
 import type {ScanLogger} from './scan-log.js';
 
 type SpawnedOpencodeProcess = ChildProcessByStdio<null, Readable, Readable>;
+
+interface OpenCodeLaunchCommand {
+  command: string;
+  args: string[];
+}
 
 export interface ManagedOpencodeServer {
   client: OpencodeClient;
@@ -17,9 +25,10 @@ export async function createManagedOpencodeServer(options: {
   port: number;
   logger?: ScanLogger | null | undefined;
 }): Promise<ManagedOpencodeServer> {
+  const launchCommand = await resolveOpenCodeLaunchCommand();
   const proc = spawn(
-    'opencode',
-    ['serve', '--hostname=127.0.0.1', `--port=${options.port}`],
+    launchCommand.command,
+    [...launchCommand.args, 'serve', '--hostname=127.0.0.1', `--port=${options.port}`],
     {
       env: {
         ...process.env,
@@ -45,6 +54,43 @@ export async function createManagedOpencodeServer(options: {
       });
     }
   };
+}
+
+async function resolveOpenCodeLaunchCommand(): Promise<OpenCodeLaunchCommand> {
+  const bundledLauncherPath = await resolveBundledOpenCodeLauncherPath();
+  if (!bundledLauncherPath) {
+    return {
+      command: 'opencode',
+      args: []
+    };
+  }
+
+  return {
+    command: resolveNodeCommand(),
+    args: [bundledLauncherPath]
+  };
+}
+
+async function resolveBundledOpenCodeLauncherPath(): Promise<string | null> {
+  let toolRoot: string;
+  try {
+    toolRoot = findToolRoot();
+  } catch {
+    return null;
+  }
+
+  const launcherPath = path.join(toolRoot, 'node_modules', 'opencode-ai', 'bin', 'opencode');
+  try {
+    await access(launcherPath);
+    return launcherPath;
+  } catch {
+    return null;
+  }
+}
+
+function resolveNodeCommand(): string {
+  const configured = process.env.OPENSHRIKE_NODE_BINARY?.trim();
+  return configured && configured.length > 0 ? configured : 'node';
 }
 
 async function waitForServerUrl(
