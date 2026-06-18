@@ -93,6 +93,18 @@
         "icon": "$(link-external)"
       },
       {
+        "command": "openshrike.installShrikeCli",
+        "category": "OpenShrike",
+        "title": "Install shrike CLI",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "openshrike.refreshInitialization",
+        "category": "OpenShrike",
+        "title": "Done",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "openshrike.runScan",
         "category": "OpenShrike",
         "title": "Run Scan",

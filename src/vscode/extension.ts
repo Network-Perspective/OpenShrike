@@ -64,8 +64,7 @@ export function activate(context: vscode.ExtensionContext): OpenShrikeExtensionA
       controller,
       output,
       detailPanel,
-      initEnvironmentMonitor,
-      extensionRoot: context.extensionPath
+      initEnvironmentMonitor
     });
 
     initEnvironmentMonitor.scheduleRefresh(workspaceTarget.path, {

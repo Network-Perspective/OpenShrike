@@ -1,5 +1,5 @@
 import {formatCheckIdDisplay} from '../lib/check-display.js';
-import {type InitEnvironmentState} from './init-environment-state.js';
+import {SHRIKE_CLI_INSTALL_COMMAND, type InitEnvironmentState} from './init-environment-state.js';
 import {
   formatConfidence,
   getStatusLabel,
@@ -33,6 +33,8 @@ export interface ScanSelectedFinding {
   remediation: string[];
   checkMarkdown: string;
   evidence: Finding['evidence'];
+  canRecheck: boolean;
+  canFix: boolean;
 }
 
 export interface ScanViewModel {
@@ -64,8 +66,10 @@ export interface ScanViewModel {
   hasFindings: boolean;
   isInitialized: boolean;
   initEnvironment: InitEnvironmentState;
-  canRunBundledInit: boolean;
+  canRunInit: boolean;
   showInstallNodeAction: boolean;
+  showInstallShrikeAction: boolean;
+  showRefreshAction: boolean;
 }
 
 export function buildScanViewModel(input: {
@@ -116,7 +120,9 @@ export function buildScanViewModel(input: {
             : null,
           remediation: selectedFinding.remediation,
           checkMarkdown: selectedFinding.checkMarkdown,
-          evidence: selectedFinding.evidence
+          evidence: selectedFinding.evidence,
+          canRecheck: canRecheckFinding(selectedFinding.status),
+          canFix: selectedFinding.status === 'fail'
         }
       : null,
     statusBarText,
@@ -127,8 +133,10 @@ export function buildScanViewModel(input: {
     hasFindings: state.findings.length > 0,
     isInitialized: state.isInitialized,
     initEnvironment: state.initEnvironment,
-    canRunBundledInit: hasWorkspace && !state.isInitialized && state.initEnvironment.statusKind === 'ready',
-    showInstallNodeAction: hasWorkspace && !state.isInitialized && ['missing', 'unsupported', 'error'].includes(state.initEnvironment.statusKind)
+    canRunInit: hasWorkspace && !state.isInitialized && state.initEnvironment.statusKind === 'ready',
+    showInstallNodeAction: hasWorkspace && !state.isInitialized && ['missing', 'unsupported'].includes(state.initEnvironment.statusKind),
+    showInstallShrikeAction: hasWorkspace && !state.isInitialized && state.initEnvironment.statusKind === 'cli-missing',
+    showRefreshAction: hasWorkspace && !state.isInitialized
   };
 }
 
@@ -192,31 +200,37 @@ function buildUninitializedStatusBarTooltip(initEnvironment: InitEnvironmentStat
     case 'checking':
       return [
         'Repository not initialized for OpenShrike.',
-        'Checking Node.js on the workspace host before enabling the bundled init wizard.'
+        'Checking Node.js and shrike CLI on the workspace host before enabling `shrike init`.'
       ].join('\n');
     case 'ready':
       return [
         'Repository not initialized for OpenShrike.',
-        `Node.js ${initEnvironment.detectedVersion ?? ''} is available on the workspace host.`,
-        'Run the bundled `shrike init` wizard in the integrated terminal, then return here and run a scan.'
+        `Node.js ${initEnvironment.detectedNodeVersion ?? ''} and shrike CLI are available on the workspace host.`,
+        'Run `shrike init` in the integrated terminal, then click "Done" or run a scan.'
       ].join('\n');
     case 'missing':
       return [
         'Repository not initialized for OpenShrike.',
         'Node.js 22+ was not found on the workspace host.',
-        'Install Node.js, then return here and run the bundled `shrike init` wizard.'
+        'Install Node.js on the workspace host, then click "Done" and run `shrike init`.'
       ].join('\n');
     case 'unsupported':
       return [
         'Repository not initialized for OpenShrike.',
-        `${initEnvironment.detectedVersion ?? 'The detected Node.js version'} does not satisfy Node.js 22+.`,
-        'Install a newer Node.js version on the workspace host, then run the bundled `shrike init` wizard.'
+        `${initEnvironment.detectedNodeVersion ?? 'The detected Node.js version'} does not satisfy Node.js 22+.`,
+        'Install a newer Node.js version on the workspace host, then click "Done" and run `shrike init`.'
+      ].join('\n');
+    case 'cli-missing':
+      return [
+        'Repository not initialized for OpenShrike.',
+        'The shrike CLI was not found on the workspace host.',
+        `Install it with \`${SHRIKE_CLI_INSTALL_COMMAND}\`, then click "Done" and run \`shrike init\`.`
       ].join('\n');
     case 'error':
       return [
         'Repository not initialized for OpenShrike.',
-        'OpenShrike could not verify Node.js on the workspace host.',
-        'Verify `node --version` in a terminal, or install Node.js 22+, then run the bundled `shrike init` wizard.'
+        'OpenShrike could not verify Node.js and shrike CLI on the workspace host.',
+        'Verify `node --version` and `shrike --version` in a terminal on the workspace host, then click "Done".'
       ].join('\n');
   }
 }
@@ -242,6 +256,10 @@ function buildDetailSummary(finding: Finding): string {
     return finding.summary;
   }
   return trimmedRationale;
+}
+
+function canRecheckFinding(status: FindingStatus): boolean {
+  return status === 'fail' || status === 'unknown' || status === 'pass' || status === 'pending';
 }
 
 export function formatSortMode(sortMode: FindingSortMode): string {

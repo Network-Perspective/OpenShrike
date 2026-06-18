@@ -6,6 +6,7 @@ import {
   createCheckingInitEnvironmentState,
   createErrorInitEnvironmentState,
   createMissingInitEnvironmentState,
+  createMissingShrikeInitEnvironmentState,
   createReadyInitEnvironmentState,
   createUnsupportedInitEnvironmentState,
   isNodeVersionSupported,
@@ -25,11 +26,24 @@ interface ResolvedShell {
   path: string;
 }
 
-interface ProbeResult {
-  detectedVersion: string | null;
+interface NodeProbeResult {
+  detectedNodeVersion: string | null;
+  detectedNodePath: string | null;
+  missing: boolean;
+  error: string | null;
+}
+
+interface CommandPathProbeResult {
   detectedPath: string | null;
   missing: boolean;
   error: string | null;
+}
+
+interface InitEnvironmentProbeDependencies {
+  runShellNodeProbe?: typeof runShellNodeProbe;
+  runDirectNodeProbe?: typeof runDirectNodeProbe;
+  runShellCommandPathProbe?: typeof runShellCommandPathProbe;
+  runDirectCommandPathProbe?: typeof runDirectCommandPathProbe;
 }
 
 const DEFAULT_REFRESH_DEBOUNCE_MS = 150;
@@ -37,6 +51,9 @@ const COMMAND_TIMEOUT_MS = 4_000;
 const POSIX_PROBE_MARKER = '__OPENSHRIKE_NODE_PROBE__';
 const POWERSHELL_PROBE_MARKER = '__OPENSHRIKE_NODE_PROBE__';
 const CMD_PROBE_MARKER = '__OPENSHRIKE_NODE_PROBE__';
+const POSIX_COMMAND_PATH_PROBE_MARKER = '__OPENSHRIKE_COMMAND_PATH_PROBE__';
+const POWERSHELL_COMMAND_PATH_PROBE_MARKER = '__OPENSHRIKE_COMMAND_PATH_PROBE__';
+const CMD_COMMAND_PATH_PROBE_MARKER = '__OPENSHRIKE_COMMAND_PATH_PROBE__';
 
 export class OpenShrikeInitEnvironmentMonitor implements vscode.Disposable {
   private readonly subscriptions: vscode.Disposable[] = [];
@@ -147,46 +164,75 @@ export class OpenShrikeInitEnvironmentMonitor implements vscode.Disposable {
   }
 }
 
-export async function probeInitEnvironment(workspacePath: string): Promise<InitEnvironmentState> {
+export async function probeInitEnvironment(
+  workspacePath: string,
+  dependencies: InitEnvironmentProbeDependencies = {}
+): Promise<InitEnvironmentState> {
   const checkedAtMs = Date.now();
-  const shellProbe = await runShellProbe(workspacePath);
-  const probeResult = shellProbe.missing || shellProbe.error
-    ? await runDirectNodeProbe(workspacePath, shellProbe)
-    : shellProbe;
+  const probeNodeWithShell = dependencies.runShellNodeProbe ?? runShellNodeProbe;
+  const probeNodeDirectly = dependencies.runDirectNodeProbe ?? runDirectNodeProbe;
+  const probeCommandPathWithShell = dependencies.runShellCommandPathProbe ?? runShellCommandPathProbe;
+  const probeCommandPathDirectly = dependencies.runDirectCommandPathProbe ?? runDirectCommandPathProbe;
 
-  if (probeResult.missing) {
+  const shellNodeProbe = await probeNodeWithShell(workspacePath);
+  const nodeProbe = shouldUseDirectNodeFallback(shellNodeProbe)
+    ? await probeNodeDirectly(workspacePath, shellNodeProbe)
+    : shellNodeProbe;
+
+  if (nodeProbe.missing) {
     return createMissingInitEnvironmentState(checkedAtMs);
   }
 
-  if (!probeResult.detectedVersion || !probeResult.detectedPath) {
+  if (!nodeProbe.detectedNodeVersion || !nodeProbe.detectedNodePath) {
     return createErrorInitEnvironmentState({
-      detectedVersion: probeResult.detectedVersion,
-      detectedPath: probeResult.detectedPath,
+      detectedNodeVersion: nodeProbe.detectedNodeVersion,
+      detectedNodePath: nodeProbe.detectedNodePath,
       checkedAtMs
     });
   }
 
-  if (!isNodeVersionSupported(probeResult.detectedVersion)) {
+  if (!isNodeVersionSupported(nodeProbe.detectedNodeVersion)) {
     return createUnsupportedInitEnvironmentState({
-      detectedVersion: probeResult.detectedVersion,
-      detectedPath: probeResult.detectedPath,
+      detectedNodeVersion: nodeProbe.detectedNodeVersion,
+      detectedNodePath: nodeProbe.detectedNodePath,
+      checkedAtMs
+    });
+  }
+
+  const shellShrikeProbe = await probeCommandPathWithShell(workspacePath, 'shrike');
+  const shrikeProbe = shouldUseDirectCommandFallback(shellShrikeProbe)
+    ? await probeCommandPathDirectly(workspacePath, 'shrike', shellShrikeProbe)
+    : shellShrikeProbe;
+  if (shrikeProbe.missing) {
+    return createMissingShrikeInitEnvironmentState({
+      detectedNodeVersion: nodeProbe.detectedNodeVersion,
+      detectedNodePath: nodeProbe.detectedNodePath,
+      checkedAtMs
+    });
+  }
+
+  if (!shrikeProbe.detectedPath) {
+    return createErrorInitEnvironmentState({
+      detectedNodeVersion: nodeProbe.detectedNodeVersion,
+      detectedNodePath: nodeProbe.detectedNodePath,
       checkedAtMs
     });
   }
 
   return createReadyInitEnvironmentState({
-    detectedVersion: probeResult.detectedVersion,
-    detectedPath: probeResult.detectedPath,
+    detectedNodeVersion: nodeProbe.detectedNodeVersion,
+    detectedNodePath: nodeProbe.detectedNodePath,
+    detectedShrikePath: shrikeProbe.detectedPath,
     checkedAtMs
   });
 }
 
-async function runShellProbe(workspacePath: string): Promise<ProbeResult> {
+async function runShellNodeProbe(workspacePath: string): Promise<NodeProbeResult> {
   const shell = resolveProbeShell();
   if (!shell) {
     return {
-      detectedVersion: null,
-      detectedPath: null,
+      detectedNodeVersion: null,
+      detectedNodePath: null,
       missing: true,
       error: 'No compatible shell was resolved for the Node.js probe.'
     };
@@ -196,41 +242,118 @@ async function runShellProbe(workspacePath: string): Promise<ProbeResult> {
   return parseShellProbeOutput(shell.kind, result);
 }
 
-async function runDirectNodeProbe(workspacePath: string, fallback: ProbeResult): Promise<ProbeResult> {
+async function runDirectNodeProbe(
+  workspacePath: string,
+  fallback: NodeProbeResult
+): Promise<NodeProbeResult> {
   const pathResult = await runCommand('node', ['-p', 'process.execPath'], workspacePath);
   if (pathResult.error?.code === 'ENOENT') {
     return {
-      detectedVersion: null,
-      detectedPath: null,
+      detectedNodeVersion: null,
+      detectedNodePath: null,
       missing: true,
       error: fallback.error
+    };
+  }
+
+  if (pathResult.timedOut) {
+    return {
+      detectedNodeVersion: null,
+      detectedNodePath: null,
+      missing: false,
+      error: fallback.error ?? 'The direct Node.js probe timed out.'
     };
   }
 
   const versionResult = await runCommand('node', ['--version'], workspacePath);
   if (versionResult.error?.code === 'ENOENT') {
     return {
-      detectedVersion: null,
-      detectedPath: null,
+      detectedNodeVersion: null,
+      detectedNodePath: null,
       missing: true,
       error: fallback.error
     };
   }
 
-  const detectedPath = pathResult.stdout.trim() || null;
-  const detectedVersion = versionResult.stdout.trim() || null;
-  if (!detectedPath || !detectedVersion) {
+  if (versionResult.timedOut) {
     return {
-      detectedVersion,
-      detectedPath,
+      detectedNodeVersion: null,
+      detectedNodePath: null,
+      missing: false,
+      error: fallback.error ?? 'The direct Node.js version probe timed out.'
+    };
+  }
+
+  const detectedNodePath = extractDirectNodePath(pathResult.stdout);
+  const detectedNodeVersion = extractVersionLine(versionResult.stdout, 'node');
+  if (!detectedNodePath || !detectedNodeVersion) {
+    return {
+      detectedNodeVersion,
+      detectedNodePath,
       missing: false,
       error: fallback.error ?? 'The direct Node.js probe returned an incomplete result.'
     };
   }
 
   return {
-    detectedVersion,
-    detectedPath,
+    detectedNodeVersion,
+    detectedNodePath,
+    missing: false,
+    error: null
+  };
+}
+
+async function runShellCommandPathProbe(
+  workspacePath: string,
+  commandName: string
+): Promise<CommandPathProbeResult> {
+  const shell = resolveProbeShell();
+  if (!shell) {
+    return {
+      detectedPath: null,
+      missing: false,
+      error: `No compatible shell was resolved for the ${commandName} probe.`
+    };
+  }
+
+  const result = await runCommand(shell.path, buildShellCommandPathProbeArgs(shell, commandName), workspacePath);
+  return parseShellCommandPathProbeOutput(shell.kind, result);
+}
+
+async function runDirectCommandPathProbe(
+  workspacePath: string,
+  commandName: string,
+  fallback: CommandPathProbeResult
+): Promise<CommandPathProbeResult> {
+  const result = await runCommand(commandName, ['--version'], workspacePath);
+  if (result.error?.code === 'ENOENT') {
+    return {
+      detectedPath: null,
+      missing: true,
+      error: fallback.error
+    };
+  }
+
+  if (result.timedOut) {
+    return {
+      detectedPath: null,
+      missing: false,
+      error: fallback.error ?? `The direct ${commandName} probe timed out.`
+    };
+  }
+
+  if (result.exitCode !== 0) {
+    return {
+      detectedPath: null,
+      missing: false,
+      error: fallback.error ?? `The direct ${commandName} probe exited with code ${result.exitCode ?? 'unknown'}.`
+    };
+  }
+
+  return {
+    // The shell-based path probe is preferred, but a successful direct invocation is enough
+    // to know the command is runnable from PATH for the integrated terminal.
+    detectedPath: commandName,
     missing: false,
     error: null
   };
@@ -241,8 +364,8 @@ function shouldProbeWorkspace(workspacePath?: string | null): workspacePath is s
 }
 
 function syncNodeBinaryEnvironment(state: InitEnvironmentState): void {
-  if (state.statusKind === 'ready' && state.detectedPath) {
-    process.env.OPENSHRIKE_NODE_BINARY = state.detectedPath;
+  if (state.detectedNodePath && state.detectedNodeVersion && isNodeVersionSupported(state.detectedNodeVersion)) {
+    process.env.OPENSHRIKE_NODE_BINARY = state.detectedNodePath;
     return;
   }
 
@@ -380,13 +503,48 @@ function buildPosixProbeCommand(): string {
   ].join(' && ');
 }
 
-function parseShellProbeOutput(shellKind: ResolvedShell['kind'], result: CommandResult): ProbeResult {
+function buildShellCommandPathProbeArgs(shell: ResolvedShell, commandName: string): string[] {
+  switch (shell.kind) {
+    case 'cmd':
+      return [
+        '/d',
+        '/c',
+        `echo ${CMD_COMMAND_PATH_PROBE_MARKER} && where ${commandName} 2>nul`
+      ];
+    case 'powershell':
+      return [
+        '-NoProfile',
+        '-Command',
+        [
+          `$marker='${POWERSHELL_COMMAND_PATH_PROBE_MARKER}'`,
+          'Write-Output $marker',
+          `$command = Get-Command ${commandName} -ErrorAction SilentlyContinue`,
+          'if (-not $command) { exit 127 }',
+          'Write-Output $command.Path'
+        ].join('; ')
+      ];
+    case 'posix': {
+      const shellName = path.basename(shell.path).toLowerCase();
+      const command = [
+        `printf '%s\\n' '${POSIX_COMMAND_PATH_PROBE_MARKER}'`,
+        `command -v ${commandName}`
+      ].join(' && ');
+      if (shellName === 'bash' || shellName === 'zsh' || shellName === 'fish') {
+        return ['-i', '-l', '-c', command];
+      }
+
+      return ['-l', '-c', command];
+    }
+  }
+}
+
+function parseShellProbeOutput(shellKind: ResolvedShell['kind'], result: CommandResult): NodeProbeResult {
   const combinedOutput = `${result.stdout}\n${result.stderr}`;
 
   if (result.error?.code === 'ENOENT') {
     return {
-      detectedVersion: null,
-      detectedPath: null,
+      detectedNodeVersion: null,
+      detectedNodePath: null,
       missing: true,
       error: `Shell executable not found: ${result.error.path ?? 'unknown shell'}`
     };
@@ -394,8 +552,8 @@ function parseShellProbeOutput(shellKind: ResolvedShell['kind'], result: Command
 
   if (result.timedOut) {
     return {
-      detectedVersion: null,
-      detectedPath: null,
+      detectedNodeVersion: null,
+      detectedNodePath: null,
       missing: false,
       error: 'The Node.js probe timed out.'
     };
@@ -412,40 +570,183 @@ function parseShellProbeOutput(shellKind: ResolvedShell['kind'], result: Command
   return parseMarkerProbeLines(combinedOutput, POSIX_PROBE_MARKER, result);
 }
 
-function parseMarkerProbeLines(output: string, marker: string, result: CommandResult): ProbeResult {
+function parseShellCommandPathProbeOutput(
+  shellKind: ResolvedShell['kind'],
+  result: CommandResult
+): CommandPathProbeResult {
+  const combinedOutput = `${result.stdout}\n${result.stderr}`;
+
+  if (result.error?.code === 'ENOENT') {
+    return {
+      detectedPath: null,
+      missing: false,
+      error: `Shell executable not found: ${result.error.path ?? 'unknown shell'}`
+    };
+  }
+
+  if (result.timedOut) {
+    return {
+      detectedPath: null,
+      missing: false,
+      error: 'The shrike CLI probe timed out.'
+    };
+  }
+
+  if (shellKind === 'cmd') {
+    return parseMarkerCommandPathLines(combinedOutput, CMD_COMMAND_PATH_PROBE_MARKER, result);
+  }
+
+  if (shellKind === 'powershell') {
+    return parseMarkerCommandPathLines(combinedOutput, POWERSHELL_COMMAND_PATH_PROBE_MARKER, result);
+  }
+
+  return parseMarkerCommandPathLines(combinedOutput, POSIX_COMMAND_PATH_PROBE_MARKER, result);
+}
+
+function parseMarkerProbeLines(output: string, marker: string, result: CommandResult): NodeProbeResult {
   const lines = output
     .split(/\r?\n/u)
     .map(line => line.trim())
     .filter(line => line.length > 0);
   const markerIndex = lines.lastIndexOf(marker);
   const relevantLines = markerIndex === -1 ? lines : lines.slice(markerIndex + 1);
-  const detectedPath = relevantLines[0] ?? null;
-  const detectedVersion = relevantLines.find(line => /^v\d+(?:\.\d+){0,2}$/u.test(line)) ?? null;
+  const detectedNodePath = extractCommandPathLine(relevantLines, 'node');
+  const detectedNodeVersion = extractVersionLine(relevantLines.join('\n'), 'node');
 
-  if (result.exitCode === 127 || result.exitCode === 1 && !detectedPath && !detectedVersion) {
+  if (result.exitCode === 127 || result.exitCode === 1 && !detectedNodePath && !detectedNodeVersion) {
     return {
-      detectedVersion: null,
-      detectedPath: null,
+      detectedNodeVersion: null,
+      detectedNodePath: null,
       missing: true,
       error: null
     };
   }
 
-  if (!detectedPath && !detectedVersion) {
+  if (!detectedNodePath && !detectedNodeVersion) {
     return {
-      detectedVersion: null,
-      detectedPath: null,
+      detectedNodeVersion: null,
+      detectedNodePath: null,
       missing: false,
       error: 'The Node.js probe returned no recognizable output.'
     };
   }
 
   return {
-    detectedVersion,
-    detectedPath,
+    detectedNodeVersion,
+    detectedNodePath,
     missing: false,
     error: result.exitCode === 0 ? null : `Node.js probe exited with code ${result.exitCode ?? 'unknown'}.`
   };
+}
+
+function parseMarkerCommandPathLines(
+  output: string,
+  marker: string,
+  result: CommandResult
+): CommandPathProbeResult {
+  const lines = output
+    .split(/\r?\n/u)
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
+  const markerIndex = lines.lastIndexOf(marker);
+  const relevantLines = markerIndex === -1 ? lines : lines.slice(markerIndex + 1);
+  const detectedPath = extractCommandPathLine(relevantLines, 'shrike');
+
+  if (result.exitCode === 127 || result.exitCode === 1 && !detectedPath) {
+    return {
+      detectedPath: null,
+      missing: true,
+      error: null
+    };
+  }
+
+  if (!detectedPath) {
+    return {
+      detectedPath: null,
+      missing: false,
+      error: 'The shrike CLI probe returned no recognizable output.'
+    };
+  }
+
+  return {
+    detectedPath,
+    missing: false,
+    error: result.exitCode === 0 ? null : `The shrike CLI probe exited with code ${result.exitCode ?? 'unknown'}.`
+  };
+}
+
+function shouldUseDirectNodeFallback(result: NodeProbeResult): boolean {
+  return result.missing || result.error !== null || !result.detectedNodePath || !result.detectedNodeVersion;
+}
+
+function shouldUseDirectCommandFallback(result: CommandPathProbeResult): boolean {
+  return result.missing || result.error !== null || !result.detectedPath;
+}
+
+function extractDirectNodePath(output: string): string | null {
+  const lines = output
+    .split(/\r?\n/u)
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
+  return extractCommandPathLine(lines, 'node');
+}
+
+function extractVersionLine(output: string, commandName: string): string | null {
+  const lines = output
+    .split(/\r?\n/u)
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
+
+  if (commandName === 'node') {
+    return lines.find(line => /^v\d+(?:\.\d+){0,2}$/u.test(line)) ?? null;
+  }
+
+  return lines.find(line => /\d/u.test(line)) ?? null;
+}
+
+function extractCommandPathLine(lines: readonly string[], commandName: string): string | null {
+  for (const line of lines) {
+    const candidate = normalizeCommandPathCandidate(line);
+    if (!candidate) {
+      continue;
+    }
+
+    if (!isExpectedCommandPath(candidate, commandName)) {
+      continue;
+    }
+
+    return candidate;
+  }
+
+  return null;
+}
+
+function normalizeCommandPathCandidate(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  return trimmed.replace(/^['"]|['"]$/gu, '');
+}
+
+function isExpectedCommandPath(candidate: string, commandName: string): boolean {
+  const normalizedCommandName = commandName.toLowerCase();
+  const allowedBaseNames = new Set([
+    normalizedCommandName,
+    `${normalizedCommandName}.exe`,
+    `${normalizedCommandName}.cmd`,
+    `${normalizedCommandName}.bat`,
+    `${normalizedCommandName}.ps1`
+  ]);
+  const posixBaseName = path.posix.basename(candidate).toLowerCase();
+  const winBaseName = path.win32.basename(candidate).toLowerCase();
+
+  if (allowedBaseNames.has(posixBaseName) || allowedBaseNames.has(winBaseName)) {
+    return true;
+  }
+
+  return candidate.toLowerCase() === normalizedCommandName;
 }
 
 async function runCommand(

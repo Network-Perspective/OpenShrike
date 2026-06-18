@@ -32,7 +32,10 @@ export async function createManagedOpencodeServer(options: {
     {
       env: {
         ...process.env,
-        OPENCODE_CONFIG_CONTENT: JSON.stringify(options.config)
+        OPENCODE_CONFIG_CONTENT: JSON.stringify(options.config),
+        // OpenShrike only needs OpenCode as an ephemeral execution engine.
+        // Using an isolated DB avoids crashes caused by stale shared migration state.
+        OPENCODE_DB: resolveOpenCodeDatabasePath()
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: process.platform !== 'win32'
@@ -99,6 +102,11 @@ async function resolveBundledOpenCodeLauncherPath(): Promise<string | null> {
 function resolveNodeCommand(): string {
   const configured = process.env.OPENSHRIKE_NODE_BINARY?.trim();
   return configured && configured.length > 0 ? configured : 'node';
+}
+
+function resolveOpenCodeDatabasePath(): string {
+  const configured = process.env.OPENSHRIKE_OPENCODE_DB?.trim();
+  return configured && configured.length > 0 ? configured : ':memory:';
 }
 
 async function waitForServerUrl(

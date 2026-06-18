@@ -1,4 +1,5 @@
 import {createCommandUri} from '../command-uri.js';
+import {SHRIKE_CLI_INSTALL_COMMAND} from '../init-environment-state.js';
 import type {ScanViewModel} from '../scan-view-model.js';
 
 export function renderSummaryHtml(viewModel: ScanViewModel): string {
@@ -35,6 +36,9 @@ export function renderSummaryHtml(viewModel: ScanViewModel): string {
             --activity-text: var(--vscode-textLink-foreground);
             --action-hover: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.18));
             --action-border: rgba(128, 128, 128, 0.22);
+            --success-action-bg: color-mix(in srgb, var(--pass) 82%, black 18%);
+            --success-action-hover: color-mix(in srgb, var(--pass) 72%, black 28%);
+            --success-action-foreground: #ffffff;
           }
 
           * {
@@ -320,6 +324,15 @@ export function renderSummaryHtml(viewModel: ScanViewModel): string {
             background: var(--vscode-button-hoverBackground);
           }
 
+          .setup-action.is-success {
+            background: var(--success-action-bg);
+            color: var(--success-action-foreground);
+          }
+
+          .setup-action.is-success:hover {
+            background: var(--success-action-hover);
+          }
+
           .setup-action.is-disabled {
             background: var(--surface-3);
             color: var(--text-muted);
@@ -465,34 +478,55 @@ function renderInitializationPrompt(viewModel: ScanViewModel): string {
 function buildInitializationCopy(viewModel: ScanViewModel): string {
   switch (viewModel.initEnvironment.statusKind) {
     case 'checking':
-      return 'OpenShrike is checking whether Node.js 22+ is available on the current workspace host before enabling the bundled init wizard.';
+      return 'OpenShrike is checking whether Node.js 22+ and the <code>shrike</code> CLI are available on the current workspace host before enabling <code>shrike init</code>.';
     case 'ready':
-      return 'OpenShrike will run the bundled <code>shrike init</code> wizard in the integrated terminal on the current workspace host. Complete that setup flow, then return here and run a scan.';
+      return 'OpenShrike will run <code>shrike init</code> in the integrated terminal on the current workspace host. Complete that setup flow, then click "Done" or run a scan.';
     case 'missing':
     case 'unsupported':
-      return 'OpenShrike needs Node.js 22+ on the current workspace host before it can run the bundled <code>shrike init</code> wizard.';
+      return 'OpenShrike needs Node.js 22+ on the current workspace host before it can run <code>shrike init</code>.';
+    case 'cli-missing':
+      return `OpenShrike found Node.js 22+ on the current workspace host, but it also needs the <code>shrike</code> CLI. Install it with <code>${SHRIKE_CLI_INSTALL_COMMAND}</code>, then click "Done" and run <code>shrike init</code>.`;
     case 'error':
-      return 'OpenShrike needs Node.js 22+ on the current workspace host before it can run the bundled <code>shrike init</code> wizard. If installing Node.js does not help, verify <code>node --version</code> in a terminal on the workspace host.';
+      return 'OpenShrike could not verify that Node.js 22+ and the <code>shrike</code> CLI are available on the current workspace host. Verify <code>node --version</code> and <code>shrike --version</code> in a terminal on the workspace host, then click "Done".';
   }
 }
 
 function renderInitializationActions(viewModel: ScanViewModel): string {
-  if (viewModel.canRunBundledInit) {
-    return `
-      <div class="setup-actions">
-        <a class="setup-action" href="${createCommandUri('openshrike.runInitInTerminal', [viewModel.workspacePath])}">Run shrike init</a>
-      </div>
-    `;
+  const actions: string[] = [];
+
+  if (viewModel.showInstallNodeAction) {
+    actions.push(
+      `<a class="setup-action" href="${createCommandUri('openshrike.openNodeInstallPage')}">Install Node.js</a>`
+    );
   }
 
-  if (!viewModel.showInstallNodeAction) {
+  if (viewModel.showInstallShrikeAction) {
+    actions.push(
+      `<a class="setup-action" href="${createCommandUri('openshrike.installShrikeCli', [viewModel.workspacePath])}">Install shrike CLI</a>`
+    );
+  }
+
+  if (viewModel.canRunInit) {
+    actions.push(
+      `<a class="setup-action" href="${createCommandUri('openshrike.runInitInTerminal', [viewModel.workspacePath])}">Run shrike init</a>`
+    );
+  } else if (viewModel.showRefreshAction) {
+    actions.push('<span class="setup-action is-disabled" aria-disabled="true">Run shrike init</span>');
+  }
+
+  if (viewModel.showRefreshAction) {
+    actions.push(
+      `<a class="setup-action is-success" href="${createCommandUri('openshrike.refreshInitialization', [viewModel.workspacePath])}">Done</a>`
+    );
+  }
+
+  if (actions.length === 0) {
     return '';
   }
 
   return `
     <div class="setup-actions">
-      <a class="setup-action" href="${createCommandUri('openshrike.openNodeInstallPage')}">Install Node.js</a>
-      <span class="setup-action is-disabled" aria-disabled="true">Run shrike init</span>
+      ${actions.join('\n      ')}
     </div>
   `;
 }

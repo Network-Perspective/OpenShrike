@@ -57,6 +57,7 @@ const {createEmptyScanState} = await import('../src/vscode/scan-data.js');
 const {OpenShrikeExtensionModel} = await import('../src/vscode/extension-model.js');
 const {OpenShrikeScanController} = await import('../src/vscode/scan-controller.js');
 const {CliError} = await import('../src/lib/cli-error.js');
+const {createMissingInitEnvironmentState} = await import('../src/vscode/init-environment-state.js');
 
 const tempDirectories: string[] = [];
 
@@ -115,6 +116,88 @@ describe('OpenShrike scan controller', () => {
     expect(state.statusLabel).toBe('Initialization required');
     expect(state.activeOperationLabel).toContain('shrike init');
     expect(state.counts.total).toBe(0);
+  });
+
+  it('preserves the current init-environment state while rerendering an uninitialized workspace', async () => {
+    const workspacePath = await createUninitializedWorkspace();
+    const workspace = {
+      name: 'Workspace',
+      path: workspacePath
+    };
+    const expectedInitEnvironment = createMissingInitEnvironmentState();
+    const model = new OpenShrikeExtensionModel(createEmptyScanState({
+      workspaceName: workspace.name,
+      workspacePath,
+      isInitialized: false,
+      initEnvironment: expectedInitEnvironment
+    }), null);
+    const controller = new OpenShrikeScanController(model);
+
+    await controller.initialize(workspace);
+
+    expect(model.getState().initEnvironment).toEqual(expectedInitEnvironment);
+    expect(model.getState().initEnvironment.statusKind).toBe('missing');
+  });
+
+  it('runs a one-check scan when recheck is requested before any scan report has been loaded', async () => {
+    const workspacePath = await createWorkspace();
+    const workspace = {
+      name: 'Workspace',
+      path: workspacePath
+    };
+    const model = new OpenShrikeExtensionModel(createEmptyScanState({
+      workspaceName: workspace.name,
+      workspacePath
+    }), null);
+    const controller = new OpenShrikeScanController(model);
+    const report = makeReport(workspacePath, {
+      runtimeMode: 'native'
+    });
+
+    await controller.initialize(workspace);
+    mockResolveScanOptions.mockResolvedValue(makeOptions(workspacePath, {
+      runtimeMode: 'native',
+      checkId: 'check-a',
+      policyId: undefined,
+      projectChecksDir: undefined
+    }));
+    mockCreateNativeScanSession.mockImplementation(() => ({
+      start: async () => report,
+      getScope: () => null,
+      getReport: () => report,
+      getPersistableReport: () => report,
+      close: vi.fn().mockResolvedValue(undefined)
+    }));
+
+    await controller.recheckSelectedFinding();
+
+    expect(mockResolveScanOptions).toHaveBeenCalledWith(expect.objectContaining({
+      repoPath: workspacePath,
+      checkId: 'check-a',
+      policyId: undefined,
+      projectChecksDir: undefined
+    }));
+    expect(model.getState().statusKind).toBe('completed');
+    expect(model.getState().counts.total).toBe(1);
+  });
+
+  it('fails auto-fix with a clear message when no scan report has been loaded yet', async () => {
+    const workspacePath = await createWorkspace();
+    const workspace = {
+      name: 'Workspace',
+      path: workspacePath
+    };
+    const model = new OpenShrikeExtensionModel(createEmptyScanState({
+      workspaceName: workspace.name,
+      workspacePath
+    }), null);
+    const controller = new OpenShrikeScanController(model);
+
+    await controller.initialize(workspace);
+
+    await expect(controller.fixSelectedFinding()).rejects.toThrow(
+      'Auto-Fix is available only after a scan or last-scan snapshot has been loaded for this repository.'
+    );
   });
 
   it('uses configured workspace defaults in the idle state', async () => {

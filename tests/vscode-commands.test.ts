@@ -6,6 +6,7 @@ import {createEmptyScanState} from '../src/vscode/scan-data.js';
 import {OpenShrikeExtensionModel} from '../src/vscode/extension-model.js';
 import {
   createMissingInitEnvironmentState,
+  createMissingShrikeInitEnvironmentState,
   createReadyInitEnvironmentState
 } from '../src/vscode/init-environment-state.js';
 
@@ -16,21 +17,27 @@ const {
   openExternal,
   parseUri,
   showInformationMessage,
-  showWarningMessage
+  showWarningMessage,
+  terminalSendText,
+  terminalShow
 } = vi.hoisted(() => {
   const commandsRegistry = new Map<string, (...args: unknown[]) => unknown>();
+  const terminalShow = vi.fn();
+  const terminalSendText = vi.fn();
 
   return {
     commandsRegistry,
     createTerminal: vi.fn(() => ({
-      show: vi.fn(),
-      sendText: vi.fn()
+      show: terminalShow,
+      sendText: terminalSendText
     })),
     executeCommand: vi.fn(),
     openExternal: vi.fn(),
     parseUri: vi.fn((value: string) => ({value})),
     showInformationMessage: vi.fn(),
-    showWarningMessage: vi.fn()
+    showWarningMessage: vi.fn(),
+    terminalSendText,
+    terminalShow
   };
 });
 
@@ -84,6 +91,8 @@ const tempDirectories: string[] = [];
 beforeEach(() => {
   commandsRegistry.clear();
   createTerminal.mockClear();
+  terminalShow.mockReset();
+  terminalSendText.mockReset();
   executeCommand.mockReset();
   executeCommand.mockResolvedValue(undefined);
   openExternal.mockReset();
@@ -104,14 +113,14 @@ afterEach(async () => {
 });
 
 describe('VS Code init commands', () => {
-  it('launches the bundled CLI with the resolved Node.js executable when Node.js is ready', async () => {
+  it('launches `shrike init` in the integrated terminal when Node.js and shrike are ready', async () => {
     const workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-vscode-command-ready-'));
     tempDirectories.push(workspacePath);
-    const extensionRoot = await createBundledCliFixture();
     const initEnvironmentMonitor = {
       refresh: vi.fn().mockResolvedValue(createReadyInitEnvironmentState({
-        detectedVersion: 'v22.18.0',
-        detectedPath: '/usr/bin/node'
+        detectedNodeVersion: 'v22.18.0',
+        detectedNodePath: '/usr/bin/node',
+        detectedShrikePath: '/usr/bin/shrike'
       })),
       scheduleRefresh: vi.fn()
     };
@@ -122,11 +131,10 @@ describe('VS Code init commands', () => {
 
     registerExtensionCommands(makeContext(), {
       model,
-      controller: makeControllerStub(),
-      detailPanel: makeDetailPanelStub(),
-      output: makeOutputStub(),
-      initEnvironmentMonitor: initEnvironmentMonitor as never,
-      extensionRoot
+      controller: makeControllerStub() as never,
+      detailPanel: makeDetailPanelStub() as never,
+      output: makeOutputStub() as never,
+      initEnvironmentMonitor: initEnvironmentMonitor as never
     });
 
     const command = commandsRegistry.get('openshrike.runInitInTerminal');
@@ -137,22 +145,18 @@ describe('VS Code init commands', () => {
     expect(initEnvironmentMonitor.refresh).toHaveBeenCalledWith(workspacePath);
     expect(createTerminal).toHaveBeenCalledWith({
       name: 'OpenShrike Init',
-      cwd: workspacePath,
-      shellPath: '/usr/bin/node',
-      shellArgs: [path.join(extensionRoot, 'dist', 'cli.js'), 'init'],
-      env: {
-        OPENSHRIKE_TOOL_ROOT: extensionRoot
-      }
+      cwd: workspacePath
     });
+    expect(terminalShow).toHaveBeenCalledTimes(1);
+    expect(terminalSendText).toHaveBeenCalledWith('shrike init', true);
     expect(showInformationMessage).toHaveBeenCalledWith(
-      'Started the bundled `shrike init` wizard in the integrated terminal. Return to OpenShrike and run a scan when initialization completes.'
+      'Started `shrike init` in the integrated terminal. Click "Done" in the OpenShrike panel after initialization completes.'
     );
   });
 
-  it('blocks the bundled init launch and offers the Node.js install command when Node.js is unavailable', async () => {
+  it('blocks init launch and offers the Node.js install command when Node.js is unavailable', async () => {
     const workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-vscode-command-missing-'));
     tempDirectories.push(workspacePath);
-    const extensionRoot = await createBundledCliFixture();
     const initEnvironmentMonitor = {
       refresh: vi.fn().mockResolvedValue(createMissingInitEnvironmentState()),
       scheduleRefresh: vi.fn()
@@ -165,11 +169,10 @@ describe('VS Code init commands', () => {
 
     registerExtensionCommands(makeContext(), {
       model,
-      controller: makeControllerStub(),
-      detailPanel: makeDetailPanelStub(),
-      output: makeOutputStub(),
-      initEnvironmentMonitor: initEnvironmentMonitor as never,
-      extensionRoot
+      controller: makeControllerStub() as never,
+      detailPanel: makeDetailPanelStub() as never,
+      output: makeOutputStub() as never,
+      initEnvironmentMonitor: initEnvironmentMonitor as never
     });
 
     const command = commandsRegistry.get('openshrike.runInitInTerminal');
@@ -179,16 +182,133 @@ describe('VS Code init commands', () => {
 
     expect(createTerminal).not.toHaveBeenCalled();
     expect(showWarningMessage).toHaveBeenCalledWith(
-      'OpenShrike cannot run the bundled init wizard because Node.js 22+ was not found on the current workspace host.',
+      'OpenShrike cannot run `shrike init` because Node.js 22+ was not found on the current workspace host.',
       'Install Node.js'
     );
     expect(executeCommand).toHaveBeenCalledWith('openshrike.openNodeInstallPage');
   });
 
+  it('blocks init launch and offers the shrike CLI install command when shrike is unavailable', async () => {
+    const workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-vscode-command-shrike-missing-'));
+    tempDirectories.push(workspacePath);
+    const initEnvironmentMonitor = {
+      refresh: vi.fn().mockResolvedValue(createMissingShrikeInitEnvironmentState({
+        detectedNodeVersion: 'v22.18.0',
+        detectedNodePath: '/usr/bin/node'
+      })),
+      scheduleRefresh: vi.fn()
+    };
+    const model = new OpenShrikeExtensionModel(createEmptyScanState({
+      workspaceName: 'Workspace',
+      workspacePath
+    }), null);
+    showWarningMessage.mockResolvedValue('Install shrike CLI');
+
+    registerExtensionCommands(makeContext(), {
+      model,
+      controller: makeControllerStub() as never,
+      detailPanel: makeDetailPanelStub() as never,
+      output: makeOutputStub() as never,
+      initEnvironmentMonitor: initEnvironmentMonitor as never
+    });
+
+    const command = commandsRegistry.get('openshrike.runInitInTerminal');
+    expect(command).toBeTypeOf('function');
+
+    await command?.(workspacePath);
+
+    expect(createTerminal).not.toHaveBeenCalled();
+    expect(showWarningMessage).toHaveBeenCalledWith(
+      'OpenShrike cannot run `shrike init` because the shrike CLI was not found on the current workspace host. Install it with `npm install -g @networkperspective/openshrike`, then click "Done" and try again.',
+      'Install shrike CLI'
+    );
+    expect(executeCommand).toHaveBeenCalledWith('openshrike.installShrikeCli');
+  });
+
+  it('runs the shrike CLI install command in the integrated terminal', async () => {
+    const workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-vscode-command-install-shrike-'));
+    tempDirectories.push(workspacePath);
+    const initEnvironmentMonitor = {
+      refresh: vi.fn().mockResolvedValue(createMissingShrikeInitEnvironmentState({
+        detectedNodeVersion: 'v22.18.0',
+        detectedNodePath: '/usr/bin/node'
+      })),
+      scheduleRefresh: vi.fn()
+    };
+    const model = new OpenShrikeExtensionModel(createEmptyScanState({
+      workspaceName: 'Workspace',
+      workspacePath
+    }), null);
+
+    registerExtensionCommands(makeContext(), {
+      model,
+      controller: makeControllerStub() as never,
+      detailPanel: makeDetailPanelStub() as never,
+      output: makeOutputStub() as never,
+      initEnvironmentMonitor: initEnvironmentMonitor as never
+    });
+
+    const command = commandsRegistry.get('openshrike.installShrikeCli');
+    expect(command).toBeTypeOf('function');
+
+    await command?.(workspacePath);
+
+    expect(initEnvironmentMonitor.refresh).toHaveBeenCalledWith(workspacePath);
+    expect(createTerminal).toHaveBeenCalledWith({
+      name: 'OpenShrike Setup',
+      cwd: workspacePath
+    });
+    expect(terminalShow).toHaveBeenCalledTimes(1);
+    expect(terminalSendText).toHaveBeenCalledWith('npm install -g @networkperspective/openshrike', true);
+    expect(showInformationMessage).toHaveBeenCalledWith(
+      'Running `npm install -g @networkperspective/openshrike` in the integrated terminal. Click "Done" in the OpenShrike panel after the install completes.'
+    );
+  });
+
+  it('refreshes initialization state and reloads repository state', async () => {
+    const workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-vscode-command-refresh-'));
+    tempDirectories.push(workspacePath);
+    const initEnvironmentMonitor = {
+      refresh: vi.fn().mockResolvedValue(createMissingInitEnvironmentState()),
+      scheduleRefresh: vi.fn()
+    };
+    const controller = makeControllerStub();
+    const model = new OpenShrikeExtensionModel(createEmptyScanState({
+      workspaceName: 'Workspace',
+      workspacePath
+    }), null);
+
+    registerExtensionCommands(makeContext(), {
+      model,
+      controller: controller as never,
+      detailPanel: makeDetailPanelStub() as never,
+      output: makeOutputStub() as never,
+      initEnvironmentMonitor: initEnvironmentMonitor as never
+    });
+
+    const command = commandsRegistry.get('openshrike.refreshInitialization');
+    expect(command).toBeTypeOf('function');
+
+    await command?.(workspacePath);
+
+    expect(initEnvironmentMonitor.refresh).toHaveBeenCalledWith(workspacePath, {
+      announceChecking: true
+    });
+    expect(controller.initialize).toHaveBeenCalledWith({
+      name: 'Workspace',
+      path: workspacePath
+    });
+    expect(controller.loadLastScan).toHaveBeenCalledWith({
+      name: 'Workspace',
+      path: workspacePath
+    }, {
+      silentMissing: true
+    });
+  });
+
   it('opens the official Node.js install page and schedules a refresh', async () => {
     const workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-vscode-command-install-'));
     tempDirectories.push(workspacePath);
-    const extensionRoot = await createBundledCliFixture();
     const initEnvironmentMonitor = {
       refresh: vi.fn(),
       scheduleRefresh: vi.fn()
@@ -200,11 +320,10 @@ describe('VS Code init commands', () => {
 
     registerExtensionCommands(makeContext(), {
       model,
-      controller: makeControllerStub(),
-      detailPanel: makeDetailPanelStub(),
-      output: makeOutputStub(),
-      initEnvironmentMonitor: initEnvironmentMonitor as never,
-      extensionRoot
+      controller: makeControllerStub() as never,
+      detailPanel: makeDetailPanelStub() as never,
+      output: makeOutputStub() as never,
+      initEnvironmentMonitor: initEnvironmentMonitor as never
     });
 
     const command = commandsRegistry.get('openshrike.openNodeInstallPage');
@@ -230,30 +349,23 @@ function makeControllerStub() {
   return {
     cancelScan: vi.fn(),
     fixSelectedFinding: vi.fn(),
+    initialize: vi.fn(),
     loadLastScan: vi.fn(),
     recheckSelectedFinding: vi.fn(),
     runScan: vi.fn(),
     setRuntimeMode: vi.fn(),
     setScopeSelection: vi.fn()
-  } as never;
+  };
 }
 
 function makeDetailPanelStub() {
   return {
     revealSelected: vi.fn()
-  } as never;
+  };
 }
 
 function makeOutputStub() {
   return {
     show: vi.fn()
-  } as never;
-}
-
-async function createBundledCliFixture(): Promise<string> {
-  const extensionRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-vscode-extension-root-'));
-  tempDirectories.push(extensionRoot);
-  await fs.mkdir(path.join(extensionRoot, 'dist'), {recursive: true});
-  await fs.writeFile(path.join(extensionRoot, 'dist', 'cli.js'), 'console.log("shrike");\n', 'utf8');
-  return extensionRoot;
+  };
 }

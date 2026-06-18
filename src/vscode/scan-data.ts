@@ -361,8 +361,9 @@ export function createSampleScanState(input: {
     canCancel: false,
     isInitialized: true,
     initEnvironment: createReadyInitEnvironmentState({
-      detectedVersion: 'v22.18.0',
-      detectedPath: '/usr/bin/node'
+      detectedNodeVersion: 'v22.18.0',
+      detectedNodePath: '/usr/bin/node',
+      detectedShrikePath: '/usr/bin/shrike'
     })
   };
 }

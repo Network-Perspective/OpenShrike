@@ -28,6 +28,7 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
   delete process.env.OPENSHRIKE_OPENCODE_BINARY;
+  delete process.env.OPENSHRIKE_OPENCODE_DB;
   delete process.env.OPENSHRIKE_NODE_BINARY;
 });
 
@@ -105,6 +106,7 @@ describe('createManagedOpencodeServer', () => {
         ],
         expect.objectContaining({
           env: expect.objectContaining({
+            OPENCODE_DB: ':memory:',
             OPENSHRIKE_NODE_BINARY: '/usr/local/bin/node',
             OPENCODE_CONFIG_CONTENT: '{}'
           }),
@@ -136,6 +138,7 @@ describe('createManagedOpencodeServer', () => {
         ['serve', '--hostname=127.0.0.1', '--port=42113'],
         expect.objectContaining({
           env: expect.objectContaining({
+            OPENCODE_DB: ':memory:',
             OPENSHRIKE_OPENCODE_BINARY: '/tmp/fake-opencode',
             OPENCODE_CONFIG_CONTENT: '{}'
           }),
@@ -146,6 +149,40 @@ describe('createManagedOpencodeServer', () => {
 
     expect(mockFindToolRoot).not.toHaveBeenCalled();
     expect(mockAccess).not.toHaveBeenCalled();
+
+    proc.stdout.emit('data', Buffer.from('opencode server listening on http://127.0.0.1:42113\n'));
+
+    const server = await serverPromise;
+    expect(server.pid).toBe(4321);
+  });
+
+  it('allows overriding the OpenCode database path explicitly', async () => {
+    const proc = new FakeChildProcess();
+    process.env.OPENSHRIKE_OPENCODE_DB = '/tmp/openshrike-opencode.db';
+    mockAccess.mockRejectedValue(new Error('missing'));
+    mockFindToolRoot.mockReturnValue('/tool');
+    mockSpawn.mockReturnValue(proc);
+    mockCreateOpencodeClient.mockReturnValue({tag: 'client'});
+
+    const serverPromise = createManagedOpencodeServer({
+      config: {},
+      port: 42113
+    });
+
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalledWith(
+        'opencode',
+        ['serve', '--hostname=127.0.0.1', '--port=42113'],
+        expect.objectContaining({
+          env: expect.objectContaining({
+            OPENSHRIKE_OPENCODE_DB: '/tmp/openshrike-opencode.db',
+            OPENCODE_DB: '/tmp/openshrike-opencode.db',
+            OPENCODE_CONFIG_CONTENT: '{}'
+          }),
+          stdio: ['ignore', 'pipe', 'pipe']
+        })
+      );
+    });
 
     proc.stdout.emit('data', Buffer.from('opencode server listening on http://127.0.0.1:42113\n'));
 

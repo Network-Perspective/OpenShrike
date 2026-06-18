@@ -8,6 +8,7 @@ import {
   createCheckingInitEnvironmentState,
   createErrorInitEnvironmentState,
   createMissingInitEnvironmentState,
+  createMissingShrikeInitEnvironmentState,
   createReadyInitEnvironmentState,
   createUnsupportedInitEnvironmentState
 } from '../src/vscode/init-environment-state.js';
@@ -133,8 +134,9 @@ describe('VS Code summary HTML', () => {
         activeOperationLabel: 'Run `shrike init` in the integrated terminal to initialize this repository.',
         isInitialized: false,
         initEnvironment: createReadyInitEnvironmentState({
-          detectedVersion: 'v22.18.0',
-          detectedPath: '/usr/bin/node'
+          detectedNodeVersion: 'v22.18.0',
+          detectedNodePath: '/usr/bin/node',
+          detectedShrikePath: '/usr/bin/shrike'
         })
       }),
       selectedFindingId: null,
@@ -143,11 +145,15 @@ describe('VS Code summary HTML', () => {
     const html = renderSummaryHtml(viewModel);
 
     expect(html).toContain('Repository initialization required');
-    expect(html).toContain('bundled <code>shrike init</code> wizard');
-    expect(html).toContain('Node.js v22.18.0 detected');
+    expect(html).toContain('OpenShrike will run <code>shrike init</code> in the integrated terminal');
+    expect(html).toContain('Node.js v22.18.0 and shrike CLI detected');
     expect(html).toContain('command:openshrike.runInitInTerminal');
     expect(html).toContain('Run shrike init');
+    expect(html).toContain('command:openshrike.refreshInitialization');
+    expect(html).toContain('>Done<');
+    expect(html).toContain('setup-action is-success');
     expect(html).not.toContain('command:openshrike.openNodeInstallPage');
+    expect(html).not.toContain('command:openshrike.installShrikeCli');
     expect(html).not.toContain('command:openshrike.runScanWithScopeOverride');
     expect(html).not.toContain('Last scan snapshot:');
   });
@@ -166,9 +172,10 @@ describe('VS Code summary HTML', () => {
     });
     const html = renderSummaryHtml(viewModel);
 
-    expect(html).toContain('Checking Node.js on the workspace host...');
+    expect(html).toContain('Checking Node.js and shrike CLI on the workspace host...');
     expect(html).not.toContain('command:openshrike.runInitInTerminal');
     expect(html).not.toContain('command:openshrike.openNodeInstallPage');
+    expect(html).toContain('command:openshrike.refreshInitialization');
   });
 
   it('renders an install path when Node.js is missing on the workspace host', () => {
@@ -190,6 +197,7 @@ describe('VS Code summary HTML', () => {
     expect(html).toContain('command:openshrike.openNodeInstallPage');
     expect(html).not.toContain('command:openshrike.runInitInTerminal');
     expect(html).toContain('aria-disabled="true"');
+    expect(html).toContain('command:openshrike.refreshInitialization');
   });
 
   it('renders an install path when Node.js is too old on the workspace host', () => {
@@ -200,8 +208,8 @@ describe('VS Code summary HTML', () => {
         statusLabel: 'Initialization required',
         isInitialized: false,
         initEnvironment: createUnsupportedInitEnvironmentState({
-          detectedVersion: 'v20.12.2',
-          detectedPath: '/usr/bin/node'
+          detectedNodeVersion: 'v20.12.2',
+          detectedNodePath: '/usr/bin/node'
         })
       }),
       selectedFindingId: null,
@@ -212,6 +220,32 @@ describe('VS Code summary HTML', () => {
     expect(html).toContain('Found Node.js v20.12.2, but OpenShrike requires 22+');
     expect(html).toContain('command:openshrike.openNodeInstallPage');
     expect(html).not.toContain('command:openshrike.runInitInTerminal');
+    expect(html).toContain('command:openshrike.refreshInitialization');
+  });
+
+  it('renders a shrike CLI install path when Node.js is ready but shrike is missing', () => {
+    const viewModel = buildScanViewModel({
+      state: createEmptyScanState({
+        workspaceName: 'Workspace',
+        workspacePath: '/tmp/workspace',
+        statusLabel: 'Initialization required',
+        isInitialized: false,
+        initEnvironment: createMissingShrikeInitEnvironmentState({
+          detectedNodeVersion: 'v22.18.0',
+          detectedNodePath: '/usr/bin/node'
+        })
+      }),
+      selectedFindingId: null,
+      sortMode: 'status'
+    });
+    const html = renderSummaryHtml(viewModel);
+
+    expect(html).toContain('shrike CLI was not found on the workspace host');
+    expect(html).toContain('npm install -g @networkperspective/openshrike');
+    expect(html).toContain('command:openshrike.installShrikeCli');
+    expect(html).not.toContain('command:openshrike.openNodeInstallPage');
+    expect(html).not.toContain('command:openshrike.runInitInTerminal');
+    expect(html).toContain('command:openshrike.refreshInitialization');
   });
 
   it('renders conservative install guidance when the Node.js probe fails', () => {
@@ -228,9 +262,10 @@ describe('VS Code summary HTML', () => {
     });
     const html = renderSummaryHtml(viewModel);
 
-    expect(html).toContain('Could not verify Node.js on the workspace host');
-    expect(html).toContain('<code>node --version</code>');
-    expect(html).toContain('command:openshrike.openNodeInstallPage');
+    expect(html).toContain('Could not verify Node.js and shrike CLI on the workspace host');
+    expect(html).toContain('<code>shrike --version</code>');
+    expect(html).toContain('command:openshrike.refreshInitialization');
+    expect(html).not.toContain('command:openshrike.openNodeInstallPage');
     expect(html).not.toContain('command:openshrike.runInitInTerminal');
   });
 
@@ -362,8 +397,22 @@ describe('VS Code view model', () => {
         workspacePath: '/tmp/workspace',
         isInitialized: false,
         initEnvironment: createReadyInitEnvironmentState({
-          detectedVersion: 'v22.18.0',
-          detectedPath: '/usr/bin/node'
+          detectedNodeVersion: 'v22.18.0',
+          detectedNodePath: '/usr/bin/node',
+          detectedShrikePath: '/usr/bin/shrike'
+        })
+      }),
+      selectedFindingId: null,
+      sortMode: 'status'
+    });
+    const cliMissingViewModel = buildScanViewModel({
+      state: createEmptyScanState({
+        workspaceName: 'Workspace',
+        workspacePath: '/tmp/workspace',
+        isInitialized: false,
+        initEnvironment: createMissingShrikeInitEnvironmentState({
+          detectedNodeVersion: 'v22.18.0',
+          detectedNodePath: '/usr/bin/node'
         })
       }),
       selectedFindingId: null,
@@ -380,10 +429,15 @@ describe('VS Code view model', () => {
       sortMode: 'status'
     });
 
-    expect(readyViewModel.canRunBundledInit).toBe(true);
+    expect(readyViewModel.canRunInit).toBe(true);
     expect(readyViewModel.showInstallNodeAction).toBe(false);
-    expect(missingViewModel.canRunBundledInit).toBe(false);
+    expect(readyViewModel.showInstallShrikeAction).toBe(false);
+    expect(cliMissingViewModel.canRunInit).toBe(false);
+    expect(cliMissingViewModel.showInstallNodeAction).toBe(false);
+    expect(cliMissingViewModel.showInstallShrikeAction).toBe(true);
+    expect(missingViewModel.canRunInit).toBe(false);
     expect(missingViewModel.showInstallNodeAction).toBe(true);
+    expect(missingViewModel.showInstallShrikeAction).toBe(false);
   });
 });
 
@@ -454,6 +508,48 @@ describe('VS Code detail HTML', () => {
     expect(html).toContain('openshrike.openEvidence');
     expect(html).toContain('src/api/handlers.ts:42');
     expect(html).toContain('The handler casts request data into an internal payload type before a validation schema runs.');
+  });
+
+  it('keeps recheck available but disables auto-fix for pending findings', async () => {
+    const state = createScanStateFromResults({
+      workspaceName: 'Workspace',
+      workspacePath: '/tmp/workspace',
+      statusKind: 'idle',
+      statusLabel: 'Ready to scan',
+      generatedAt: null,
+      durationMs: null,
+      scopeLabel: 'uncommitted changes',
+      selectionLabel: 'check-a',
+      runtimeMode: 'native',
+      parallelism: 'auto',
+      totalChecks: 1,
+      checkIds: ['check-a'],
+      checks: [],
+      titlesByCheckId: {
+        'check-a': 'Check A'
+      },
+      checkMarkdownPathsByCheckId: {
+        'check-a': '.openshrike/checks/check-a.md'
+      },
+      activeOperationLabel: 'Run OpenShrike: Run Scan or Load Last Scan.',
+      outputLines: [],
+      warnings: [],
+      lastScanPath: '/tmp/workspace/.openshrike/last-scan.md',
+      canCancel: false
+    });
+    const viewModel = buildScanViewModel({
+      state,
+      selectedFindingId: 'check-a',
+      sortMode: 'status'
+    });
+    const html = await renderFindingDetailHtml({viewModel});
+
+    expect(viewModel.selectedFinding?.status).toBe('pending');
+    expect(viewModel.selectedFinding?.canRecheck).toBe(true);
+    expect(viewModel.selectedFinding?.canFix).toBe(false);
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).toContain('command:openshrike.recheckFinding');
+    expect(html).not.toContain('command:openshrike.fixFinding');
   });
 
   it('uses an untruncated lead summary in the detail header', async () => {

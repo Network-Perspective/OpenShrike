@@ -39,12 +39,32 @@ export async function renderFindingDetailHtml(input: {
           : 'No remediation available until the check completes.'
       )}</li>`;
   const actionButtons = [
-    {label: 'Open Check Markdown', command: 'openshrike.openCheckMarkdown', kind: 'secondary'},
-    {label: 'Open Last Scan Snapshot', command: 'openshrike.openLastScan', kind: 'secondary'},
-    {label: 'Recheck', command: 'openshrike.recheckFinding', kind: 'secondary'},
-    {label: 'Auto-Fix', command: 'openshrike.fixFinding', kind: 'primary'}
+    {
+      label: 'Open Check Markdown',
+      command: 'openshrike.openCheckMarkdown',
+      kind: 'secondary' as const,
+      isEnabled: true
+    },
+    {
+      label: 'Open Last Scan Snapshot',
+      command: 'openshrike.openLastScan',
+      kind: 'secondary' as const,
+      isEnabled: true
+    },
+    {
+      label: 'Recheck',
+      command: 'openshrike.recheckFinding',
+      kind: 'secondary' as const,
+      isEnabled: finding.canRecheck
+    },
+    {
+      label: 'Auto-Fix',
+      command: 'openshrike.fixFinding',
+      kind: 'primary' as const,
+      isEnabled: finding.canFix
+    }
   ]
-    .map(action => `<a class="button button-${action.kind}" href="${createCommandUri(action.command)}">${escapeHtml(action.label)}</a>`)
+    .map(action => renderActionButton(action))
     .join('');
   const statusClass = `status-${finding.status}`;
 
@@ -199,6 +219,15 @@ export async function renderFindingDetailHtml(input: {
           .button:hover {
             border-color: var(--panel-border);
             background: rgba(128, 128, 128, 0.12);
+          }
+
+          .button.is-disabled,
+          .button.is-disabled:hover {
+            background: var(--surface-3);
+            border-color: var(--soft-border);
+            color: var(--text-muted);
+            cursor: default;
+            pointer-events: none;
           }
 
           .button:focus-visible {
@@ -407,6 +436,21 @@ export async function renderFindingDetailHtml(input: {
       </body>
     </html>
   `;
+}
+
+function renderActionButton(input: {
+  label: string;
+  command: string;
+  kind: 'primary' | 'secondary';
+  isEnabled: boolean;
+}): string {
+  const label = escapeHtml(input.label);
+  const className = `button button-${input.kind}${input.isEnabled ? '' : ' is-disabled'}`;
+  if (!input.isEnabled) {
+    return `<span class="${className}" aria-disabled="true">${label}</span>`;
+  }
+
+  return `<a class="${className}" href="${createCommandUri(input.command)}">${label}</a>`;
 }
 
 async function renderEvidenceCard(

@@ -281,6 +281,11 @@ export class OpenShrikeScanController {
     }
 
     const context = this.requireContext();
+    if (!context.request || !context.report) {
+      await this.runScan(context.workspace, this.createSingleCheckScanOverrides(context, selectedFinding.id));
+      return;
+    }
+
     const baseOptions = await this.resolveActionBaseOptions(context);
     this.appendOutputLine(`Rechecking ${selectedFinding.id}.`);
 
@@ -328,6 +333,7 @@ export class OpenShrikeScanController {
     }
 
     const context = this.requireContext();
+    this.assertFixActionAvailable(context);
     if (selectedFinding.status !== 'fail') {
       throw new Error('Only failed findings can be fixed.');
     }
@@ -705,6 +711,7 @@ export class OpenShrikeScanController {
   }
 
   private renderState(totalChecks?: number): void {
+    const currentInitEnvironment = this.model.getState().initEnvironment;
     const workspace = this.context?.workspace ?? {
       name: this.model.getState().workspaceName,
       path: this.model.getState().workspacePath
@@ -737,7 +744,8 @@ export class OpenShrikeScanController {
           outputLines: this.outputLines,
           warnings: this.warnings,
           lastScanPath: this.lastScanPath,
-          canCancel: this.activeRun !== null && !this.activeRun.cancelRequested
+          canCancel: this.activeRun !== null && !this.activeRun.cancelRequested,
+          initEnvironment: currentInitEnvironment
         })
       : createEmptyScanState({
           workspaceName: workspace.name,
@@ -748,7 +756,8 @@ export class OpenShrikeScanController {
           activeOperationLabel: this.workspaceInitialized ? this.activeOperationLabel : UNINITIALIZED_OPERATION_LABEL,
           ...(this.runtimeMode ? {runtimeModeLabel: this.runtimeMode} : {}),
           ...(this.parallelism !== null ? {parallelismLabel: String(this.parallelism)} : {}),
-          isInitialized: this.workspaceInitialized
+          isInitialized: this.workspaceInitialized,
+          initEnvironment: currentInitEnvironment
         });
 
     this.model.setState(state);
@@ -1008,6 +1017,25 @@ export class OpenShrikeScanController {
     }
 
     return this.context;
+  }
+
+  private assertFixActionAvailable(context: ScanContext): void {
+    if (!context.request || !context.report) {
+      throw new Error(
+        'Auto-Fix is available only after a scan or last-scan snapshot has been loaded for this repository.'
+      );
+    }
+  }
+
+  private createSingleCheckScanOverrides(
+    context: ScanContext,
+    checkId: string
+  ): Partial<ScanCommandOptions> {
+    return {
+      checkId,
+      policyId: undefined,
+      projectChecksDir: context.request?.projectChecksDir ?? undefined
+    };
   }
 
   private appendOutputLine(message: string): void {

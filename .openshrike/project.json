@@ -21,7 +21,7 @@
     "scanModel": "azure/gpt-5.4-mini",
     "fixAgent": "shrike-fixer",
     "fixModel": "azure/gpt-5.4",
-    "mode": "docker",
+    "mode": "native",
     "parallelism": 10
   },
   "scan": {

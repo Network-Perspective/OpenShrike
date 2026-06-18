@@ -130,8 +130,9 @@ export class OpenShrikeExtensionModel {
 function isSameInitEnvironmentState(left: InitEnvironmentState, right: InitEnvironmentState): boolean {
   return left.statusKind === right.statusKind
     && left.requiredNodeRange === right.requiredNodeRange
-    && left.detectedVersion === right.detectedVersion
-    && left.detectedPath === right.detectedPath
+    && left.detectedNodeVersion === right.detectedNodeVersion
+    && left.detectedNodePath === right.detectedNodePath
+    && left.detectedShrikePath === right.detectedShrikePath
     && left.message === right.message
     && left.checkedAtMs === right.checkedAtMs;
 }
