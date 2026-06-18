@@ -21,7 +21,7 @@ export type InitScreen =
 export type ExistingInitAction = 'update' | 'replace' | 'exit';
 export type OpenCodeDiscoveryAction = 'use-discovered' | 'auth-login' | 'exit';
 export type OpenCodeInstallAction = 'install-curl' | 'install-npm' | 'install-brew' | 'back';
-export type SuccessAction = 'run-scan' | 'change-defaults' | 'exit';
+export type SuccessAction = 'exit';
 export type ChangeDefaultsAction = 'policy' | 'scan-model' | 'fix-model' | 'runtime' | 'parallelism' | 'done';
 export type FixModelChoiceAction = 'same-as-scan' | 'use-suggested' | 'choose-other' | 'back';
 

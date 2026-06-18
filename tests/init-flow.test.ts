@@ -62,7 +62,7 @@ afterEach(async () => {
 });
 
 describe('runInitCommand', () => {
-  it('initializes a fresh repo from discovered OpenCode config and returns run-scan when selected', async () => {
+  it('initializes a fresh repo from discovered OpenCode config and exits after setup complete', async () => {
     const repoRoot = await makeTypescriptRepo();
     const {homeRoot} = await makeDiscoveredOpenCodeHome({
       models: ['azure/gpt-5.4-mini', 'azure/gpt-5.4'],
@@ -122,7 +122,18 @@ describe('runInitCommand', () => {
           {label: 'Policies', value: 'lang-typescript, lang-python'},
           {label: 'Runtime mode', value: 'native'}
         ]);
-        return {type: 'submit', value: 'run-scan'};
+        expect(spec.options).toEqual([]);
+        expect(spec.submitValue).toBe('exit');
+        expect(spec.autoSubmit).toBe(true);
+        expect(spec.showHintBar).toBe(false);
+        expect(spec.noteRailTone).toBe('muted');
+        expect(spec.allowCancel).toBe(false);
+        expect(spec.noteLines).toEqual([[
+          {text: 'Run ', color: 'secondary'},
+          {text: 'shrike scan', color: 'cursor'},
+          {text: ' to scan this repository', color: 'secondary'}
+        ]]);
+        return {type: 'submit', value: 'exit'};
       }
     ]);
     mockCreateInitUiSession.mockReturnValue(session);
@@ -135,9 +146,10 @@ describe('runInitCommand', () => {
     session.assertFinished();
     expect(session.suspend).not.toHaveBeenCalled();
     expect(session.close).toHaveBeenCalledOnce();
+    expect(session.close).toHaveBeenCalledWith({preserveOutput: true});
     expect(result).toMatchObject({
       repoRoot,
-      action: 'run-scan',
+      action: 'exit',
       wroteFiles: true,
       projectConfigPath: path.join(repoRoot, '.openshrike', 'project.json'),
       opencodeConfigPath: path.join(repoRoot, '.openshrike', 'opencode.json'),

@@ -18,8 +18,7 @@ import type {
   InitScreen,
   InitWizardContext,
   OpenCodeDiscoveryAction,
-  OpenCodeInstallAction,
-  SuccessAction
+  OpenCodeInstallAction
 } from './init/state.js';
 import {detectProjectType, rankPoliciesForProject} from './init/project-detect.js';
 import {discoverExistingInit, discoverOpenCodeSetup, findRepoRoot, getOpenCodeInstallOptions} from './init/discovery.js';
@@ -33,7 +32,7 @@ export interface InitCommandOptions {
 
 export interface InitResult {
   repoRoot: string;
-  action: 'exit' | 'run-scan';
+  action: 'exit';
   wroteFiles: boolean;
   projectConfigPath?: string | undefined;
   opencodeConfigPath?: string | undefined;
@@ -68,6 +67,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
   let selectionFlow: SelectionFlow = 'initial';
   let modelSelectionFlow: ModelSelectionFlow = 'initial-scan';
   let changeDefaultsOrigin: ChangeDefaultsOrigin = 'success';
+  let preserveOutput = false;
   const history: InitHistoryItem[] = [];
   const ui = createInitUiSession();
 
@@ -448,12 +448,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
 
         case 'success': {
           const prompt = 'Setup complete';
-          const optionsForScreen: InitScreenOption<SuccessAction>[] = [
-            {value: 'run-scan', label: 'Run `shrike scan`'},
-            {value: 'change-defaults', label: 'Change saved defaults'},
-            {value: 'exit', label: 'Exit'}
-          ];
-          const selection = await ui.showScreen<SuccessAction>({
+          const selection = await ui.showScreen<'exit'>({
             prompt,
             bodyLines: ['Repository initialized for Shrike.'],
             summaryItems: [
@@ -462,26 +457,25 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
               {label: 'Policies', value: formatPolicySelection(context.selections.policyIds)},
               {label: 'Runtime mode', value: context.selections.runtimeMode}
             ],
-            options: optionsForScreen,
-            allowCancel: true
+            noteLines: [[
+              {text: 'Run ', color: 'secondary'},
+              {text: 'shrike scan', color: 'cursor'},
+              {text: ' to scan this repository', color: 'secondary'}
+            ]],
+            noteRailTone: 'muted',
+            options: [],
+            submitValue: 'exit',
+            autoSubmit: true,
+            showHintBar: false,
+            allowCancel: false
           }, history);
 
           if (selection.type !== 'submit') {
             break;
           }
 
-          if (selection.value === 'run-scan') {
-            return buildCompletedResult(context, 'run-scan');
-          }
-
-          if (selection.value === 'change-defaults') {
-            pushSelectedHistory(history, 'success', prompt, optionsForScreen, selection.value!);
-            changeDefaultsOrigin = 'success';
-            screen = 'change-defaults';
-            break;
-          }
-
-          return buildCompletedResult(context, 'exit');
+          preserveOutput = true;
+          return buildCompletedResult(context);
         }
 
         case 'change-defaults': {
@@ -656,7 +650,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<InitR
 
     throw error;
   } finally {
-    ui.close();
+    ui.close({preserveOutput});
   }
 }
 
@@ -1084,19 +1078,19 @@ function buildExitResult(context: InitWizardContext): InitResult {
   };
 }
 
-function buildCompletedResult(context: InitWizardContext, action: 'exit' | 'run-scan'): InitResult {
+function buildCompletedResult(context: InitWizardContext): InitResult {
   const writeResult = context.writeResult;
   if (!writeResult) {
     return {
       repoRoot: context.repoRoot,
-      action,
+      action: 'exit',
       wroteFiles: false
     };
   }
 
   return {
     repoRoot: context.repoRoot,
-    action,
+    action: 'exit',
     wroteFiles: true,
     projectConfigPath: writeResult.projectConfigPath,
     opencodeConfigPath: writeResult.opencodeConfigPath,

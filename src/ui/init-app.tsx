@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {Box, Text, render, useInput} from 'ink';
 import {
   DialogFrame,
@@ -26,15 +26,25 @@ export interface InitScreenOption<T extends string> {
   searchText?: string | undefined;
 }
 
+export type InitThemeColor = keyof typeof initTheme;
+
+export interface InitTextFragment {
+  text: string;
+  color?: InitThemeColor | undefined;
+}
+
+export type InitTextLine = string | InitTextFragment[];
+
 export type InitScreenSelectionMode = 'single' | 'multiple';
 
 export interface InitScreenSpec<T extends string> {
   title?: string;
   prompt: string;
   tone?: 'normal' | 'warning' | 'error';
-  bodyLines?: string[];
+  bodyLines?: InitTextLine[];
   summaryItems?: Array<{label: string; value: string}>;
-  noteLines?: string[];
+  noteLines?: InitTextLine[];
+  noteRailTone?: DialogRailTone | undefined;
   options: InitScreenOption<T>[];
   initialValue?: T | undefined;
   initialValues?: T[] | undefined;
@@ -44,7 +54,11 @@ export interface InitScreenSpec<T extends string> {
   searchLabel?: string | undefined;
   allowBack?: boolean | undefined;
   allowCancel?: boolean | undefined;
-  helpLines?: string[] | undefined;
+  helpLines?: InitTextLine[] | undefined;
+  submitValue?: T | undefined;
+  submitHint?: string | undefined;
+  autoSubmit?: boolean | undefined;
+  showHintBar?: boolean | undefined;
 }
 
 export type InitScreenResult<T extends string> =
@@ -65,7 +79,7 @@ export interface InitUiSession {
     history: InitHistoryItem[]
   ): Promise<InitScreenResult<T>>;
   suspend(): void;
-  close(): void;
+  close(options?: {preserveOutput?: boolean}): void;
 }
 
 interface OptionNavigationState {
@@ -113,18 +127,21 @@ class InkInitUiSession implements InitUiSession {
   }
 
   suspend(): void {
+    this.close();
+  }
+
+  close(options?: {preserveOutput?: boolean}): void {
     if (!this.instance) {
       return;
     }
 
-    this.instance.clear();
+    if (!options?.preserveOutput) {
+      this.instance.clear();
+    }
+
     this.instance.unmount();
     this.instance.cleanup();
     this.instance = null;
-  }
-
-  close(): void {
-    this.suspend();
   }
 }
 
@@ -160,6 +177,7 @@ function InitScreenView<T extends string>(props: {
   const [showHelp, setShowHelp] = useState(false);
   const [isSettled, setIsSettled] = useState(false);
   const selectionMode = props.spec.selectionMode ?? 'single';
+  const hasSelectableOptions = props.spec.options.length > 0;
   const minSelections = selectionMode === 'multiple'
     ? Math.max(0, props.spec.minSelections ?? 1)
     : 0;
@@ -167,6 +185,26 @@ function InitScreenView<T extends string>(props: {
   const filteredOptions = getFilteredOptions(props.spec.options, query, Boolean(props.spec.searchable));
   const effectiveNavigation = resolveOptionNavigation(navigation, filteredOptions.length);
   const effectiveIndex = effectiveNavigation.selectedIndex;
+
+  useEffect(() => {
+    const submitValue = props.spec.submitValue;
+
+    if (!props.spec.autoSubmit || hasSelectableOptions || submitValue === undefined) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setIsSettled(true);
+      props.onResolve({
+        type: 'submit',
+        value: submitValue
+      });
+    }, 0);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [hasSelectableOptions, props.onResolve, props.spec.autoSubmit, props.spec.submitValue]);
 
   useInput((input, key) => {
     if (isSettled) {
@@ -204,22 +242,22 @@ function InitScreenView<T extends string>(props: {
       return;
     }
 
-    if (props.spec.searchable && isBackspace(input, key)) {
+    if (hasSelectableOptions && props.spec.searchable && isBackspace(input, key)) {
       setQuery(previous => previous.slice(0, -1));
       return;
     }
 
-    if (props.spec.searchable && isPrintableInput(input, key)) {
+    if (hasSelectableOptions && props.spec.searchable && isPrintableInput(input, key)) {
       setQuery(previous => previous + input);
       return;
     }
 
-    if (key.upArrow) {
+    if (hasSelectableOptions && key.upArrow) {
       setNavigation(previous => moveOptionNavigation(previous, filteredOptions.length, -1));
       return;
     }
 
-    if (key.downArrow) {
+    if (hasSelectableOptions && key.downArrow) {
       setNavigation(previous => moveOptionNavigation(previous, filteredOptions.length, 1));
       return;
     }
@@ -243,6 +281,15 @@ function InitScreenView<T extends string>(props: {
       props.onResolve({
         type: 'submit',
         value: filteredOptions[effectiveIndex]!.value
+      });
+      return;
+    }
+
+    if (key.return && !hasSelectableOptions && props.spec.submitValue !== undefined) {
+      setIsSettled(true);
+      props.onResolve({
+        type: 'submit',
+        value: props.spec.submitValue
       });
     }
   });
@@ -274,6 +321,10 @@ export function InitScreenLayout<T extends string>(props: {
   const hints = buildHintBar(props.spec);
   const headerRailTone: DialogRailTone = 'muted';
   const choiceRailTone: DialogRailTone = 'active';
+  const noteRailTone = props.spec.noteRailTone ?? choiceRailTone;
+  const hasSelectableOptions = props.spec.options.length > 0;
+  const hasVisibleHints = hints.length > 0;
+  const showHelp = props.showHelp && Boolean(props.spec.helpLines && props.spec.helpLines.length > 0);
   const visibleWindow = getVisibleOptionWindow(
     props.filteredOptions,
     props.effectiveIndex,
@@ -303,14 +354,14 @@ export function InitScreenLayout<T extends string>(props: {
         <SummaryBlock items={props.spec.summaryItems} railTone={headerRailTone} />
       ) : null}
       <DialogLine railTone="none" />
-      {props.spec.searchable ? (
+      {hasSelectableOptions && props.spec.searchable ? (
         <DialogLine railTone={choiceRailTone}>
           <Text color={initTheme.secondary}>{`${props.spec.searchLabel ?? 'Search'}: `}</Text>
           {props.query.length > 0 ? <Text color={initTheme.primary}>{props.query}</Text> : null}
           <Text backgroundColor={initTheme.cursor}> </Text>
         </DialogLine>
       ) : null}
-      {props.filteredOptions.length > 0 ? (
+      {hasSelectableOptions && props.filteredOptions.length > 0 ? (
         <>
           <SelectList
             items={visibleWindow.options.map((option, index) => ({
@@ -330,26 +381,26 @@ export function InitScreenLayout<T extends string>(props: {
             </DialogLine>
           ) : null}
         </>
-      ) : (
+      ) : hasSelectableOptions ? (
         <DialogLine railTone={choiceRailTone}>
           <Text color={initTheme.secondary}>No matching options.</Text>
         </DialogLine>
-      )}
-      {renderTextLines(props.spec.noteLines, choiceRailTone)}
-      <DialogLine railTone={choiceRailTone} />
-      {props.showHelp && props.spec.helpLines && props.spec.helpLines.length > 0 ? (
+      ) : null}
+      {renderTextLines(props.spec.noteLines, noteRailTone)}
+      {showHelp || hasVisibleHints ? <DialogLine railTone={choiceRailTone} /> : null}
+      {showHelp ? (
         <>
           {renderTextLines(props.spec.helpLines, choiceRailTone)}
-          <DialogLine railTone={choiceRailTone} />
+          {hasVisibleHints ? <DialogLine railTone={choiceRailTone} /> : null}
         </>
       ) : null}
-      <KeyHintBar hints={hints} railTone={choiceRailTone} />
+      {hasVisibleHints ? <KeyHintBar hints={hints} railTone={choiceRailTone} /> : null}
     </DialogFrame>
   );
 }
 
 function renderTextLines(
-  lines: string[] | undefined,
+  lines: InitTextLine[] | undefined,
   railTone: DialogRailTone
 ): React.ReactNode {
   if (!lines || lines.length === 0) {
@@ -359,8 +410,8 @@ function renderTextLines(
   return (
     <>
       {lines.map((line, index) => (
-        <DialogLine key={`${index}:${line}`} railTone={railTone}>
-          <Text color={initTheme.secondary}>{line || ' '}</Text>
+        <DialogLine key={index} railTone={railTone}>
+          {renderTextLine(line)}
         </DialogLine>
       ))}
     </>
@@ -368,13 +419,23 @@ function renderTextLines(
 }
 
 function buildHintBar<T extends string>(spec: InitScreenSpec<T>): string[] {
-  const hints = ['↑/↓ to select'];
-  if (spec.selectionMode === 'multiple') {
-    hints.push('Space: toggle');
+  if (spec.showHintBar === false) {
+    return [];
   }
-  hints.push('Enter: confirm');
 
-  if (spec.searchable) {
+  const hints: string[] = [];
+
+  if (spec.options.length > 0) {
+    hints.push('↑/↓ to select');
+    if (spec.selectionMode === 'multiple') {
+      hints.push('Space: toggle');
+    }
+    hints.push('Enter: confirm');
+  } else if (spec.submitValue !== undefined) {
+    hints.push(`Enter: ${spec.submitHint ?? 'continue'}`);
+  }
+
+  if (spec.options.length > 0 && spec.searchable) {
     hints.push('Type: to search');
   }
 
@@ -391,6 +452,29 @@ function buildHintBar<T extends string>(spec: InitScreenSpec<T>): string[] {
   }
 
   return hints;
+}
+
+function renderTextLine(line: InitTextLine): React.ReactNode {
+  if (typeof line === 'string') {
+    return <Text color={initTheme.secondary}>{line || ' '}</Text>;
+  }
+
+  if (line.length === 0) {
+    return <Text> </Text>;
+  }
+
+  return (
+    <Text>
+      {line.map((fragment, index) => (
+        <Text
+          key={`${index}:${fragment.text}`}
+          color={fragment.color ? initTheme[fragment.color] : initTheme.secondary}
+        >
+          {fragment.text}
+        </Text>
+      ))}
+    </Text>
+  );
 }
 
 function getFilteredOptions<T extends string>(

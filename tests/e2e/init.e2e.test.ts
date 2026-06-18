@@ -66,31 +66,24 @@ describe('init terminal e2e', () => {
         source: 'screen',
         timeoutMs: 30_000
       });
-      await session.waitForIdleFrame({
-        idleMs: 200,
-        timeoutMs: 10_000
+      await session.waitForText('Run shrike scan to scan this repository', {
+        source: 'either',
+        timeoutMs: 30_000
       });
+      const exit = await session.waitForExit(30_000);
+      expect(exit.exitCode).toBe(0);
 
       const completedScreen = await session.screen();
       expect(completedScreen).toContain('Setup complete');
       expect(completedScreen).toContain(fixture.selectedScanModel);
       expect(completedScreen).toContain(fixture.selectedFixModel);
       expect(completedScreen).toContain(fixture.expectedPolicyId);
-
-      session.press('down');
-      await session.waitForText('\u25cf  Change saved defaults', {
-        source: 'screen',
-        timeoutMs: 5_000
-      });
-      session.press('down');
-      await session.waitForText('\u25cf  Exit', {
-        source: 'screen',
-        timeoutMs: 5_000
-      });
-      session.press('enter');
-
-      const exit = await session.waitForExit(30_000);
-      expect(exit.exitCode).toBe(0);
+      expect(completedScreen).toContain('Run shrike scan to scan this repository');
+      expect(completedScreen).toContain('│  Run shrike scan to scan this repository');
+      expect(completedScreen).not.toContain('Change saved defaults');
+      expect(completedScreen).not.toContain('Run `shrike scan`');
+      expect(completedScreen).not.toContain('Enter: exit');
+      expect(completedScreen).not.toContain('Esc: cancel');
 
       const projectConfig = await loadProjectConfig(fixture.projectConfigPath);
       const runtimeConfig = await loadRuntimeConfig(fixture.repoOpencodeConfigPath, {

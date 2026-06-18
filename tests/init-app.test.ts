@@ -189,6 +189,43 @@ describe('init ui layout', () => {
     );
   });
 
+  it('renders an optionless submit screen with a brighter command hint', () => {
+    const spec: InitScreenSpec<'exit'> = {
+      prompt: 'Setup complete',
+      options: [],
+      submitValue: 'exit',
+      autoSubmit: true,
+      showHintBar: false,
+      noteRailTone: 'muted',
+      noteLines: [[
+        {text: 'Run ', color: 'secondary'},
+        {text: 'shrike scan', color: 'cursor'},
+        {text: ' to scan this repository', color: 'secondary'}
+      ]]
+    };
+
+    const output = renderToString(
+      React.createElement(InitScreenLayout, {
+        spec,
+        history: [],
+        query: '',
+        showHelp: false,
+        filteredOptions: spec.options,
+        selectedValues: [],
+        effectiveIndex: 0,
+        visibleStart: 0
+      }),
+      {columns: 120}
+    );
+    const plainOutput = stripAnsi(output);
+
+    expect(plainOutput).toContain('Run shrike scan to scan this repository');
+    expect(plainOutput).not.toContain('Enter: exit');
+    expect(plainOutput).not.toContain('Esc: cancel');
+    expect(plainOutput).toContain('│  Run shrike scan to scan this repository');
+    expect(plainOutput).not.toContain('↑/↓ to select');
+  });
+
   it('scrolls the visible window when moving past the bottom edge', () => {
     expect(moveOptionNavigation({
       selectedIndex: 19,
