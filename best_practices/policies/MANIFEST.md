@@ -3,7 +3,7 @@ id: policy-manifest
 title: Policy Manifest
 kind: manifest
 status: active
-policy-count: 15
+policy-count: 17
 ---
 
 # Policy Manifest
@@ -25,4 +25,6 @@ policy-count: 15
 | [Rust Language Policy](lang-rust.md) | language | shared-foundation | 71 |
 | [Swift Language Policy](lang-swift.md) | language | shared-foundation | 66 |
 | [TypeScript Language Policy](lang-typescript.md) | language | shared-foundation | 69 |
+| [Clean Architecture Doctrine](doctrine-clean-arch.md) | doctrine | None | 3 |
+| [Vertical Slice Architecture Doctrine](doctrine-vertical-slice.md) | doctrine | None | 3 |
 

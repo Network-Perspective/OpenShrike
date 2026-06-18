@@ -215,6 +215,14 @@ img { max-width: 100%; height: auto; }
   font-size: 1.0625rem;
 }
 
+.section__subtitle {
+  font-size: clamp(1.25rem, 2.5vw, 1.5rem);
+  font-weight: 700;
+  color: var(--color-heading);
+  text-align: center;
+  margin: 2.5rem 0 1rem;
+}
+
 /* ── VS Code section ─────────────────────────────────────── */
 
 .vscode-shot {

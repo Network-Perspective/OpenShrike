@@ -6,6 +6,7 @@ permalink: /library/
 {%- assign allchecks = site.checks | concat: site.extended -%}
 {%- assign foundation = site.policies | where: "kind", "foundation" -%}
 {%- assign languages = site.policies | where: "kind", "language" | sort: "title" -%}
+{%- assign doctrines = site.policies | where: "kind", "doctrine" | sort: "title" -%}
 {%- assign by_domain = allchecks | group_by: "domain" -%}
 {%- assign by_lang = allchecks | group_by: "language" -%}
 
@@ -44,6 +45,22 @@ permalink: /library/
       </a>
       {% endfor %}
     </div>
+
+    {% if doctrines.size > 0 %}
+    <h3 class="section__subtitle">Architecture doctrines</h3>
+    <p class="section__lead">
+      Opt-in overlays for a specific architecture. Enable one on top of your language policy when
+      your repo commits to that doctrine.
+    </p>
+    <div class="card-grid card-grid--3col">
+      {% for p in doctrines %}
+      <a class="card card--link" href="{{ p.url | relative_url }}">
+        <div class="card__title">{{ p.title }}</div>
+        <p class="card__text">{{ p["check-count"] }} checks · architecture overlay</p>
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
 </section>
 

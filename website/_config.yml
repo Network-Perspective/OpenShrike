@@ -1,7 +1,7 @@
 title: OpenShrike
 description: Turn engineering best practices into tests your team can run and enforce.
-url: "https://network-perspective.github.io"
-baseurl: "/OpenShrike"
+url: "https://openshrike.networkperspective.ai"
+baseurl: ""
 
 markdown: kramdown
 permalink: pretty
