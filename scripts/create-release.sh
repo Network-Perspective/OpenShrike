@@ -11,6 +11,7 @@ Defaults:
 
 Behavior:
   - bumps package.json/package-lock.json version
+  - refreshes docker/openshrike-runtime.package-lock.json
   - stages all current changes
   - creates commit: chore(release): v<version>
   - creates annotated tag: v<version>
@@ -138,6 +139,8 @@ echo "Preparing release ${TAG_NAME} on branch ${CURRENT_BRANCH}"
 echo "This will stage and commit all current changes in the repository."
 
 npm version "$TARGET_VERSION" --no-git-tag-version
+npm run prepare:vscode-runtime
+npm run verify:vscode-runtime
 
 git add -A
 
