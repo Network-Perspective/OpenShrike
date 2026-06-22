@@ -22,10 +22,12 @@ best_practices/
 ├── extended/      Additional checks layered on top of the foundation,
 │                  grouped by domain and language
 └── policies/      Selectable bundles that reference checks by relative link
-    ├── MANIFEST.md          Index of every policy (excluded from selection)
-    ├── shared-foundation.md Cross-language baseline
-    ├── lang-*.md            One per language; each inlines shared-foundation
-    └── doctrine-*.md        Opt-in architecture overlays
+    ├── MANIFEST.md                    Index of every policy (excluded from selection)
+    ├── baseline-shared-foundation.md Minimal cross-language starter
+    ├── shared-foundation.md          Full cross-language foundation
+    ├── baseline-lang-*.md            Minimal starter per language
+    ├── lang-*.md                     Full per-language bundles
+    └── doctrine-*.md                 Opt-in architecture overlays
 ```
 
 ## Anatomy of a check
@@ -75,10 +77,10 @@ check-count: 77             # informational
 
 - **`kind: manifest`** is excluded from selection — that is `MANIFEST.md`, the
   human-readable index of all policies.
-- **`includes`** merges another policy's checks. `lang-*` policies include
-  `shared-foundation`, so selecting a language policy already covers the
-  baseline; add a second `lang-*` only when a repo has another substantial
-  implementation language.
+- **`includes`** merges another policy's checks. Starter `baseline-lang-*`
+  policies include `baseline-shared-foundation`; full `lang-*` policies include
+  `shared-foundation`. Policies can also add their own direct checks on top of
+  included policies.
 - **`kind: doctrine`** policies are opt-in architecture overlays that carry
   only their doctrine checks (they do **not** include the foundation). Enable
   one on top of a language policy when the repo commits to that architecture.

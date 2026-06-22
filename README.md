@@ -167,7 +167,7 @@ shrike scan --scope branch \
 shrike scan --scope pr \
   --target develop...HEAD            # PR-style diff scan
 shrike scan --scope full             # scan the whole repository
-shrike scan --policy csharp-baseline # run a specific policy
+shrike scan --policy baseline-lang-csharp # run a specific policy
 shrike scan --runtime docker         # run in an ephemeral container
 shrike scan --help                   # full reference
 ```
@@ -196,7 +196,7 @@ shrike fix --help         # full reference
 ## Development
 
 ```bash
-npm run dev -- scan --policy csharp-baseline --path .
+npm run dev -- scan --policy baseline-lang-csharp --path .
 npm run build
 npm run typecheck
 npm test

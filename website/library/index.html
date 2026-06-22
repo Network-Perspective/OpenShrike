@@ -4,8 +4,10 @@ title: "Best-Practice Library — OpenShrike"
 permalink: /library/
 ---
 {%- assign allchecks = site.checks | concat: site.extended -%}
-{%- assign foundation = site.policies | where: "kind", "foundation" -%}
-{%- assign languages = site.policies | where: "kind", "language" | sort: "title" -%}
+{%- assign baseline_foundation = site.policies | where: "title", "Baseline Shared Foundation Policy" -%}
+{%- assign full_foundation = site.policies | where: "title", "Shared Foundation Policy" -%}
+{%- assign baseline_languages = site.policies | where_exp: "p", "p.includes contains 'baseline-shared-foundation'" | sort: "title" -%}
+{%- assign full_languages = site.policies | where_exp: "p", "p.includes contains 'shared-foundation'" | sort: "title" -%}
 {%- assign doctrines = site.policies | where: "kind", "doctrine" | sort: "title" -%}
 {%- assign by_domain = allchecks | group_by: "domain" -%}
 {%- assign by_lang = allchecks | group_by: "language" -%}
@@ -28,20 +30,56 @@ permalink: /library/
   <div class="container">
     <h2 class="section__title">Policies</h2>
     <p class="section__lead">
-      A policy is a curated bundle of checks. Enable one per substantial language in your repo;
-      every language policy already inlines the shared foundation.
+      A policy is a curated bundle of checks. Start with a baseline policy for a low-noise rollout,
+      move up to a full language policy when you want broader coverage, then layer an architecture
+      doctrine on top when your repo commits to one. Language policies include a foundation policy
+      for shared cross-language concerns.
+    </p>
+
+    <h3 class="section__subtitle">Baseline policies</h3>
+    <p class="section__lead">
+      High-signal starter policies for low-noise onboarding. Each baseline language policy includes
+      the baseline foundation.
     </p>
     <div class="card-grid card-grid--3col">
-      {% for p in foundation %}
+      {% for p in baseline_foundation %}
       <a class="card card--highlighted card--link" href="{{ p.url | relative_url }}">
         <div class="card__title">{{ p.title }}</div>
-        <p class="card__text">Cross-language baseline · {{ p["check-count"] }} checks</p>
+        <p class="card__text">Cross-language foundation · {{ p["check-count"] }} checks</p>
       </a>
       {% endfor %}
-      {% for p in languages %}
+      {% for p in baseline_languages %}
       <a class="card card--link" href="{{ p.url | relative_url }}">
         <div class="card__title">{{ p.title }}</div>
-        <p class="card__text">{{ p["check-count"] }} checks · includes shared foundation</p>
+        {% if p.includes and p.includes.size > 0 %}
+        <p class="card__text">{{ p["check-count"] }} checks · includes {{ p.includes | join: ', ' }}</p>
+        {% else %}
+        <p class="card__text">{{ p["check-count"] }} checks</p>
+        {% endif %}
+      </a>
+      {% endfor %}
+    </div>
+
+    <h3 class="section__subtitle">Full language policies</h3>
+    <p class="section__lead">
+      Broader coverage for repositories with substantial code in a language. Each full language
+      policy includes the shared foundation.
+    </p>
+    <div class="card-grid card-grid--3col">
+      {% for p in full_foundation %}
+      <a class="card card--highlighted card--link" href="{{ p.url | relative_url }}">
+        <div class="card__title">{{ p.title }}</div>
+        <p class="card__text">Cross-language foundation · {{ p["check-count"] }} checks</p>
+      </a>
+      {% endfor %}
+      {% for p in full_languages %}
+      <a class="card card--link" href="{{ p.url | relative_url }}">
+        <div class="card__title">{{ p.title }}</div>
+        {% if p.includes and p.includes.size > 0 %}
+        <p class="card__text">{{ p["check-count"] }} checks · includes {{ p.includes | join: ', ' }}</p>
+        {% else %}
+        <p class="card__text">{{ p["check-count"] }} checks</p>
+        {% endif %}
       </a>
       {% endfor %}
     </div>

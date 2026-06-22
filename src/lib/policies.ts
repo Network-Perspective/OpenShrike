@@ -72,11 +72,11 @@ async function resolveBundledPolicyEntry(
   }
 
   const directCheckIds = match.checkIds;
-  if (directCheckIds.length > 0) {
+  if (directCheckIds.length > 0 && match.includes.length === 0) {
     return match;
   }
 
-  if (match.includes.length === 0) {
+  if (directCheckIds.length === 0 && match.includes.length === 0) {
     throw new Error(`Policy '${match.id}' contains no check definitions.`);
   }
 
@@ -88,7 +88,10 @@ async function resolveBundledPolicyEntry(
 
   return {
     ...match,
-    checkIds: uniqueCaseInsensitive(includedPolicies.flatMap(policy => policy.checkIds))
+    checkIds: uniqueCaseInsensitive([
+      ...directCheckIds,
+      ...includedPolicies.flatMap(policy => policy.checkIds)
+    ])
   };
 }
 

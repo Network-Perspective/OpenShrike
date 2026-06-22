@@ -21,9 +21,31 @@ describe('resolvePolicyDefinition', () => {
     expect(policy.checkIds).toContain('bp-sec-004');
   });
 
+  it('returns checks for baseline-shared-foundation', async () => {
+    const policy = await resolvePolicyDefinition('baseline-shared-foundation');
+
+    expect(policy.id).toBe('baseline-shared-foundation');
+    expect(policy.version).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(policy.checkIds).toHaveLength(19);
+    expect(policy.checkIds).toContain('bp-sec-001');
+    expect(policy.checkIds).toContain('ops-018');
+  });
+
+  it('merges included and direct checks for baseline language policies', async () => {
+    const policy = await resolvePolicyDefinition('baseline-lang-typescript');
+
+    expect(policy.id).toBe('baseline-lang-typescript');
+    expect(policy.version).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(policy.checkIds).toHaveLength(20);
+    expect(policy.checkIds).toContain('sec-typescript-001');
+    expect(policy.checkIds).toContain('bp-arch-001');
+  });
+
   it('lists selectable policies and excludes the manifest', async () => {
     const catalog = await listPolicyCatalog();
 
+    expect(catalog.map(policy => policy.id)).toContain('baseline-lang-typescript');
+    expect(catalog.map(policy => policy.id)).toContain('baseline-shared-foundation');
     expect(catalog.map(policy => policy.id)).toContain('lang-typescript');
     expect(catalog.map(policy => policy.id)).toContain('shared-foundation');
     expect(catalog.map(policy => policy.id)).not.toContain('policy-manifest');
