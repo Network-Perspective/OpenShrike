@@ -104,8 +104,8 @@ describe('runInitCommand', () => {
       spec => {
         expect(spec.prompt).toBe('Select default policies');
         expect(spec.selectionMode).toBe('multiple');
-        expect(spec.options[0]?.value).toBe('lang-typescript');
-        expect(spec.initialValues).toEqual(['lang-typescript']);
+        expect(spec.options[0]?.value).toBe('baseline-lang-typescript');
+        expect(spec.initialValues).toEqual(['baseline-lang-typescript']);
         expect(spec.noteLines).toEqual([
           '',
           'Press Space to toggle policies, then Enter to confirm.',
@@ -207,6 +207,68 @@ describe('runInitCommand', () => {
     expect(runtimeConfig.config.model).toBe('azure/gpt-5.4-mini');
     expect(runtimeConfig.config.agent?.['shrike-checker']?.model).toBe('azure/gpt-5.4-mini');
     expect(runtimeConfig.config.agent?.['shrike-fixer']?.model).toBe('azure/gpt-5.4');
+  });
+
+  it('defaults an empty repo to the baseline shared foundation policy', async () => {
+    const repoRoot = await makeEmptyRepo();
+    const {homeRoot} = await makeDiscoveredOpenCodeHome({
+      models: ['azure/gpt-5.4-mini', 'azure/gpt-5.4'],
+      defaultModel: 'azure/gpt-5.4-mini',
+      authPresent: true
+    });
+    useHome(homeRoot);
+
+    const session = createScriptedSession([
+      spec => {
+        expect(spec.prompt).toBe('OpenCode discovery');
+        return {type: 'submit', value: 'use-discovered'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Select default scan model');
+        return {type: 'submit', value: 'azure/gpt-5.4-mini'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Select default fix model');
+        return {type: 'submit', value: 'use-suggested'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Select default policies');
+        expect(spec.bodyLines).toEqual([
+          'Detected project type: Shared / Mixed',
+          'Evidence: repository layout'
+        ]);
+        expect(spec.selectionMode).toBe('multiple');
+        expect(spec.options[0]?.value).toBe('baseline-shared-foundation');
+        expect(spec.initialValues).toEqual(['baseline-shared-foundation']);
+        return {type: 'submit', values: ['baseline-shared-foundation']};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Setup complete');
+        expect(spec.summaryItems).toEqual([
+          {label: 'Scan model', value: 'azure/gpt-5.4-mini'},
+          {label: 'Fix model', value: 'azure/gpt-5.4'},
+          {label: 'Policies', value: 'baseline-shared-foundation'},
+          {label: 'Runtime mode', value: 'native'}
+        ]);
+        return {type: 'submit', value: 'exit'};
+      }
+    ]);
+    mockCreateInitUiSession.mockReturnValue(session);
+
+    const result = await runInitCommand({
+      cwd: repoRoot,
+      force: false
+    });
+
+    session.assertFinished();
+    expect(result.action).toBe('exit');
+    expect(result.wroteFiles).toBe(true);
+
+    const projectConfig = await loadProjectConfig(path.join(repoRoot, '.openshrike', 'project.json'));
+    expect(projectConfig.config.init.projectType).toBe('shared');
+    expect(projectConfig.config.init.seedPolicyId).toBe('baseline-shared-foundation');
+    expect(projectConfig.config.init.seedPolicyIds).toEqual(['baseline-shared-foundation']);
+    expect(projectConfig.config.init.detectedFrom).toEqual(['repository layout']);
   });
 
   it('continues from auth-only OpenCode setup and writes the selected model to the repo-local config', async () => {
@@ -623,6 +685,12 @@ async function makeTypescriptRepo(): Promise<string> {
   );
   await fs.writeFile(path.join(repoRoot, 'tsconfig.json'), '{\n  "compilerOptions": {}\n}\n', 'utf8');
   await fs.writeFile(path.join(repoRoot, 'src', 'index.ts'), 'export const value = 1;\n', 'utf8');
+  return repoRoot;
+}
+
+async function makeEmptyRepo(): Promise<string> {
+  const repoRoot = await makeTempDirectory('openshrike-init-flow-empty-repo-');
+  await fs.mkdir(path.join(repoRoot, '.git'));
   return repoRoot;
 }
 

@@ -668,10 +668,11 @@ async function buildWizardContext(
     policyCatalog.map(policy => policy.id),
     projectDetection
   );
+  const fallbackPolicyId = defaultPolicyOrder[0] ?? projectDetection.recommended.defaultPolicyId;
   const defaultPolicyIds = resolveSavedPolicyIds(
     existingProjectConfig?.config,
     policyCatalog.map(policy => policy.id)
-  ) ?? [defaultPolicyOrder[0] ?? 'shared-foundation'];
+  ) ?? [fallbackPolicyId];
 
   return {
     repoRoot,
@@ -712,7 +713,7 @@ function resetSelections(context: InitWizardContext, includeExistingDefaults: bo
     context.policyCatalog.map(policy => policy.id),
     context.projectDetection
   );
-  const fallbackPolicyIds = [defaultPolicyOrder[0] ?? 'shared-foundation'];
+  const fallbackPolicyIds = [defaultPolicyOrder[0] ?? context.projectDetection.recommended.defaultPolicyId];
 
   if (includeExistingDefaults && context.existingProjectConfig?.config) {
     context.selections = {

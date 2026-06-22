@@ -180,7 +180,7 @@ Supported project types:
 
 Detection is implemented in `src/lib/init/project-detect.ts` using weighted
 markers. Policy ranking prefers the recommended baseline for the detected type,
-adjacent policies, then `shared-foundation`.
+adjacent baseline policies, then `baseline-shared-foundation`.
 
 ## Implemented State Machine
 

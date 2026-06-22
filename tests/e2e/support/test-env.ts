@@ -531,7 +531,7 @@ export async function createPhase4InitFixture(): Promise<Phase4InitFixture> {
     checksDirectory,
     selectedScanModel: 'azure/gpt-5.4-mini',
     selectedFixModel: 'azure/gpt-5.4',
-    expectedPolicyId: 'lang-typescript',
+    expectedPolicyId: 'baseline-lang-typescript',
     commandPath: resolveFromToolRoot('shrike'),
     env: {
       ...buildIsolatedHomeEnv(homeRoot),

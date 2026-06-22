@@ -56,15 +56,15 @@ const PROJECT_LABELS: Record<ProjectType, string> = {
 };
 
 const DEFAULT_POLICIES: Record<ProjectType, string> = {
-  typescript: 'lang-typescript',
-  javascript: 'lang-javascript',
-  python: 'lang-python',
-  'python-ml': 'lang-python-ml',
-  pytorch: 'lang-pytorch',
-  csharp: 'lang-csharp',
-  go: 'lang-go',
-  java: 'lang-java',
-  shared: 'shared-foundation'
+  typescript: 'baseline-lang-typescript',
+  javascript: 'baseline-lang-javascript',
+  python: 'baseline-lang-python',
+  'python-ml': 'baseline-lang-python-ml',
+  pytorch: 'baseline-lang-pytorch',
+  csharp: 'baseline-lang-csharp',
+  go: 'baseline-lang-go',
+  java: 'baseline-lang-java',
+  shared: 'baseline-shared-foundation'
 };
 
 export async function detectProjectType(repoRoot: string): Promise<DetectedProjectSummary> {
@@ -101,21 +101,19 @@ export function rankPoliciesForProject(
   policyIds: string[],
   detection: DetectedProjectSummary
 ): string[] {
-  const preferred = new Set<string>([
+  const preferredOrder = unique([
     detection.recommended.defaultPolicyId,
     ...getAdjacentPolicies(detection.recommended.projectType),
+    DEFAULT_POLICIES.shared,
     'shared-foundation'
   ]);
+  const preferred = new Set<string>(preferredOrder);
 
   const existingPreferred = policyIds.filter(policyId => preferred.has(policyId));
   const remaining = policyIds.filter(policyId => !preferred.has(policyId)).sort((left, right) => left.localeCompare(right));
 
   return [
-    ...sortByPreferredOrder(existingPreferred, [
-      detection.recommended.defaultPolicyId,
-      ...getAdjacentPolicies(detection.recommended.projectType),
-      'shared-foundation'
-    ]),
+    ...sortByPreferredOrder(existingPreferred, preferredOrder),
     ...remaining
   ];
 }
@@ -361,15 +359,15 @@ function unique(values: string[]): string[] {
 function getAdjacentPolicies(projectType: ProjectType): string[] {
   switch (projectType) {
     case 'typescript':
-      return ['lang-javascript'];
+      return ['baseline-lang-javascript'];
     case 'javascript':
-      return ['lang-typescript'];
+      return ['baseline-lang-typescript'];
     case 'python':
-      return ['lang-python-ml', 'lang-pytorch'];
+      return ['baseline-lang-python-ml', 'baseline-lang-pytorch'];
     case 'python-ml':
-      return ['lang-python', 'lang-pytorch'];
+      return ['baseline-lang-python', 'baseline-lang-pytorch'];
     case 'pytorch':
-      return ['lang-python', 'lang-python-ml'];
+      return ['baseline-lang-python', 'baseline-lang-python-ml'];
     default:
       return [];
   }
