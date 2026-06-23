@@ -291,10 +291,12 @@ async function resolveOpencodeBinary(toolRoot: string): Promise<string | null> {
     return pathResolved;
   }
 
-  const localCandidates = [
-    path.join(toolRoot, 'node_modules', '.bin', 'opencode'),
-    path.join(toolRoot, 'node_modules', '.bin', 'opencode.cmd')
-  ];
+  const localCandidateNames = process.platform === 'win32'
+    ? ['opencode.cmd', 'opencode']
+    : ['opencode', 'opencode.cmd'];
+  const localCandidates = localCandidateNames.map(candidateName =>
+    path.join(toolRoot, 'node_modules', '.bin', candidateName)
+  );
 
   for (const candidate of localCandidates) {
     if (await pathExists(candidate)) {

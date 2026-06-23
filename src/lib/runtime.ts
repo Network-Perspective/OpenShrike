@@ -57,7 +57,8 @@ export class OpenCodeRuntime {
     private readonly onEvent: ((event: RuntimeEventEnvelope) => void) | undefined,
     private readonly logger: ScanLogger | null,
     private readonly sessionErrors: Map<string, string>,
-    private readonly sessionMetadata: Map<string, RuntimeSessionMetadata>
+    private readonly sessionMetadata: Map<string, RuntimeSessionMetadata>,
+    private readonly sessionActivity: Map<string, number>
   ) {}
 
   static async create(options: OpenCodeRuntimeOptions): Promise<OpenCodeRuntime> {
@@ -77,6 +78,7 @@ export class OpenCodeRuntime {
     const streamAbortController = new AbortController();
     const sessionErrors = new Map<string, string>();
     const sessionMetadata = new Map<string, RuntimeSessionMetadata>();
+    const sessionActivity = new Map<string, number>();
     try {
       const stream = await server.client.event.subscribe({
         query: {
@@ -91,6 +93,10 @@ export class OpenCodeRuntime {
       const streamTask = (async () => {
         try {
           for await (const event of stream.stream) {
+            const sessionId = getEventSessionId(event);
+            if (sessionId) {
+              sessionActivity.set(sessionId, Date.now());
+            }
             if (event.type === 'session.error' && event.properties.sessionID) {
               sessionErrors.set(
                 event.properties.sessionID,
@@ -150,7 +156,8 @@ export class OpenCodeRuntime {
         options.onEvent,
         options.logger ?? null,
         sessionErrors,
-        sessionMetadata
+        sessionMetadata,
+        sessionActivity
       );
     } catch (error) {
       await server.close().catch(() => undefined);
@@ -172,6 +179,8 @@ export class OpenCodeRuntime {
     allowEmptyText?: boolean | undefined;
     requestTimeoutMs?: number | undefined;
     completionTimeoutMs?: number | undefined;
+    requestInactivityTimeoutMs?: number | undefined;
+    completionInactivityTimeoutMs?: number | undefined;
   }): Promise<PromptResult> {
     const sessionResult = await withTimeoutSignal(
       OPENCODE_REQUEST_TIMEOUT_MS,
@@ -195,6 +204,7 @@ export class OpenCodeRuntime {
       sessionId: session.id,
       title: options.title
     });
+    this.sessionActivity.set(session.id, Date.now());
     this.sessionMetadata.set(session.id, {
       checkId: options.checkId,
       batchId: options.batchId,
@@ -211,44 +221,64 @@ export class OpenCodeRuntime {
         providerID,
         modelID,
         title: options.title,
-        requestTimeoutMs: options.requestTimeoutMs ?? OPENCODE_REQUEST_TIMEOUT_MS,
-        completionTimeoutMs: options.completionTimeoutMs ?? OPENCODE_POLL_TIMEOUT_MS,
+        requestTimeoutMs:
+          options.requestInactivityTimeoutMs === undefined
+            ? options.requestTimeoutMs ?? OPENCODE_REQUEST_TIMEOUT_MS
+            : null,
+        completionTimeoutMs:
+          options.completionInactivityTimeoutMs === undefined
+            ? options.completionTimeoutMs ?? OPENCODE_POLL_TIMEOUT_MS
+            : null,
+        requestInactivityTimeoutMs: options.requestInactivityTimeoutMs ?? null,
+        completionInactivityTimeoutMs: options.completionInactivityTimeoutMs ?? null,
         promptLength: options.prompt.length,
         promptSha256: crypto.createHash('sha256').update(options.prompt).digest('hex').slice(0, 16)
       });
-      const responseResult = await withTimeoutSignal(
-        options.requestTimeoutMs ?? OPENCODE_REQUEST_TIMEOUT_MS,
-        'send OpenCode prompt',
-        signal =>
-          this.client.session.prompt({
-            path: {
-              id: session.id
+      const sendPrompt = (signal: AbortSignal) =>
+        this.client.session.prompt({
+          path: {
+            id: session.id
+          },
+          query: {
+            directory: this.repoPath
+          },
+          body: {
+            agent: options.agent,
+            model: {
+              providerID,
+              modelID
             },
-            query: {
-              directory: this.repoPath
+            ...(options.system !== undefined ? {system: options.system} : {}),
+            parts: [
+              {
+                type: 'text',
+                text: options.prompt
+              }
+            ]
+          },
+          signal
+        });
+      const responseResult = options.requestInactivityTimeoutMs === undefined
+        ? await withTimeoutSignal(
+            options.requestTimeoutMs ?? OPENCODE_REQUEST_TIMEOUT_MS,
+            'send OpenCode prompt',
+            sendPrompt
+          )
+        : await withSessionInactivitySignal(
+            {
+              sessionId: session.id,
+              inactivityTimeoutMs: options.requestInactivityTimeoutMs,
+              operation: 'send OpenCode prompt',
+              getLastActivityAt: () => this.sessionActivity.get(session.id) ?? Date.now()
             },
-            body: {
-              agent: options.agent,
-              model: {
-                providerID,
-                modelID
-              },
-              ...(options.system !== undefined ? {system: options.system} : {}),
-              parts: [
-                {
-                  type: 'text',
-                  text: options.prompt
-                }
-              ]
-            },
-            signal
-          })
-      );
+            sendPrompt
+          );
       const response = unwrapSdkResult<NonNullable<typeof responseResult.data>>(
         responseResult,
         'OpenCode prompt failed.'
       );
       const responseParts = Array.isArray(response.parts) ? response.parts : [];
+      this.sessionActivity.set(session.id, Date.now());
 
       let text = extractAssistantTextFromParts(responseParts);
       this.logger?.write('prompt.response', {
@@ -263,7 +293,10 @@ export class OpenCodeRuntime {
         session.id,
         text,
         options.allowEmptyText ?? false,
-        options.completionTimeoutMs ?? OPENCODE_POLL_TIMEOUT_MS
+        {
+          timeoutMs: options.completionTimeoutMs ?? OPENCODE_POLL_TIMEOUT_MS,
+          inactivityTimeoutMs: options.completionInactivityTimeoutMs
+        }
       );
 
       return {
@@ -317,6 +350,7 @@ export class OpenCodeRuntime {
         });
       } finally {
         this.sessionMetadata.delete(session.id);
+        this.sessionActivity.delete(session.id);
       }
     }
   }
@@ -329,6 +363,32 @@ export class OpenCodeRuntime {
   }
 
   private async waitForPromptCompletion(
+    sessionId: string,
+    initialText: string,
+    allowEmptyText: boolean,
+    options: {
+      timeoutMs: number;
+      inactivityTimeoutMs?: number | undefined;
+    }
+  ): Promise<string> {
+    if (options.inactivityTimeoutMs !== undefined) {
+      return await this.waitForPromptCompletionUntilInactive(
+        sessionId,
+        initialText,
+        allowEmptyText,
+        options.inactivityTimeoutMs
+      );
+    }
+
+    return await this.waitForPromptCompletionUntilTimeout(
+      sessionId,
+      initialText,
+      allowEmptyText,
+      options.timeoutMs
+    );
+  }
+
+  private async waitForPromptCompletionUntilTimeout(
     sessionId: string,
     initialText: string,
     allowEmptyText: boolean,
@@ -417,6 +477,105 @@ export class OpenCodeRuntime {
 
     throw new Error(`Timed out waiting for OpenCode assistant response for session '${sessionId}'.`);
   }
+
+  private async waitForPromptCompletionUntilInactive(
+    sessionId: string,
+    initialText: string,
+    allowEmptyText: boolean,
+    inactivityTimeoutMs: number
+  ): Promise<string> {
+    const startedAt = Date.now();
+    const inactivityMonitor = createInactivityMonitor({
+      sessionId,
+      inactivityTimeoutMs,
+      operation: 'wait for OpenCode assistant response',
+      getLastActivityAt: () => this.sessionActivity.get(sessionId) ?? startedAt
+    });
+    let attempt = 0;
+    let latestText = initialText;
+    let lastProgressSignature: string | null = null;
+
+    try {
+      while (true) {
+        throwIfSignalAborted(inactivityMonitor.signal);
+        attempt += 1;
+
+        const messagesResult = await promiseWithAbortSignal(
+          this.client.session.messages({
+            path: {
+              id: sessionId
+            },
+            query: {
+              directory: this.repoPath
+            },
+            signal: inactivityMonitor.signal
+          }),
+          inactivityMonitor.signal
+        );
+        const messages = unwrapSdkResult<NonNullable<typeof messagesResult.data>>(
+          messagesResult,
+          'Failed to read OpenCode session messages.'
+        );
+        const safeMessages = Array.isArray(messages) ? messages : [];
+        const progressSignature = summarizeMessageProgress(safeMessages);
+        if (lastProgressSignature === null) {
+          lastProgressSignature = progressSignature;
+        } else if (progressSignature !== lastProgressSignature) {
+          lastProgressSignature = progressSignature;
+          this.sessionActivity.set(sessionId, Date.now());
+        }
+
+        const latestAssistantMessage = getLatestAssistantMessage(safeMessages);
+        const text = latestAssistantMessage ? extractAssistantTextFromParts(latestAssistantMessage.parts) : '';
+        const completed = Boolean(latestAssistantMessage?.info.time.completed);
+        const messageError = latestAssistantMessage
+          ? getErrorMessage(latestAssistantMessage.info.error, '')
+          : '';
+
+        if (text) {
+          latestText = text;
+        }
+
+        this.logger?.write('prompt.wait.iteration', {
+          sessionId,
+          attempt,
+          messageCount: safeMessages.length,
+          assistantMessageCount: safeMessages.filter(message => message.info.role === 'assistant').length,
+          latestAssistantPartTypes: latestAssistantMessage?.parts.map(part => part.type) ?? [],
+          latestAssistantTextLength: text.length,
+          latestAssistantCompleted: completed,
+          latestAssistantError: messageError ?? null,
+          sessionError: this.sessionErrors.get(sessionId) ?? null,
+          sessionInactivityMs: Date.now() - (this.sessionActivity.get(sessionId) ?? startedAt)
+        });
+
+        if (messageError) {
+          throw new Error(messageError);
+        }
+
+        const sessionError = this.sessionErrors.get(sessionId);
+        if (sessionError) {
+          throw new Error(sessionError);
+        }
+
+        if (completed) {
+          if (latestText) {
+            return latestText;
+          }
+
+          if (allowEmptyText) {
+            return '';
+          }
+
+          throw new Error('OpenCode completed the prompt without any assistant text output.');
+        }
+
+        await delayWithSignal(500, inactivityMonitor.signal);
+      }
+    } finally {
+      inactivityMonitor.dispose();
+    }
+  }
 }
 
 function createRuntimeEventEnvelope(
@@ -437,26 +596,27 @@ function createRuntimeEventEnvelope(
 }
 
 function getEventSessionId(event: Event): string | null {
-  const runtimeEvent = event as {type: string; properties?: Record<string, unknown>};
-
-  switch (runtimeEvent.type) {
-    case 'message.part.delta':
-      return (runtimeEvent.properties as {sessionID?: string} | undefined)?.sessionID ?? null;
-    case 'message.part.updated':
-      return (runtimeEvent.properties as {part?: {sessionID?: string}} | undefined)?.part?.sessionID ?? null;
-    case 'message.updated':
-      return (runtimeEvent.properties as {info?: {sessionID?: string}} | undefined)?.info?.sessionID ?? null;
-    case 'session.status':
-      return (runtimeEvent.properties as {sessionID?: string} | undefined)?.sessionID ?? null;
-    case 'permission.updated':
-      return (runtimeEvent.properties as {sessionID?: string} | undefined)?.sessionID ?? null;
-    case 'permission.replied':
-      return (runtimeEvent.properties as {sessionID?: string} | undefined)?.sessionID ?? null;
-    case 'session.error':
-      return (runtimeEvent.properties as {sessionID?: string} | undefined)?.sessionID ?? null;
-    default:
-      return null;
+  const properties = (event as {properties?: Record<string, unknown>}).properties;
+  if (!properties) {
+    return null;
   }
+
+  const topLevelSessionId = (properties as {sessionID?: unknown}).sessionID;
+  if (typeof topLevelSessionId === 'string' && topLevelSessionId.trim()) {
+    return topLevelSessionId;
+  }
+
+  const partSessionId = (properties as {part?: {sessionID?: unknown}}).part?.sessionID;
+  if (typeof partSessionId === 'string' && partSessionId.trim()) {
+    return partSessionId;
+  }
+
+  const infoSessionId = (properties as {info?: {sessionID?: unknown}}).info?.sessionID;
+  if (typeof infoSessionId === 'string' && infoSessionId.trim()) {
+    return infoSessionId;
+  }
+
+  return null;
 }
 
 function parseProviderModel(model: string): [string, string] {
@@ -494,6 +654,45 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function delayWithSignal(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    throw getAbortError(signal);
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener('abort', abortHandler);
+      resolve();
+    }, ms);
+
+    const abortHandler = () => {
+      clearTimeout(timeout);
+      signal.removeEventListener('abort', abortHandler);
+      reject(getAbortError(signal));
+    };
+
+    signal.addEventListener('abort', abortHandler, {once: true});
+  });
+}
+
+async function withSessionInactivitySignal<T>(
+  options: {
+    sessionId: string;
+    inactivityTimeoutMs: number;
+    operation: string;
+    getLastActivityAt: () => number;
+  },
+  callback: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+  const monitor = createInactivityMonitor(options);
+
+  try {
+    return await promiseWithAbortSignal(callback(monitor.signal), monitor.signal);
+  } finally {
+    monitor.dispose();
+  }
+}
+
 async function withTimeoutSignal<T>(
   timeoutMs: number,
   operation: string,
@@ -515,6 +714,79 @@ async function withTimeoutSignal<T>(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function createInactivityMonitor(options: {
+  sessionId: string;
+  inactivityTimeoutMs: number;
+  operation: string;
+  getLastActivityAt: () => number;
+}): {
+  signal: AbortSignal;
+  dispose: () => void;
+} {
+  const controller = new AbortController();
+  const checkForInactivity = () => {
+    if (controller.signal.aborted) {
+      return;
+    }
+
+    const inactivityMs = Date.now() - options.getLastActivityAt();
+    if (inactivityMs >= options.inactivityTimeoutMs) {
+      controller.abort(
+        new Error(
+          `${options.operation} timed out after ${options.inactivityTimeoutMs}ms of session inactivity for session '${options.sessionId}'.`
+        )
+      );
+    }
+  };
+  const interval = setInterval(checkForInactivity, getInactivityPollIntervalMs(options.inactivityTimeoutMs));
+  checkForInactivity();
+
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearInterval(interval);
+    }
+  };
+}
+
+function getInactivityPollIntervalMs(timeoutMs: number): number {
+  return Math.min(1_000, Math.max(10, Math.floor(timeoutMs / 10)));
+}
+
+async function promiseWithAbortSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    throw getAbortError(signal);
+  }
+
+  let abortHandler: (() => void) | undefined;
+  const abortPromise = new Promise<never>((_resolve, reject) => {
+    abortHandler = () => {
+      reject(getAbortError(signal));
+    };
+    signal.addEventListener('abort', abortHandler, {once: true});
+  });
+
+  try {
+    return await Promise.race([promise, abortPromise]);
+  } finally {
+    if (abortHandler) {
+      signal.removeEventListener('abort', abortHandler);
+    }
+  }
+}
+
+function throwIfSignalAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw getAbortError(signal);
+  }
+}
+
+function getAbortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error('OpenCode session activity monitor aborted the operation.');
 }
 
 async function findAvailablePort(): Promise<number> {
@@ -540,6 +812,145 @@ async function findAvailablePort(): Promise<number> {
       });
     });
   });
+}
+
+function summarizeMessageProgress(
+  messages: Array<{
+    info: Message;
+    parts: Part[];
+  }>
+): string {
+  return JSON.stringify(
+    messages.map(message => ({
+      id: message.info.id,
+      role: message.info.role,
+      completed:
+        'completed' in message.info.time
+          ? message.info.time.completed ?? null
+          : null,
+      error:
+        'error' in message.info
+          ? getErrorMessage((message.info as {error?: unknown}).error, '')
+          : '',
+      parts: message.parts.map(summarizePartProgress)
+    }))
+  );
+}
+
+function summarizePartProgress(part: Part): Record<string, unknown> {
+  switch (part.type) {
+    case 'text':
+    case 'reasoning':
+      return {
+        id: part.id,
+        type: part.type,
+        length: part.text.length
+      };
+    case 'tool':
+      return {
+        id: part.id,
+        type: part.type,
+        tool: part.tool,
+        status: part.state.status,
+        input: summarizeActivityValue(part.state.input),
+        outputLength:
+          'output' in part.state && typeof part.state.output === 'string'
+            ? part.state.output.length
+            : null,
+        errorLength:
+          'error' in part.state && typeof part.state.error === 'string'
+            ? part.state.error.length
+            : null,
+        title:
+          'title' in part.state && typeof part.state.title === 'string'
+            ? part.state.title.length
+            : null,
+        raw:
+          'raw' in part.state && typeof part.state.raw === 'string'
+            ? part.state.raw.length
+            : null
+      };
+    case 'agent':
+      return {
+        id: part.id,
+        type: part.type,
+        name: part.name
+      };
+    case 'subtask':
+      return {
+        id: part.id,
+        type: part.type,
+        agent: part.agent,
+        descriptionLength: part.description.length
+      };
+    case 'step-start':
+      return {
+        id: part.id,
+        type: part.type
+      };
+    case 'step-finish':
+      return {
+        id: part.id,
+        type: part.type,
+        reason: part.reason
+      };
+    case 'retry':
+      return {
+        id: part.id,
+        type: part.type,
+        attempt: part.attempt,
+        error: getErrorMessage(part.error, '')
+      };
+    case 'patch':
+      return {
+        id: part.id,
+        type: part.type,
+        fileCount: part.files.length
+      };
+    case 'compaction':
+      return {
+        id: part.id,
+        type: part.type,
+        auto: part.auto
+      };
+    default:
+      return {
+        type: part.type
+      };
+  }
+}
+
+function summarizeActivityValue(value: unknown): unknown {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === 'string') {
+    return {
+      type: 'string',
+      length: value.length
+    };
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return {
+      type: 'array',
+      length: value.length
+    };
+  }
+
+  if (typeof value === 'object') {
+    return {
+      type: 'object',
+      keys: Object.keys(value).sort()
+    };
+  }
+
+  return typeof value;
 }
 
 function getLatestAssistantMessage(

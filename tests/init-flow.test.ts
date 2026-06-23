@@ -5,6 +5,7 @@ import path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {loadRuntimeConfig, serializeConfig} from '../src/lib/config.js';
 import {loadProjectConfig} from '../src/lib/project-config.js';
+import {findToolRoot} from '../src/lib/project-root.js';
 import {writeShrikeInitFiles} from '../src/lib/init/write.js';
 import type {InitHistoryItem, InitScreenResult, InitScreenSpec} from '../src/ui/init-app.js';
 
@@ -34,8 +35,11 @@ const tempDirectories: string[] = [];
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
 const originalPath = process.env.PATH;
+const originalToolRoot = process.env.OPENSHRIKE_TOOL_ROOT;
 const stdinTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
 const stderrTtyDescriptor = Object.getOwnPropertyDescriptor(process.stderr, 'isTTY');
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+const actualToolRoot = findToolRoot({moduleUrl: import.meta.url, envToolRoot: null});
 
 beforeEach(() => {
   setTty(process.stdin, true);
@@ -53,6 +57,8 @@ afterEach(async () => {
   restoreEnv('HOME', originalHome);
   restoreEnv('USERPROFILE', originalUserProfile);
   restoreEnv('PATH', originalPath);
+  restoreEnv('OPENSHRIKE_TOOL_ROOT', originalToolRoot);
+  restorePlatform(platformDescriptor);
   vi.restoreAllMocks();
   await Promise.all(
     tempDirectories.splice(0).map(directory =>
@@ -646,6 +652,96 @@ describe('runInitCommand', () => {
     expect(projectConfig.config.runtime.scanModel).toBe('azure/gpt-5.4-mini');
     expect(projectConfig.config.runtime.fixModel).toBe('azure/gpt-5.4-mini');
   });
+
+  it('prefers the Windows repo-local opencode.cmd shim for auth login', async () => {
+    setPlatform('win32');
+
+    const repoRoot = await makeTypescriptRepo();
+    const {authPath, homeRoot} = await makeDiscoveredOpenCodeHome({
+      models: ['azure/gpt-5.4-mini', 'azure/gpt-5.4'],
+      defaultModel: 'azure/gpt-5.4-mini',
+      authPresent: false,
+      configPresent: false
+    });
+    const emptyPathDirectory = path.join(homeRoot, 'empty-bin');
+    await fs.mkdir(emptyPathDirectory, {recursive: true});
+    process.env.HOME = homeRoot;
+    process.env.USERPROFILE = homeRoot;
+    process.env.PATH = emptyPathDirectory;
+
+    const {cmdBinaryPath, shellShimPath, toolRoot} = await makeToolRootWithLocalOpencodeShims();
+    process.env.OPENSHRIKE_TOOL_ROOT = toolRoot;
+
+    mockSpawn.mockImplementation((command: string, args: string[], options: Record<string, unknown>) => {
+      expect(command).toBe(cmdBinaryPath);
+      expect(command).not.toBe(shellShimPath);
+
+      if (args[0] === 'auth' && args[1] === 'login') {
+        expect(options.cwd).toBe(repoRoot);
+        expect(options.shell).toBe(false);
+        expect(options.stdio).toBe('inherit');
+        const child = createMockChild();
+        void fs.mkdir(path.dirname(authPath), {recursive: true})
+          .then(() => fs.writeFile(authPath, '{"token":"test"}\n', 'utf8'))
+          .then(() => {
+            queueMicrotask(() => {
+              child.emit('close', 0, null);
+            });
+          });
+        return child;
+      }
+
+      if (args[0] === 'models') {
+        expect(options.cwd).toBe(repoRoot);
+        return createSuccessfulProcessChild([
+          'azure/gpt-5.4-mini',
+          'azure/gpt-5.4'
+        ].join('\n'));
+      }
+
+      throw new Error(`Unexpected external command: ${command} ${args.join(' ')}`);
+    });
+
+    const session = createScriptedSession([
+      spec => {
+        expect(spec.prompt).toBe('OpenCode authentication required');
+        return {type: 'submit', value: 'auth-login'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('OpenCode discovery');
+        return {type: 'submit', value: 'use-discovered'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Select default scan model');
+        return {type: 'submit', value: 'azure/gpt-5.4-mini'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Select default fix model');
+        return {type: 'submit', value: 'same-as-scan'};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Select default policies');
+        return {type: 'submit', values: ['lang-typescript']};
+      },
+      spec => {
+        expect(spec.prompt).toBe('Setup complete');
+        return {type: 'submit', value: 'exit'};
+      }
+    ]);
+    mockCreateInitUiSession.mockReturnValue(session);
+
+    const result = await runInitCommand({
+      cwd: repoRoot,
+      force: false
+    });
+
+    session.assertFinished();
+    expect(session.suspend).toHaveBeenCalledOnce();
+    expect(mockSpawn).toHaveBeenCalledTimes(2);
+    expect(mockSpawn.mock.calls.map(call => call[0])).toEqual([cmdBinaryPath, cmdBinaryPath]);
+    expect(await fs.readFile(authPath, 'utf8')).toContain('token');
+    expect(result.wroteFiles).toBe(true);
+  });
 });
 
 function createScriptedSession(handlers: ScreenHandler[]) {
@@ -765,6 +861,31 @@ async function createOpencodeBinary(homeRoot: string, includeBinary: boolean): P
   return binaryPath;
 }
 
+async function makeToolRootWithLocalOpencodeShims(): Promise<{
+  toolRoot: string;
+  cmdBinaryPath: string;
+  shellShimPath: string;
+}> {
+  const toolRoot = await makeTempDirectory('openshrike-init-flow-tool-root-');
+  const bestPracticesSource = path.join(actualToolRoot, 'best_practices');
+  const bestPracticesTarget = path.join(toolRoot, 'best_practices');
+  await fs.symlink(bestPracticesSource, bestPracticesTarget, os.platform() === 'win32' ? 'junction' : 'dir');
+
+  const binDirectory = path.join(toolRoot, 'node_modules', '.bin');
+  await fs.mkdir(binDirectory, {recursive: true});
+
+  const shellShimPath = path.join(binDirectory, 'opencode');
+  const cmdBinaryPath = path.join(binDirectory, 'opencode.cmd');
+  await fs.writeFile(shellShimPath, '#!/usr/bin/env sh\n', 'utf8');
+  await fs.writeFile(cmdBinaryPath, '@echo off\r\n', 'utf8');
+
+  return {
+    toolRoot,
+    cmdBinaryPath,
+    shellShimPath
+  };
+}
+
 function useHome(homeRoot: string, extraPath?: string): void {
   process.env.HOME = homeRoot;
   process.env.USERPROFILE = homeRoot;
@@ -804,13 +925,32 @@ async function makeTempDirectory(prefix: string): Promise<string> {
   return directory;
 }
 
-function restoreEnv(name: 'HOME' | 'USERPROFILE' | 'PATH', value: string | undefined): void {
+function restoreEnv(
+  name: 'HOME' | 'USERPROFILE' | 'PATH' | 'OPENSHRIKE_TOOL_ROOT',
+  value: string | undefined
+): void {
   if (value === undefined) {
     delete process.env[name];
     return;
   }
 
   process.env[name] = value;
+}
+
+function setPlatform(value: NodeJS.Platform): void {
+  Object.defineProperty(process, 'platform', {
+    configurable: true,
+    value
+  });
+}
+
+function restorePlatform(descriptor: PropertyDescriptor | undefined): void {
+  if (descriptor) {
+    Object.defineProperty(process, 'platform', descriptor);
+    return;
+  }
+
+  delete (process as {platform?: NodeJS.Platform}).platform;
 }
 
 function setTty(stream: NodeJS.ReadStream | NodeJS.WriteStream, value: boolean): void {

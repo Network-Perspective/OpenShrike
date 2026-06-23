@@ -1,8 +1,5 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {
-  OPENCODE_FIX_POLL_TIMEOUT_MS,
-  OPENCODE_FIX_REQUEST_TIMEOUT_MS
-} from '../src/lib/constants.js';
+import {OPENCODE_FIX_INACTIVITY_TIMEOUT_MS} from '../src/lib/constants.js';
 import type {OpenCodeRuntime} from '../src/lib/runtime.js';
 import type {CheckResult, SavedScanRequest, ScanScopeContext} from '../src/lib/types.js';
 
@@ -71,8 +68,8 @@ describe('runFixForCheck', () => {
       title: 'check-a fix',
       checkId: 'check-a',
       allowEmptyText: true,
-      requestTimeoutMs: OPENCODE_FIX_REQUEST_TIMEOUT_MS,
-      completionTimeoutMs: OPENCODE_FIX_POLL_TIMEOUT_MS
+      requestInactivityTimeoutMs: OPENCODE_FIX_INACTIVITY_TIMEOUT_MS,
+      completionInactivityTimeoutMs: OPENCODE_FIX_INACTIVITY_TIMEOUT_MS
     }));
   });
 });
