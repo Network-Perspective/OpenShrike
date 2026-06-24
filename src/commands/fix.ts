@@ -4,6 +4,7 @@ import {
   resolveScanOutputFormat
 } from '../lib/cli-error.js';
 import {fixAndRecheckCheck, updateReportCheck} from '../lib/fix.js';
+import {resolveCheckTitles} from '../lib/checks.js';
 import {createSavedScanRequest, loadLastScanState, saveLastScanState} from '../lib/last-scan.js';
 import {renderScanReportMarkdown} from '../lib/markdown.js';
 import {resolveScanOptions} from '../lib/scan-options.js';
@@ -158,7 +159,10 @@ export async function executeFixCommand(rawOptions: Partial<ScanCommandOptions>)
     }
 
     if (options.outputFormat === 'markdown') {
-      process.stdout.write(`${renderScanReportMarkdown(nextReport)}\n`);
+      const titlesByCheckId = await resolveCheckTitles(nextReport.checks.map(check => check.id), {
+        checksDirectory: savedRequest.projectChecksDir ?? undefined
+      }).catch(() => ({}));
+      process.stdout.write(`${renderScanReportMarkdown(nextReport, {titlesByCheckId})}\n`);
     } else {
       process.stdout.write(`${JSON.stringify(nextReport, null, 2)}\n`);
     }

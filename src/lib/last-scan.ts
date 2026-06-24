@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {z} from 'zod';
+import {resolveCheckTitles} from './checks.js';
 import {CliError} from './cli-error.js';
 import {
   CONFIG_DIRECTORY_NAME,
@@ -99,7 +100,7 @@ export async function saveLastScanState(options: {
   await fs.writeFile(paths.jsonPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 
   try {
-    await fs.writeFile(paths.markdownPath, `${renderSavedScanMarkdown(payload)}\n`, 'utf8');
+    await fs.writeFile(paths.markdownPath, `${await renderSavedScanMarkdown(payload)}\n`, 'utf8');
   } catch (error) {
     return [
       `Saved ${LAST_SCAN_JSON_FILE_NAME}, but failed to write ${LAST_SCAN_MARKDOWN_FILE_NAME}: ${error instanceof Error ? error.message : String(error)}`
@@ -186,8 +187,11 @@ export function createSavedScanRequest(options: Pick<ScanCommandOptions, 'checkI
   };
 }
 
-function renderSavedScanMarkdown(state: SavedLastScanState): string {
+async function renderSavedScanMarkdown(state: SavedLastScanState): Promise<string> {
   const selection = formatSelection(state.request);
+  const titlesByCheckId = await resolveCheckTitles(state.report.checks.map(check => check.id), {
+    checksDirectory: state.request.projectChecksDir ?? undefined
+  }).catch(() => ({}));
   return [
     '# OpenShrike Last Scan',
     '',
@@ -209,7 +213,7 @@ function renderSavedScanMarkdown(state: SavedLastScanState): string {
         ]
       : []),
     '',
-    renderScanReportMarkdown(state.report)
+    renderScanReportMarkdown(state.report, {titlesByCheckId})
   ].join('\n');
 }
 

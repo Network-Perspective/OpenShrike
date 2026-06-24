@@ -497,6 +497,23 @@ describe('executeScanCommand', () => {
     expect(mockSaveLastScanState).not.toHaveBeenCalled();
     expect(stderrSpy).toHaveBeenCalledWith('OpenShrike warning: stale report\n');
   });
+
+  it('exits successfully when the scan result only contains unknown checks', async () => {
+    const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openshrike-scan-command-unknown-'));
+    tempDirectories.push(repoRoot);
+    mockResolveScanOptions.mockResolvedValue(makeOptions(repoRoot, {
+      checkId: 'check-a',
+      outputFormat: 'markdown'
+    }));
+    mockRunScan.mockResolvedValue(makeReport(repoRoot, 'unknown'));
+
+    const exitCode = await executeScanCommand({
+      repoPath: repoRoot
+    });
+
+    expect(exitCode).toBe(0);
+    expect(writeSpy).toHaveBeenCalledWith('# report\n');
+  });
 });
 
 function makeOptions(repoPath: string, overrides: Partial<ScanCommandOptions>): ScanCommandOptions {
@@ -522,25 +539,25 @@ function makeOptions(repoPath: string, overrides: Partial<ScanCommandOptions>): 
   };
 }
 
-function makeReport(repoPath: string) {
+function makeReport(repoPath: string, status: 'pass' | 'unknown' = 'pass') {
   return {
     bundle_id: 'check-a',
     policy_version: '2026-05-18',
     repo: {path: repoPath},
     summary: {
       total_checks: 1,
-      passed: 1,
+      passed: status === 'pass' ? 1 : 0,
       failed: 0,
-      unknown: 0
+      unknown: status === 'unknown' ? 1 : 0
     },
     checks: [
       {
         id: 'check-a',
         version: '0.1.0',
-        status: 'pass',
+        status,
         confidence: 'HIGH',
         evidence: [],
-        rationale: 'ok',
+        rationale: status === 'unknown' ? 'Need more evidence.' : 'ok',
         remediation: []
       }
     ]

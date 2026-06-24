@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {extractCheckTitleFromDefinition} from '../../src/lib/checks.js';
 import {resolveFromToolRoot} from '../../src/lib/project-root.js';
 import type {ScanReport} from '../../src/lib/types.js';
 import {describe, expect, it} from 'vitest';
@@ -122,11 +123,12 @@ describe('scan terminal e2e', () => {
       );
 
       const rawOutput = session.rawOutput();
+      const checkTitle = extractCheckTitleFromDefinition(fixture.checkDefinition, fixture.checkId);
       expect(rawOutput).toContain('# OpenShrike Scan Report');
-      expect(rawOutput).toContain(`### \`${fixture.checkId}\``);
-      expect(rawOutput).toContain('- Status: `pass`');
-      expect(rawOutput).toContain('- Confidence: `HIGH`');
-      expect(rawOutput).toContain(`- \`${fixture.changedFilePath}:1\``);
+      expect(rawOutput).toContain('## Passing Checks');
+      expect(rawOutput).toContain(`✓ ${fixture.checkId} - ${checkTitle}`);
+      expect(rawOutput).not.toContain(`### \`${fixture.checkId}\``);
+      expect(rawOutput).not.toContain('- Status: `pass`');
     } finally {
       await session?.close();
       await mockServer.close();
@@ -616,10 +618,12 @@ describe('scan terminal e2e', () => {
       expect(mockServer.requests[0]?.promptText).toContain('+  const normalized = token.trim();');
 
       const rawOutput = session.rawOutput();
+      const checkTitle = extractCheckTitleFromDefinition(fixture.checkDefinition, fixture.checkId);
       expect(rawOutput).toContain('# OpenShrike Scan Report');
-      expect(rawOutput).toContain(`### \`${fixture.checkId}\``);
-      expect(rawOutput).toContain('- Status: `pass`');
-      expect(rawOutput).toContain('- Confidence: `HIGH`');
+      expect(rawOutput).toContain('## Passing Checks');
+      expect(rawOutput).toContain(`✓ ${fixture.checkId} - ${checkTitle}`);
+      expect(rawOutput).not.toContain(`### \`${fixture.checkId}\``);
+      expect(rawOutput).not.toContain('- Status: `pass`');
     } finally {
       await session?.close();
       await mockServer.close();

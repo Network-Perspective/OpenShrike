@@ -47,6 +47,28 @@ export async function readCheckTitle(
   return (await resolveCheckCatalogEntry(checkId, options)).title;
 }
 
+export async function resolveCheckTitles(
+  checkIds: readonly string[],
+  options: ResolveCheckDefinitionOptions = {}
+): Promise<Record<string, string>> {
+  if (checkIds.length === 0) {
+    return {};
+  }
+
+  const checksDirectory = options.checksDirectory ?? getBundledChecksDirectory();
+  const catalog = await listCheckCatalog(checksDirectory);
+  const titlesByNormalizedId = new Map(
+    catalog.map(entry => [entry.id.toLowerCase(), entry.title] as const)
+  );
+
+  return Object.fromEntries(
+    [...new Set(checkIds)].flatMap(checkId => {
+      const title = titlesByNormalizedId.get(checkId.toLowerCase());
+      return title ? [[checkId, title] as const] : [];
+    })
+  );
+}
+
 export async function listCheckCatalog(checksDirectory: string): Promise<CheckCatalogEntry[]> {
   const markdownFiles = await listMarkdownFiles(checksDirectory, {
     skipDirectoryNames: resolveBundledPolicyDirectorySkips(checksDirectory)

@@ -4,7 +4,7 @@ export const CHECK_STATUS_DISPLAY_ORDER: readonly CheckStatus[] = ['fail', 'unkn
 
 const CHECK_STATUS_HEADERS: Record<CheckStatus, string> = {
   fail: 'Failing Checks',
-  unknown: 'Unknown Checks',
+  unknown: 'Inconclusive / Not Applicable Checks',
   pass: 'Passing Checks'
 };
 

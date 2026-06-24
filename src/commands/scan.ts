@@ -6,6 +6,7 @@ import {
   assembleBundleForPolicy,
   assembleBundleForProjectChecks
 } from '../lib/bundle.js';
+import {resolveCheckTitles} from '../lib/checks.js';
 import {
   CliError,
   normalizeCliError,
@@ -151,7 +152,10 @@ async function executeResolvedScanCommand(
   }
 
   if (options.outputFormat === 'markdown') {
-    process.stdout.write(`${renderScanReportMarkdown(report)}\n`);
+    const titlesByCheckId = await resolveCheckTitles(report.checks.map(check => check.id), {
+      checksDirectory: options.projectChecksDir
+    }).catch(() => ({}));
+    process.stdout.write(`${renderScanReportMarkdown(report, {titlesByCheckId})}\n`);
   } else {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   }
