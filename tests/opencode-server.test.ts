@@ -82,11 +82,49 @@ describe('createManagedOpencodeServer', () => {
     expect(proc.stderr.destroyed).toBe(true);
   });
 
-  it('prefers the bundled OpenCode launcher when available', async () => {
+  it('prefers the bundled OpenCode executable when available', async () => {
+    const proc = new FakeChildProcess();
+    mockFindToolRoot.mockReturnValue('/tool');
+    mockAccess.mockResolvedValue(undefined);
+    mockSpawn.mockReturnValue(proc);
+    mockCreateOpencodeClient.mockReturnValue({tag: 'client'});
+
+    const serverPromise = createManagedOpencodeServer({
+      config: {},
+      port: 42113
+    });
+
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalledWith(
+        '/tool/node_modules/opencode-ai/bin/opencode.exe',
+        [
+          'serve',
+          '--hostname=127.0.0.1',
+          '--port=42113'
+        ],
+        expect.objectContaining({
+          env: expect.objectContaining({
+            OPENCODE_DB: ':memory:',
+            OPENCODE_CONFIG_CONTENT: '{}'
+          }),
+          stdio: ['ignore', 'pipe', 'pipe']
+        })
+      );
+    });
+
+    proc.stdout.emit('data', Buffer.from('opencode server listening on http://127.0.0.1:42113\n'));
+
+    const server = await serverPromise;
+    expect(server.pid).toBe(4321);
+  });
+
+  it('supports the legacy bundled OpenCode JavaScript launcher', async () => {
     const proc = new FakeChildProcess();
     process.env.OPENSHRIKE_NODE_BINARY = '/usr/local/bin/node';
     mockFindToolRoot.mockReturnValue('/tool');
-    mockAccess.mockResolvedValue(undefined);
+    mockAccess
+      .mockRejectedValueOnce(new Error('missing'))
+      .mockResolvedValueOnce(undefined);
     mockSpawn.mockReturnValue(proc);
     mockCreateOpencodeClient.mockReturnValue({tag: 'client'});
 
@@ -105,11 +143,6 @@ describe('createManagedOpencodeServer', () => {
           '--port=42113'
         ],
         expect.objectContaining({
-          env: expect.objectContaining({
-            OPENCODE_DB: ':memory:',
-            OPENSHRIKE_NODE_BINARY: '/usr/local/bin/node',
-            OPENCODE_CONFIG_CONTENT: '{}'
-          }),
           stdio: ['ignore', 'pipe', 'pipe']
         })
       );

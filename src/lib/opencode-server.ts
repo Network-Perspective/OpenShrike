@@ -68,21 +68,18 @@ async function resolveOpenCodeLaunchCommand(): Promise<OpenCodeLaunchCommand> {
     };
   }
 
-  const bundledLauncherPath = await resolveBundledOpenCodeLauncherPath();
-  if (!bundledLauncherPath) {
+  const bundledLaunchCommand = await resolveBundledOpenCodeLaunchCommand();
+  if (!bundledLaunchCommand) {
     return {
       command: 'opencode',
       args: []
     };
   }
 
-  return {
-    command: resolveNodeCommand(),
-    args: [bundledLauncherPath]
-  };
+  return bundledLaunchCommand;
 }
 
-async function resolveBundledOpenCodeLauncherPath(): Promise<string | null> {
+async function resolveBundledOpenCodeLaunchCommand(): Promise<OpenCodeLaunchCommand | null> {
   let toolRoot: string;
   try {
     toolRoot = findToolRoot();
@@ -90,10 +87,24 @@ async function resolveBundledOpenCodeLauncherPath(): Promise<string | null> {
     return null;
   }
 
-  const launcherPath = path.join(toolRoot, 'node_modules', 'opencode-ai', 'bin', 'opencode');
+  const executablePath = path.join(toolRoot, 'node_modules', 'opencode-ai', 'bin', 'opencode.exe');
   try {
-    await access(launcherPath);
-    return launcherPath;
+    await access(executablePath);
+    return {
+      command: executablePath,
+      args: []
+    };
+  } catch {
+    // OpenCode releases before 1.18 shipped a JavaScript launcher instead.
+  }
+
+  const legacyLauncherPath = path.join(toolRoot, 'node_modules', 'opencode-ai', 'bin', 'opencode');
+  try {
+    await access(legacyLauncherPath);
+    return {
+      command: resolveNodeCommand(),
+      args: [legacyLauncherPath]
+    };
   } catch {
     return null;
   }
